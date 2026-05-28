@@ -16,6 +16,8 @@ python .\tools\ti_save_parser.py councilor Hanna --current-location-context
 python .\tools\ti_save_parser.py nation-ui "유럽 연합"
 python .\tools\ti_save_parser.py hab-ui "제303기초연구단"
 python .\tools\ti_save_parser.py research --details
+python .\tools\ti_save_parser.py topbar --details
+python .\tools\build_module_catalog.py
 python .\tools\ti_save_parser.py advise "Lati Wirya" "중화민국"
 python .\tools\ti_save_parser.py types --limit 30
 python .\tools\ti_save_parser.py raw --type TIFactionState --template ResistCouncil --keys displayName,resources,baseIncomes_year,missionControlUsage
@@ -36,6 +38,16 @@ knowledge-sector bonuses, hab efficiency modules, excess MC research, and
 research-distribution bonuses. The `advise` command applies one hypothetical
 Advise assignment to a nation and reports both the direct source increase and
 the final increase after research-distribution bonuses.
+
+The `topbar` command reconstructs the top resource bar from the save, including
+current stockpiles, monthly/yearly net resource income, research distribution,
+mission-control usage/capacity, and control-point maintenance usage/cap.
+
+The module catalog generator reads hab module templates from the local Terra
+Invicta install and writes `data/module_catalog.json` plus
+`docs/module_catalog.md`. Use the JSON for optimizer inputs; the Markdown is a
+human-readable reference for module income, upkeep, crew, power, MC, CP cap,
+build cost, requirements, and derived tags.
 
 The `nation-ui` command reconstructs the nation panel values used for UI
 validation, including federation-pooled funding/boost income, faction research

@@ -26,9 +26,15 @@ SAVE_GLOB = "*.gz"
 DEFAULT_MAX_COUNCILOR_ATTRIBUTE = 25
 DAYS_PER_YEAR = 365.2422
 DEFAULT_GLOBAL_CONFIG = {
+    "ExcessMCToMoneyConversion_Day": 0.2,
     "ExcessMCToResearchConversion_Day": 0.075,
+    "TIMissionModifier_ControlPointOverage_Multiplier": 1.0 / 3.0,
+    "controlPointCostScaling": 0.6,
+    "controlPointMaintenanceDivisor": 2.0,
+    "financialSectorFundingBonus": 1.05,
     "knowledgeSectorResearchBonus": 1.05,
     "researchBonusPerSlotInUse": 0.05,
+    "spaceMineFreebies": 0,
     "spaceResourceToTons": 0.1,
     "crewWaterConsumptionTons_year": 3.5,
     "crewVolatilesConsumptionTons_year": 3.5,
@@ -110,6 +116,55 @@ HAB_SUPPORT_FIELDS = {
 }
 HAB_ADMIN_ADVISER_RESOURCES = {"Money", "Water", "Volatiles", "Metals", "NobleMetals", "Fissiles"}
 HAB_EFFICIENCY_RESOURCES = {"Money", "Water", "Volatiles", "Metals", "NobleMetals", "Fissiles", "Research", "Influence", "Operations", "Exotics"}
+TOPBAR_RESOURCES = (
+    "Money",
+    "Influence",
+    "Operations",
+    "Boost",
+    "MissionControl",
+    "Research",
+    "Water",
+    "Volatiles",
+    "Metals",
+    "NobleMetals",
+    "Fissiles",
+    "Antimatter",
+    "Exotics",
+)
+BASIC_SPACE_RESOURCES = ("Water", "Volatiles", "Metals", "NobleMetals", "Fissiles")
+MINING_BONUS_CONTEXTS = {
+    "Water": "MiningWaterBonus",
+    "Volatiles": "MiningVolatilesBonus",
+    "Metals": "MiningMetalsBonus",
+    "NobleMetals": "MiningNoblesBonus",
+    "Fissiles": "MiningFissilesBonus",
+}
+HAB_SITE_PRODUCTION_FIELDS = {
+    "Water": "water_day",
+    "Volatiles": "volatiles_day",
+    "Metals": "metals_day",
+    "NobleMetals": "nobles_day",
+    "Fissiles": "fissiles_day",
+}
+COUNCILOR_INCOME_FIELDS = {
+    "Money": ("incomeMoney", "incomeMoney_month", "Administration"),
+    "Influence": ("incomeInfluence", "incomeInfluence_month", "Persuasion"),
+    "Operations": ("incomeOps", "incomeOps_month", "Command"),
+    "Boost": ("incomeBoost", "incomeBoost_month", None),
+    "Research": ("incomeResearch", "incomeResearch_month", "Science"),
+    "MissionControl": (None, "incomeMissionControl", None),
+    "Projects": ("incomeProjects", "projectCapacityGranted", None),
+}
+FACTION_IDEOLOGY_BY_TEMPLATE = {
+    "ResistCouncil": "Resist",
+    "DestroyCouncil": "Destroy",
+    "ExploitCouncil": "Exploit",
+    "SubmitCouncil": "Submit",
+    "AppeaseCouncil": "Appease",
+    "CooperateCouncil": "Cooperate",
+    "EscapeCouncil": "Escape",
+    "AlienCouncil": "Alien",
+}
 HAB_LEO_PRIORITY_RULES = {
     "LEOBonusEconomy": "Economy",
     "LEOBonusWelfare": "Welfare",
@@ -460,6 +515,15 @@ def apply_effect_modifiers(
         elif operation == "DecreaseToValue":
             result = min(result, value)
     return result
+
+
+def effect_modifier_delta(
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+    context: str,
+    base_value: float,
+) -> float:
+    return apply_effect_modifiers(effect_contexts, effect_templates, context, base_value) - base_value
 
 
 def build_index(data: dict[str, Any]) -> IndexedState:
@@ -1314,33 +1378,30 @@ def faction_councilor_ids(faction: dict[str, Any]) -> list[int]:
     return [state_id for state_id in (ref_id(item) for item in refs) if state_id is not None]
 
 
-def councilor_resource_income(
+def councilor_is_income_active(councilor: dict[str, Any]) -> bool:
+    return not councilor.get("detained") and not councilor.get("isAlien")
+
+
+def councilor_monthly_income(
     indexed: IndexedState,
     councilor: dict[str, Any],
     trait_templates: dict[str, dict[str, Any]],
     final_attributes: dict[str, Any],
     resource: str,
 ) -> float:
-    if councilor.get("detained") or councilor.get("isAlien"):
+    if not councilor_is_income_active(councilor):
         return 0.0
-
-    if resource == "Research":
-        trait_field = "incomeResearch"
-        org_field = "incomeResearch_month"
-        attribute = "Science"
-    elif resource == "MissionControl":
-        trait_field = "incomeMissionControl"
-        org_field = "incomeMissionControl"
-        attribute = None
-    else:
+    fields = COUNCILOR_INCOME_FIELDS.get(resource)
+    if not fields:
         return 0.0
+    trait_field, org_field, attribute = fields
 
     positive = 0.0
     negative = 0.0
     trait_names = councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []
     for trait_name in trait_names:
         trait = trait_templates.get(trait_name)
-        if not trait:
+        if not trait or not trait_field:
             continue
         value = as_float(trait.get(trait_field), 0.0)
         if value >= 0:
@@ -1356,15 +1417,38 @@ def councilor_resource_income(
         org = found[2]
         if not org.get("applyingBonuses"):
             continue
-        value = as_float(org.get(org_field), 0.0)
+        value = as_float(org.get(org_field), 0.0) if org_field else 0.0
         if value >= 0:
             positive += value
         else:
             negative += value
 
-    if attribute:
+    if attribute and positive > 0.0:
         positive *= 1.0 + as_float(final_attributes.get(attribute), 0.0) / 100.0
     return positive + negative
+
+
+def councilor_yearly_income(
+    indexed: IndexedState,
+    councilor: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    final_attributes: dict[str, Any],
+    resource: str,
+) -> float:
+    monthly = councilor_monthly_income(indexed, councilor, trait_templates, final_attributes, resource)
+    if resource in {"Projects", "MissionControl"}:
+        return monthly
+    return monthly * 12.0
+
+
+def councilor_resource_income(
+    indexed: IndexedState,
+    councilor: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    final_attributes: dict[str, Any],
+    resource: str,
+) -> float:
+    return councilor_monthly_income(indexed, councilor, trait_templates, final_attributes, resource)
 
 
 def councilor_research_and_mc(
@@ -1478,6 +1562,20 @@ def nation_raw_boost_year(indexed: IndexedState, nation: dict[str, Any]) -> floa
     return total
 
 
+def nation_current_boost_year(indexed: IndexedState, nation: dict[str, Any]) -> float:
+    total = 0.0
+    refs = nation.get("regions") if isinstance(nation.get("regions"), list) else []
+    for region_ref in refs:
+        found = resolve_ref(indexed, region_ref)
+        if not found:
+            continue
+        region = found[2]
+        if region.get("leadOccupier"):
+            continue
+        total += as_float(region.get("boostPerYear_dekatons"), 0.0)
+    return total
+
+
 def nation_federation_pooled_year(indexed: IndexedState, nation: dict[str, Any], resource: str) -> float:
     federation_ref = nation.get("federation")
     federation_id = ref_id(federation_ref)
@@ -1485,7 +1583,7 @@ def nation_federation_pooled_year(indexed: IndexedState, nation: dict[str, Any],
         if resource == "Money":
             return as_float(nation.get("spaceFunding_year"), 0.0)
         if resource == "Boost":
-            return nation_raw_boost_year(indexed, nation)
+            return nation_current_boost_year(indexed, nation)
         return 0.0
 
     federation = state_value_by_id(indexed, federation_id)
@@ -1499,10 +1597,60 @@ def nation_federation_pooled_year(indexed: IndexedState, nation: dict[str, Any],
     if resource == "Money":
         pooled = sum(as_float(member.get("spaceFunding_year"), 0.0) for member in member_states)
     elif resource == "Boost":
-        pooled = sum(nation_raw_boost_year(indexed, member) for member in member_states)
+        pooled = sum(nation_current_boost_year(indexed, member) for member in member_states)
     else:
         pooled = 0.0
     return pooled * (own_points ** 3) / denominator
+
+
+def faction_ideology_key(faction: dict[str, Any]) -> str | None:
+    template = faction.get("templateName")
+    if isinstance(template, str):
+        if template in FACTION_IDEOLOGY_BY_TEMPLATE:
+            return FACTION_IDEOLOGY_BY_TEMPLATE[template]
+        if template.endswith("Council"):
+            return template.removesuffix("Council")
+    return None
+
+
+def faction_public_opinion(nation: dict[str, Any], faction: dict[str, Any]) -> float:
+    public_opinion = nation.get("publicOpinion") if isinstance(nation.get("publicOpinion"), dict) else {}
+    ideology = faction_ideology_key(faction)
+    return as_float(public_opinion.get(ideology), 0.0) if ideology else 0.0
+
+
+def nation_financial_sector_owned(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> bool:
+    return any(
+        cp.get("controlPointType") == "FinancialSector"
+        and ref_id(cp.get("faction")) == faction_id
+        and not cp.get("benefitsDisabled")
+        for cp in nation_control_points(indexed, nation)
+    )
+
+
+def nation_money_contribution_month(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> float:
+    owned_points = active_owned_control_points(indexed, nation, faction_id)
+    num_control_points = int(as_float(nation.get("numControlPoints"), len(nation_control_points(indexed, nation))))
+    if not owned_points or num_control_points <= 0:
+        return 0.0
+    monthly = nation_federation_pooled_year(indexed, nation, "Money") / 12.0
+    if nation_financial_sector_owned(indexed, nation, faction_id):
+        monthly *= DEFAULT_GLOBAL_CONFIG["financialSectorFundingBonus"]
+    return monthly / num_control_points * len(owned_points)
+
+
+def nation_boost_contribution_month(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> float:
+    owned_points = active_owned_control_points(indexed, nation, faction_id)
+    num_control_points = int(as_float(nation.get("numControlPoints"), len(nation_control_points(indexed, nation))))
+    if not owned_points or num_control_points <= 0:
+        return 0.0
+    monthly = nation_federation_pooled_year(indexed, nation, "Boost") / 12.0
+    return monthly / num_control_points * len(owned_points)
+
+
+def nation_influence_contribution_month(indexed: IndexedState, nation: dict[str, Any], faction: dict[str, Any]) -> float:
+    population = nation_population_millions(indexed, nation)
+    return population * faction_public_opinion(nation, faction) * 0.5 / 12.0
 
 
 def nation_adviser_science_bonus(
@@ -1527,6 +1675,26 @@ def nation_adviser_science_bonus(
         sciences.append(extra_advisor[1])
     sciences.sort(reverse=True)
     return sum(science / 100.0 / (index + 1.0) for index, science in enumerate(sciences))
+
+
+def state_adviser_attribute_bonus(
+    state: dict[str, Any],
+    councilor_by_id: dict[int, dict[str, Any]],
+    attribute: str,
+) -> float:
+    values: list[float] = []
+    refs = state.get("advisingCouncilors") if isinstance(state.get("advisingCouncilors"), list) else []
+    for councilor_ref in refs:
+        councilor_id = ref_id(councilor_ref)
+        if councilor_id is None:
+            continue
+        summary = councilor_by_id.get(councilor_id)
+        if not summary or not summary.get("active", True):
+            continue
+        final_attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
+        values.append(as_float(final_attributes.get(attribute), 0.0))
+    values.sort(reverse=True)
+    return sum(value / 100.0 / (index + 1.0) for index, value in enumerate(values))
 
 
 def nation_monthly_research(
@@ -1732,11 +1900,83 @@ def hab_template_special_rules(template: dict[str, Any]) -> list[str]:
     return template.get("specialRules") if isinstance(template.get("specialRules"), list) else []
 
 
-def hab_template_income(resource: str, template: dict[str, Any], hab_has_construction: bool = False) -> float:
+def hab_site_daily_production(hab_site: dict[str, Any] | None, resource: str) -> float:
+    if not hab_site:
+        return 0.0
+    field = HAB_SITE_PRODUCTION_FIELDS.get(resource)
+    return as_float(hab_site.get(field), 0.0) if field else 0.0
+
+
+def faction_active_org_mining_bonus(indexed: IndexedState, faction: dict[str, Any]) -> float:
+    total = 0.0
+    for councilor_id in faction_councilor_ids(faction):
+        councilor = state_value_by_id(indexed, councilor_id)
+        if not councilor or councilor.get("detained") or councilor.get("isAlien"):
+            continue
+        org_refs = councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []
+        for org_ref in org_refs:
+            org = state_value_by_id(indexed, ref_id(org_ref))
+            if isinstance(org, dict) and org.get("applyingBonuses"):
+                total += as_float(org.get("miningBonus"), 0.0)
+    return total
+
+
+def faction_mining_multiplier(
+    indexed: IndexedState,
+    faction: dict[str, Any] | None,
+    resource: str,
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+) -> float:
+    if not faction:
+        return 1.0
+    value = 1.0 + faction_active_org_mining_bonus(indexed, faction)
+    value = apply_effect_modifiers(effect_contexts, effect_templates, "SpaceMiningBonus", value)
+    resource_context = MINING_BONUS_CONTEXTS.get(resource)
+    if resource_context:
+        value = apply_effect_modifiers(effect_contexts, effect_templates, resource_context, value)
+    return value
+
+
+def hab_template_income(
+    resource: str,
+    template: dict[str, Any],
+    hab_has_construction: bool = False,
+    *,
+    indexed: IndexedState | None = None,
+    faction: dict[str, Any] | None = None,
+    hab_site: dict[str, Any] | None = None,
+    effect_contexts: dict[str, list[str]] | None = None,
+    effect_templates: dict[str, dict[str, Any]] | None = None,
+    mining_rate: float = 1.0,
+) -> float:
     if "MoneyIfNotBuilding" in hab_template_special_rules(template) and hab_has_construction:
         return 0.0
     field = HAB_INCOME_FIELDS.get(resource)
-    return as_float(template.get(field), 0.0) if field else 0.0
+    income = as_float(template.get(field), 0.0) if field else 0.0
+    if (
+        resource in BASIC_SPACE_RESOURCES
+        and template.get("mine")
+        and indexed is not None
+        and faction is not None
+        and hab_site is not None
+    ):
+        mining_multiplier = faction_mining_multiplier(
+            indexed,
+            faction,
+            resource,
+            effect_contexts or {},
+            effect_templates or {},
+        )
+        income += (
+            hab_site_daily_production(hab_site, resource)
+            * as_float(template.get("miningModifier"), 1.0)
+            * mining_multiplier
+            * mining_rate
+            * DAYS_PER_YEAR
+            / 12.0
+        )
+    return income
 
 
 def hab_template_direct_support(resource: str, template: dict[str, Any]) -> float:
@@ -1811,6 +2051,11 @@ def hab_monthly_resource_income(
     administration_modifier: float,
     science_adviser_multiplier: float = 1.0,
     administration_adviser_multiplier: float = 1.0,
+    indexed: IndexedState | None = None,
+    faction: dict[str, Any] | None = None,
+    effect_contexts: dict[str, list[str]] | None = None,
+    effect_templates: dict[str, dict[str, Any]] | None = None,
+    mining_rate: float = 1.0,
 ) -> dict[str, float]:
     income = 0.0
     support = 0.0
@@ -1820,6 +2065,7 @@ def hab_monthly_resource_income(
     core_record = hab_core_module_record(records)
     core_id = core_record.get("id") if core_record else None
     has_construction = any(hab_module_okay(record) and not record.get("completed") for record in records)
+    hab_site = state_value_by_id(indexed, ref_id(hab.get("habSite"))) if indexed is not None else None
 
     for record in records:
         if not hab_module_okay(record):
@@ -1830,7 +2076,17 @@ def hab_monthly_resource_income(
             or (resource == "MissionControl" and record.get("id") == core_id)
         )
         if include_income_and_support:
-            income += hab_template_income(resource, template, has_construction)
+            income += hab_template_income(
+                resource,
+                template,
+                has_construction,
+                indexed=indexed,
+                faction=faction,
+                hab_site=hab_site,
+                effect_contexts=effect_contexts,
+                effect_templates=effect_templates,
+                mining_rate=mining_rate,
+            )
             support += hab_template_support(resource, template, include_crew_support=True)
             if "Farm" in hab_template_special_rules(template):
                 farm_discount += int(as_float(template.get("specialRulesValue"), 0.0))
@@ -1989,13 +2245,32 @@ def calculate_hab_ui(
         raise SystemExit(f"Hab not found: {hab_name}")
     hab_id, hab = found
     hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    trait_templates = load_trait_templates(templates_dir)
+    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    faction_ref = resolve_ref(indexed, hab.get("faction"))
+    faction = faction_ref[2] if faction_ref else {}
+    faction_id = ref_id(hab.get("faction"))
+    effect_contexts = faction_effect_contexts(indexed, faction_id) if faction_id is not None else {}
+    _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     records = hab_module_records(indexed, hab, hab_module_templates)
     active_records = [record for record in records if hab_module_active_record(record)]
     okay_records = [record for record in records if hab_module_okay(record)]
     administration_modifier = hab_administration_modifier(records)
     location = hab_location_summary(indexed, templates_dir, hab)
     monthly = {
-        resource: hab_monthly_resource_income(hab, records, resource, administration_modifier)
+        resource: hab_monthly_resource_income(
+            hab,
+            records,
+            resource,
+            administration_modifier,
+            science_adviser_multiplier=1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Science"),
+            administration_adviser_multiplier=1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Administration"),
+            indexed=indexed,
+            faction=faction,
+            effect_contexts=effect_contexts,
+            effect_templates=effect_templates,
+            mining_rate=faction_mining_rate(indexed, faction) if faction else 1.0,
+        )
         for resource in HAB_MONTHLY_RESOURCES
     }
     module_counts: dict[str, int] = {}
@@ -2274,6 +2549,461 @@ def command_research(save_path: Path, templates_dir: Path | None, args: argparse
     data = load_save(save_path)
     indexed = build_index(data)
     result = calculate_research_breakdown(indexed, templates_dir, args.faction, include_details=args.details)
+    print_json(result, compact=args.compact)
+
+
+def scenario_customizations(indexed: IndexedState) -> dict[str, Any]:
+    global_state = first_value(indexed, "TIGlobalValuesState") or {}
+    customizations = global_state.get("scenarioCustomizations")
+    return customizations if isinstance(customizations, dict) else {}
+
+
+def scenario_float(indexed: IndexedState, key: str, default: float = 1.0) -> float:
+    return as_float(scenario_customizations(indexed).get(key), default)
+
+
+def faction_is_player(indexed: IndexedState, faction: dict[str, Any]) -> bool:
+    metadata = first_value(indexed, "TIMetadataState") or {}
+    player_name = metadata.get("playerFactionName")
+    if player_name and str(player_name) == str(faction.get("displayName")):
+        return True
+    player = resolve_ref(indexed, faction.get("player"))
+    return bool(player and player[2].get("templateName") == "ResistPlayer")
+
+
+def faction_mining_rate(indexed: IndexedState, faction: dict[str, Any]) -> float:
+    if faction_is_player(indexed, faction):
+        return scenario_float(indexed, "miningRatePlayer", 1.0)
+    if faction.get("templateName") == "AlienCouncil":
+        return scenario_float(indexed, "miningRateAlien", 1.0)
+    return scenario_float(indexed, "miningRateHumanAI", 1.0)
+
+
+def faction_hab_states(indexed: IndexedState, faction: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+    result: dict[int, dict[str, Any]] = {}
+    for sector in faction_sector_states(indexed, faction):
+        hab_id = ref_id(sector.get("hab"))
+        hab = state_value_by_id(indexed, hab_id)
+        if hab_id is not None and isinstance(hab, dict):
+            result[hab_id] = hab
+    return list(result.items())
+
+
+def faction_ship_states(indexed: IndexedState, faction: dict[str, Any]) -> list[dict[str, Any]]:
+    ships: list[dict[str, Any]] = []
+    fleet_refs = faction.get("fleets") if isinstance(faction.get("fleets"), list) else []
+    for fleet_ref in fleet_refs:
+        fleet = state_value_by_id(indexed, ref_id(fleet_ref))
+        if not isinstance(fleet, dict):
+            continue
+        for ship_ref in fleet.get("ships") if isinstance(fleet.get("ships"), list) else []:
+            ship = state_value_by_id(indexed, ref_id(ship_ref))
+            if isinstance(ship, dict):
+                ships.append(ship)
+    return ships
+
+
+def faction_ship_designs(faction: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    designs = faction.get("shipDesigns") if isinstance(faction.get("shipDesigns"), list) else []
+    return {str(item.get("dataName")): item for item in designs if isinstance(item, dict) and item.get("dataName")}
+
+
+def faction_yearly_income_from_ships(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction: dict[str, Any],
+    resource: str,
+) -> float:
+    if resource != "Money":
+        return 0.0
+    hull_templates = load_named_templates(templates_dir, "TIShipHullTemplate.json")
+    designs = faction_ship_designs(faction)
+    monthly = 0.0
+    for ship in faction_ship_states(indexed, faction):
+        design = designs.get(str(ship.get("templateName")), {})
+        hull = hull_templates.get(str(design.get("hullName")), {})
+        monthly += as_float(hull.get("monthlyIncome_Money"), 0.0)
+    return monthly * 12.0
+
+
+def faction_yearly_income_from_diplomacy(indexed: IndexedState, faction_id: int, faction: dict[str, Any], resource: str) -> float:
+    daily = 0.0
+    for transfer in faction.get("dailyResourceTransfers") if isinstance(faction.get("dailyResourceTransfers"), list) else []:
+        if not isinstance(transfer, dict):
+            continue
+        transfer_value = transfer.get("transfer") if isinstance(transfer.get("transfer"), dict) else transfer
+        if transfer_value.get("resource") == resource:
+            daily -= as_float(transfer_value.get("value"), 0.0)
+    for entry in type_entries(indexed, "TIFactionState"):
+        other = entry.get("Value") or {}
+        other_id = raw_state_id(entry)
+        if other_id == faction_id:
+            continue
+        for transfer in other.get("dailyResourceTransfers") if isinstance(other.get("dailyResourceTransfers"), list) else []:
+            if not isinstance(transfer, dict) or ref_id(transfer.get("targetFaction")) != faction_id:
+                continue
+            transfer_value = transfer.get("transfer") if isinstance(transfer.get("transfer"), dict) else transfer
+            if transfer_value.get("resource") == resource:
+                daily += as_float(transfer_value.get("value"), 0.0)
+    return daily * DAYS_PER_YEAR
+
+
+def faction_negative_yearly_income_from_unassigned_orgs(indexed: IndexedState, faction: dict[str, Any], resource: str) -> float:
+    if resource not in {"Money", "Influence", "Operations", "Boost", "MissionControl"}:
+        return 0.0
+    field = {
+        "Money": "incomeMoney_month",
+        "Influence": "incomeInfluence_month",
+        "Operations": "incomeOps_month",
+        "Boost": "incomeBoost_month",
+        "MissionControl": "incomeMissionControl",
+    }[resource]
+    monthly = 0.0
+    for org_ref in faction.get("unassignedOrgs") if isinstance(faction.get("unassignedOrgs"), list) else []:
+        org = state_value_by_id(indexed, ref_id(org_ref))
+        value = as_float(org.get(field), 0.0) if isinstance(org, dict) else 0.0
+        if value < 0.0:
+            monthly += value
+    return monthly if resource == "MissionControl" else monthly * 12.0
+
+
+def faction_yearly_income_from_councilors(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    councilor_by_id: dict[int, dict[str, Any]],
+    resource: str,
+) -> float:
+    total = 0.0
+    for councilor_id in faction_councilor_ids(faction):
+        councilor = state_value_by_id(indexed, councilor_id)
+        if not councilor:
+            continue
+        summary = councilor_by_id.get(councilor_id, {})
+        final_attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
+        total += councilor_yearly_income(indexed, councilor, trait_templates, final_attributes, resource)
+    return total
+
+
+def faction_yearly_income_from_nations(
+    indexed: IndexedState,
+    faction_id: int,
+    faction: dict[str, Any],
+    councilor_by_id: dict[int, dict[str, Any]],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+    resource: str,
+) -> float:
+    if resource not in {"Money", "Influence", "Boost", "Research", "MissionControl"}:
+        return 0.0
+    total_month = 0.0
+    for entry in type_entries(indexed, "TINationState"):
+        nation = entry.get("Value") or {}
+        if resource == "Money":
+            total_month += nation_money_contribution_month(indexed, nation, faction_id)
+        elif resource == "Boost":
+            total_month += nation_boost_contribution_month(indexed, nation, faction_id)
+        elif resource == "Research":
+            total_month += nation_research_contribution_month(
+                indexed,
+                nation,
+                faction_id,
+                councilor_by_id,
+                effect_contexts,
+                effect_templates,
+            )
+        elif resource == "MissionControl":
+            total_month += nation_mission_control_contribution(indexed, nation, faction_id)
+        elif resource == "Influence":
+            total_month += nation_influence_contribution_month(indexed, nation, faction)
+    return total_month if resource == "MissionControl" else total_month * 12.0
+
+
+def faction_yearly_income_from_habs(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction: dict[str, Any],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+    councilor_by_id: dict[int, dict[str, Any]],
+    resource: str,
+) -> float:
+    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    total_month = 0.0
+    for _, hab in faction_hab_states(indexed, faction):
+        records = hab_module_records(indexed, hab, hab_module_templates)
+        administration_modifier = hab_administration_modifier(records)
+        monthly = hab_monthly_resource_income(
+            hab,
+            records,
+            resource,
+            administration_modifier,
+            science_adviser_multiplier=1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Science"),
+            administration_adviser_multiplier=1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Administration"),
+            indexed=indexed,
+            faction=faction,
+            effect_contexts=effect_contexts,
+            effect_templates=effect_templates,
+            mining_rate=faction_mining_rate(indexed, faction),
+        )
+        total_month += monthly["net"]
+    return total_month if resource in {"Projects", "MissionControl"} else total_month * 12.0
+
+
+def faction_max_mission_control_components(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction_id: int,
+    faction: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    councilor_by_id: dict[int, dict[str, Any]],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+) -> dict[str, float]:
+    base_incomes = faction.get("baseIncomes_year") if isinstance(faction.get("baseIncomes_year"), dict) else {}
+    hq = as_float(base_incomes.get("MissionControl"), 0.0) + scenario_float(indexed, "missionControlBonus", 0.0)
+    councilors = faction_yearly_income_from_councilors(indexed, faction, trait_templates, councilor_by_id, "MissionControl")
+    nations = faction_yearly_income_from_nations(indexed, faction_id, faction, councilor_by_id, effect_contexts, effect_templates, "MissionControl")
+    habs = 0.0
+    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    for _, hab in faction_hab_states(indexed, faction):
+        for record in hab_module_records(indexed, hab, hab_module_templates):
+            template = record.get("template") if isinstance(record.get("template"), dict) else {}
+            value = int(as_float(template.get("missionControl"), 0.0))
+            if hab_module_active_record(record) and value > 0:
+                habs += value
+    pre_effect = hq + councilors + nations + habs
+    total = apply_effect_modifiers(effect_contexts, effect_templates, "MissionControlDisruption_PCT", pre_effect)
+    return {
+        "HQ": hq,
+        "councilors": councilors,
+        "nations": nations,
+        "habs": habs,
+        "effects": total - pre_effect,
+        "total": total,
+    }
+
+
+def faction_excess_mission_control_yearly_income(
+    mc_components: dict[str, float],
+    faction: dict[str, Any],
+    resource: str,
+) -> float:
+    if resource not in {"Money", "Research"}:
+        return 0.0
+    max_buildable = mc_components.get("councilors", 0.0) + mc_components.get("nations", 0.0) + mc_components.get("habs", 0.0)
+    available = max(mc_components.get("total", 0.0) - as_float(faction.get("missionControlUsage"), 0.0), 0.0)
+    excess = min(max_buildable, available)
+    conversion = (
+        DEFAULT_GLOBAL_CONFIG["ExcessMCToMoneyConversion_Day"]
+        if resource == "Money"
+        else DEFAULT_GLOBAL_CONFIG["ExcessMCToResearchConversion_Day"]
+    )
+    return excess * DAYS_PER_YEAR * conversion
+
+
+def nation_control_point_maintenance_cost(nation: dict[str, Any]) -> float:
+    control_points = max(int(as_float(nation.get("numControlPoints"), 0.0)), 1)
+    gdp_billions = as_float(nation.get("GDP"), 0.0) / 1_000_000_000.0
+    if gdp_billions <= 0.0:
+        return 0.0
+    return (gdp_billions ** DEFAULT_GLOBAL_CONFIG["controlPointCostScaling"]) / (
+        DEFAULT_GLOBAL_CONFIG["controlPointMaintenanceDivisor"] * control_points
+    )
+
+
+def faction_control_point_maintenance(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction_id: int,
+    faction: dict[str, Any],
+    councilor_by_id: dict[int, dict[str, Any]],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+) -> dict[str, float]:
+    baseline = 0.0
+    for cp_ref in faction.get("controlPoints") if isinstance(faction.get("controlPoints"), list) else []:
+        cp = state_value_by_id(indexed, ref_id(cp_ref))
+        if not isinstance(cp, dict) or cp.get("benefitsDisabled"):
+            continue
+        nation = state_value_by_id(indexed, ref_id(cp.get("nation")))
+        if isinstance(nation, dict):
+            baseline += nation_control_point_maintenance_cost(nation)
+
+    global_state = first_value(indexed, "TIGlobalValuesState") or {}
+    global_freebies = as_float(global_state.get("controlPointMaintenanceFreebies"), 125.0)
+    councilors = 0.0
+    for councilor_id in faction_councilor_ids(faction):
+        summary = councilor_by_id.get(councilor_id, {})
+        final_attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
+        councilors += (
+            as_float(final_attributes.get("Persuasion"), 0.0)
+            + as_float(final_attributes.get("Command"), 0.0)
+            + as_float(final_attributes.get("Administration"), 0.0)
+        )
+
+    habs = 0.0
+    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    for _, hab in faction_hab_states(indexed, faction):
+        habs += hab_control_point_capacity(hab, hab_module_records(indexed, hab, hab_module_templates))
+
+    effect_delta = effect_modifier_delta(effect_contexts, effect_templates, "ControlPointMaintenance", global_freebies)
+    cap = global_freebies + councilors + habs - effect_delta
+    overage = max(baseline - cap, 0.0)
+    return {
+        "usage": baseline,
+        "cap": cap,
+        "overage": overage,
+        "annualInfluenceCost": overage * overage,
+        "missionPenaltyRecent": (faction.get("history_CPCapOverageByDay") or [0.0])[0],
+        "missionPenaltyCurrent": overage * DEFAULT_GLOBAL_CONFIG["TIMissionModifier_ControlPointOverage_Multiplier"],
+        "components": {
+            "globalFreebies": global_freebies,
+            "councilors": councilors,
+            "habs": habs,
+            "effects": -effect_delta,
+        },
+    }
+
+
+def faction_resource_components_yearly(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction_id: int,
+    faction: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+    councilor_by_id: dict[int, dict[str, Any]],
+    mc_components: dict[str, float],
+    cp_maintenance: dict[str, float],
+    resource: str,
+) -> dict[str, float]:
+    base_incomes = faction.get("baseIncomes_year") if isinstance(faction.get("baseIncomes_year"), dict) else {}
+    components = {
+        "HQ": as_float(base_incomes.get(resource), 0.0),
+        "nations": faction_yearly_income_from_nations(indexed, faction_id, faction, councilor_by_id, effect_contexts, effect_templates, resource),
+        "councilors": faction_yearly_income_from_councilors(indexed, faction, trait_templates, councilor_by_id, resource),
+        "habs": faction_yearly_income_from_habs(indexed, templates_dir, faction, effect_contexts, effect_templates, councilor_by_id, resource),
+        "ships": faction_yearly_income_from_ships(indexed, templates_dir, faction, resource),
+        "diplomacy": faction_yearly_income_from_diplomacy(indexed, faction_id, faction, resource),
+        "unassignedOrgs": faction_negative_yearly_income_from_unassigned_orgs(indexed, faction, resource),
+        "excessMissionControl": faction_excess_mission_control_yearly_income(mc_components, faction, resource),
+    }
+    if resource == "Influence":
+        components["controlPointMaintenance"] = -as_float(cp_maintenance.get("annualInfluenceCost"), 0.0)
+    return components
+
+
+def calculate_topbar(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction_name: str | None = None,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    trait_templates = load_trait_templates(templates_dir)
+    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    faction_id, faction = find_faction_state(indexed, faction_name)
+    effect_contexts = faction_effect_contexts(indexed, faction_id)
+    _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
+    mc_components = faction_max_mission_control_components(
+        indexed,
+        templates_dir,
+        faction_id,
+        faction,
+        trait_templates,
+        councilor_by_id,
+        effect_contexts,
+        effect_templates,
+    )
+    cp_maintenance = faction_control_point_maintenance(
+        indexed,
+        templates_dir,
+        faction_id,
+        faction,
+        councilor_by_id,
+        effect_contexts,
+        effect_templates,
+    )
+
+    resources = faction.get("resources") if isinstance(faction.get("resources"), dict) else {}
+    rows: dict[str, Any] = {}
+    for resource in TOPBAR_RESOURCES:
+        if resource == "MissionControl":
+            rows[resource] = clean_numbers(
+                {
+                    "usage": as_float(faction.get("missionControlUsage"), 0.0),
+                    "capacity": mc_components["total"],
+                    "available": max(mc_components["total"] - as_float(faction.get("missionControlUsage"), 0.0), 0.0),
+                    "components": mc_components if include_details else None,
+                },
+                6,
+            )
+            if not include_details:
+                rows[resource].pop("components", None)
+            continue
+        if resource == "Research":
+            research = calculate_research_breakdown(indexed, templates_dir, faction_name, include_details=include_details)
+            rows[resource] = {
+                "current": as_float(resources.get(resource), 0.0),
+                "daily": research["daily"]["total"],
+                "monthly": research["monthly"]["total"],
+                "yearly": research["annual"]["total"],
+                "beforeDistributionDaily": research["daily"]["beforeDistribution"],
+                "distributionBonusDaily": research["daily"]["distributionBonus"],
+            }
+            if include_details:
+                rows[resource]["componentsDaily"] = research["daily"]["bySource"]
+            rows[resource] = clean_numbers(rows[resource], 6)
+            continue
+
+        components = faction_resource_components_yearly(
+            indexed,
+            templates_dir,
+            faction_id,
+            faction,
+            trait_templates,
+            effect_contexts,
+            effect_templates,
+            councilor_by_id,
+            mc_components,
+            cp_maintenance,
+            resource,
+        )
+        yearly = sum(components.values())
+        row = {
+            "current": as_float(resources.get(resource), 0.0),
+            "daily": yearly / DAYS_PER_YEAR,
+            "monthly": yearly / 12.0,
+            "yearly": yearly,
+        }
+        if include_details:
+            row["componentsYearly"] = components
+        rows[resource] = clean_numbers(row, 6)
+
+    output = {
+        "faction": {
+            "id": faction_id,
+            "template": faction.get("templateName"),
+            "display": faction.get("displayName"),
+        },
+        "showMonthlyIncomes": bool(faction.get("showMonthlyIncomesInTopBarAndIntel")),
+        "resources": rows,
+        "controlPointMaintenance": clean_numbers(cp_maintenance, 6),
+        "resourceIncomeDeficiencies": faction.get("resourceIncomeDeficiencies") or [],
+        "sourceNotes": [
+            "Top-bar stockpiles are raw TIFactionState.resources.",
+            "Top-bar non-research deltas use TIFactionState.GetMonthlyIncome-equivalent yearly components divided by 12 when monthly display is enabled.",
+            "Research row includes the distribution-slot bonus, matching GeneralControlsController.ResourceReportString.",
+        ],
+    }
+    return output
+
+
+def command_topbar(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    result = calculate_topbar(indexed, templates_dir, args.faction, include_details=args.details)
     print_json(result, compact=args.compact)
 
 
@@ -2844,6 +3574,11 @@ def build_parser() -> argparse.ArgumentParser:
     research.add_argument("--details", action="store_true", help="Include nation/councilor/hab source details.")
     add_compact_flag(research)
 
+    topbar = subparsers.add_parser("topbar", help="Reconstruct the top resource bar values for a faction.")
+    topbar.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
+    topbar.add_argument("--details", action="store_true", help="Include yearly source components for each resource.")
+    add_compact_flag(topbar)
+
     advise = subparsers.add_parser("advise", help="Estimate research change from assigning a councilor to Advise a nation.")
     advise.add_argument("councilor")
     advise.add_argument("nation")
@@ -2896,6 +3631,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if command == "research":
             command_research(save_path, templates_dir, args)
+            return 0
+        if command == "topbar":
+            command_topbar(save_path, templates_dir, args)
             return 0
         if command == "advise":
             command_advise(save_path, templates_dir, args)
