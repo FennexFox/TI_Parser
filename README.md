@@ -18,6 +18,7 @@ python .\tools\ti_save_parser.py hab-ui "제303기초연구단"
 python .\tools\ti_save_parser.py research --details
 python .\tools\ti_save_parser.py topbar --details
 python .\tools\build_module_catalog.py
+python .\tools\ti_save_parser.py world-ui
 python .\tools\ti_save_parser.py advise "Lati Wirya" "중화민국"
 python .\tools\ti_save_parser.py types --limit 30
 python .\tools\ti_save_parser.py raw --type TIFactionState --template ResistCouncil --keys displayName,resources,baseIncomes_year,missionControlUsage
@@ -48,6 +49,10 @@ Invicta install and writes `data/module_catalog.json` plus
 `docs/module_catalog.md`. Use the JSON for optimizer inputs; the Markdown is a
 human-readable reference for module income, upkeep, crew, power, MC, CP cap,
 build cost, requirements, and derived tags.
+
+The `world-ui` command reconstructs the Intel screen's world tab values:
+population, GDP, global public opinion, resource market prices, environmental
+damage, active wars, and faction atrocity counts.
 
 The `nation-ui` command reconstructs the nation panel values used for UI
 validation, including federation-pooled funding/boost income, faction research
