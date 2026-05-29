@@ -15,7 +15,10 @@ python .\tools\ti_save_parser.py councilor Hanna --target-nation USA --details
 python .\tools\ti_save_parser.py councilor Hanna --current-location-context
 python .\tools\ti_save_parser.py nation-ui "유럽 연합"
 python .\tools\ti_save_parser.py hab-ui "제303기초연구단"
+python .\tools\ti_save_parser.py hab-slots --faction ResistCouncil
+python .\tools\ti_save_parser.py hab-plan --upgrading-to-tier 3 --focus research
 python .\tools\ti_save_parser.py research --details
+python .\tools\ti_save_parser.py research-ui
 python .\tools\ti_save_parser.py topbar --details
 python .\tools\build_module_catalog.py
 python .\tools\ti_save_parser.py world-ui
@@ -40,6 +43,14 @@ research-distribution bonuses. The `advise` command applies one hypothetical
 Advise assignment to a nation and reports both the direct source increase and
 the final increase after research-distribution bonuses.
 
+The `research-ui` command reconstructs the Research screen's active slots. It
+reads the three global techs from `TIGlobalResearchState.techProgress`, active
+faction projects from `TIFactionState.currentProjectProgress` slots 3-5, slot
+weights from `researchWeights`, category/project-facility modifiers, current
+progress, daily slot output, faction contribution bars, and ETA dates. Project
+records in slots 6+ are reported separately as paused/stored progress, not as
+currently active project research slots.
+
 The `topbar` command reconstructs the top resource bar from the save, including
 current stockpiles, monthly/yearly net resource income, research distribution,
 mission-control usage/capacity, and control-point maintenance usage/cap.
@@ -61,4 +72,29 @@ opinion, army/navy limits, nukes, and diplomacy lists.
 
 The `hab-ui` command reconstructs a hab panel from raw sector/module state and
 module templates, including crew, power, monthly net resources, research
-category bonuses, Earth LEO priority bonuses, and construction modifiers.
+category bonuses, Earth LEO priority bonuses, construction modifiers, and
+`modules.slots` slot accounting. Raw saves can include locked future sector
+placeholders with empty module slots; these should not be treated as currently
+available build slots.
+
+The `hab-slots` command lists faction habs with currently usable empty slots.
+It defaults to the player faction, excludes habs with zero usable empty slots
+unless `--all` is passed, and reports raw, usable, occupied, empty, locked, and
+locked-empty slot counts for each hab.
+
+The `hab-plan` command is a save-derived planning view for current and future
+hab slots. It can scan the player's habs, filter to cores currently upgrading
+to a target tier, and rank buildable module candidates for `balanced`,
+`research`, `projects`, `category-bonus`, or `resources` focus. `research`
+means monthly `Research` output only; `Projects` output and tech category
+bonuses are separate score axes and are not silently converted into research.
+Its `suggestedFill` output aggregates a transparent heuristic fill plan by
+module count and includes projected final power, MC availability, and monthly
+resource/research deltas. Locked placeholder slots are only included in
+`plannedEmpty` when the current core module is actively upgrading to a higher
+tier that will unlock those sectors.
+
+`hab-plan` is intentionally not a full optimizer yet. It uses template build
+material weights rather than exact location-adjusted costs, filters out combat
+and objective-only modules for the economic planning view, and should be treated
+as a shortlist generator before committing construction in-game.

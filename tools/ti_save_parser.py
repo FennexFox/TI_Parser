@@ -16,7 +16,7 @@ import math
 import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -36,6 +36,10 @@ DEFAULT_GLOBAL_CONFIG = {
     "financialSectorFundingBonus": 1.05,
     "knowledgeSectorResearchBonus": 1.05,
     "researchBonusPerSlotInUse": 0.05,
+    "categoryBonusPenaltyPerExtraSlot": 0.9,
+    "first20ExtraProjectBonusPct": 0.05,
+    "second20ExtraProjectBonusPct": 0.03,
+    "overageExtraProjectBonusPct": 0.01,
     "spaceMineFreebies": 0,
     "spaceResourceToTons": 0.1,
     "crewWaterConsumptionTons_year": 3.5,
@@ -1849,7 +1853,10 @@ def hab_module_records(
     hab_module_templates: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
+    hab_faction_id = ref_id(hab.get("faction"))
     for sector in hab_sector_states(indexed, hab):
+        sector_faction_id = ref_id(sector.get("faction"))
+        sector_owned_by_hab = hab_faction_id is not None and sector_faction_id == hab_faction_id
         refs = sector.get("habModules") if isinstance(sector.get("habModules"), list) else []
         for slot, module_ref in enumerate(refs):
             found = resolve_ref(indexed, module_ref)
@@ -1866,6 +1873,9 @@ def hab_module_records(
                     "sectorId": ref_id(sector.get("ID")),
                     "sectorNum": sector.get("sectorNum"),
                     "sectorFaction": ref_summary(indexed, sector.get("faction")),
+                    "sectorFactionId": sector_faction_id,
+                    "habFactionId": hab_faction_id,
+                    "sectorOwnedByHabFaction": sector_owned_by_hab,
                     "slot": slot,
                     "state": module,
                     "templateName": template_name,
@@ -1884,6 +1894,35 @@ def hab_module_records(
 
 def hab_module_empty(record: dict[str, Any]) -> bool:
     return not bool(record.get("templateName"))
+
+
+def hab_slot_usable(record: dict[str, Any]) -> bool:
+    return bool(record.get("sectorOwnedByHabFaction"))
+
+
+def hab_slot_summary(records: list[dict[str, Any]]) -> dict[str, int]:
+    raw = len(records)
+    usable = sum(1 for record in records if hab_slot_usable(record))
+    occupied = sum(1 for record in records if hab_slot_usable(record) and not hab_module_empty(record))
+    empty = sum(1 for record in records if hab_slot_usable(record) and hab_module_empty(record))
+    locked_empty = sum(1 for record in records if not hab_slot_usable(record) and hab_module_empty(record))
+    return {
+        "raw": raw,
+        "usable": usable,
+        "occupied": occupied,
+        "empty": empty,
+        "locked": raw - usable,
+        "lockedEmpty": locked_empty,
+    }
+
+
+def hab_module_counts(records: list[dict[str, Any]]) -> dict[str, int]:
+    module_counts: dict[str, int] = {}
+    for record in records:
+        if hab_module_okay(record):
+            template_name = str(record.get("templateName"))
+            module_counts[template_name] = module_counts.get(template_name, 0) + 1
+    return module_counts
 
 
 def hab_module_okay(record: dict[str, Any]) -> bool:
@@ -2287,12 +2326,6 @@ def calculate_hab_ui(
         )
         for resource in HAB_MONTHLY_RESOURCES
     }
-    module_counts: dict[str, int] = {}
-    for record in records:
-        if hab_module_okay(record):
-            template_name = str(record.get("templateName"))
-            module_counts[template_name] = module_counts.get(template_name, 0) + 1
-
     construction_time_modifier = hab_module_construction_time_modifier(records)
     output = {
         "identity": {
@@ -2324,11 +2357,17 @@ def calculate_hab_ui(
         "modules": {
             "active": len(active_records),
             "okay": len(okay_records),
-            "counts": module_counts,
+            "slots": hab_slot_summary(records),
+            "counts": hab_module_counts(records),
             "records": [
                 {
                     "id": record.get("id"),
+                    "sectorId": record.get("sectorId"),
                     "sectorNum": record.get("sectorNum"),
+                    "sectorFaction": record.get("sectorFaction"),
+                    "sectorFactionId": record.get("sectorFactionId"),
+                    "habFactionId": record.get("habFactionId"),
+                    "sectorOwnedByHabFaction": record.get("sectorOwnedByHabFaction"),
                     "slot": record.get("slot"),
                     "display": record.get("display"),
                     "template": record.get("templateName"),
@@ -2351,6 +2390,902 @@ def command_hab_ui(save_path: Path, templates_dir: Path | None, args: argparse.N
     data = load_save(save_path)
     indexed = build_index(data)
     result = calculate_hab_ui(indexed, templates_dir, args.name)
+    print_json(result, compact=args.compact)
+
+
+def summarize_hab_slots(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    hab_id: int,
+    hab: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]],
+    include_module_counts: bool = False,
+) -> dict[str, Any]:
+    records = hab_module_records(indexed, hab, hab_module_templates)
+    result = {
+        "id": hab_id,
+        "display": hab.get("displayName"),
+        "habType": hab.get("habType"),
+        "tier": hab.get("tier"),
+        "location": hab_location_summary(indexed, templates_dir, hab),
+        "slots": hab_slot_summary(records),
+    }
+    if include_module_counts:
+        result["moduleCounts"] = hab_module_counts(records)
+    return result
+
+
+def calculate_hab_slots(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction_name: str | None = None,
+    include_all: bool = False,
+    include_module_counts: bool = False,
+) -> dict[str, Any]:
+    faction_id, faction = find_faction_state(indexed, faction_name)
+    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    rows_all = [
+        summarize_hab_slots(indexed, templates_dir, hab_id, hab, hab_module_templates, include_module_counts)
+        for hab_id, hab in faction_hab_states(indexed, faction)
+    ]
+    totals = {
+        key: sum(int(row["slots"][key]) for row in rows_all)
+        for key in ("raw", "usable", "occupied", "empty", "locked", "lockedEmpty")
+    }
+    rows = rows_all
+    if not include_all:
+        rows = [row for row in rows if row["slots"]["empty"] > 0]
+    rows.sort(key=lambda row: (-int(row["slots"]["empty"]), str(row.get("display") or "")))
+    return {
+        "faction": {
+            "id": faction_id,
+            "template": faction.get("templateName"),
+            "display": faction.get("displayName"),
+        },
+        "filters": {
+            "includeAll": include_all,
+            "moduleCounts": include_module_counts,
+            "returnedHabs": len(rows),
+            "totalHabs": len(rows_all),
+        },
+        "totals": totals,
+        "habs": rows,
+        "sourceNotes": [
+            "Raw save sectors can include locked future placeholder sectors.",
+            "Only slots in sectors owned by the hab's current faction are counted as currently usable build slots.",
+        ],
+    }
+
+
+def command_hab_slots(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    result = calculate_hab_slots(
+        indexed,
+        templates_dir,
+        faction_name=args.faction,
+        include_all=args.all,
+        include_module_counts=args.module_counts,
+    )
+    print_json(clean_numbers(result, 6), compact=args.compact)
+
+
+def hab_projected_power_summary(records: list[dict[str, Any]]) -> dict[str, int]:
+    generated = 0
+    consumed = 0
+    for record in records:
+        if hab_module_empty(record) or record.get("destroyed") or record.get("decommissioning"):
+            continue
+        power = int(as_float(record.get("template", {}).get("power"), 0.0))
+        if power > 0:
+            generated += power
+        elif power < 0:
+            consumed += -power
+    return {"consumed": consumed, "generated": generated, "net": generated - consumed}
+
+
+def hab_upgrade_info(records: list[dict[str, Any]]) -> dict[str, Any]:
+    core = hab_core_module_record(records)
+    if not core:
+        return {"isUpgrading": False, "targetTier": None}
+    template = core.get("template") if isinstance(core.get("template"), dict) else {}
+    prior_template = core.get("priorTemplate") if isinstance(core.get("priorTemplate"), dict) else {}
+    target_tier = int(as_float(template.get("tier"), 0.0)) or None
+    prior_tier = int(as_float(prior_template.get("tier"), 0.0)) or None
+    is_upgrading = (
+        not bool(core.get("completed"))
+        and bool(core.get("priorTemplateName"))
+        and target_tier is not None
+        and (prior_tier is None or target_tier > prior_tier)
+    )
+    state = core.get("state") if isinstance(core.get("state"), dict) else {}
+    return {
+        "isUpgrading": is_upgrading,
+        "targetTier": target_tier,
+        "coreTemplate": core.get("templateName"),
+        "priorCoreTemplate": core.get("priorTemplateName"),
+        "priorTier": prior_tier,
+        "completionDate": state.get("completionDate"),
+        "baseBuildDuration_days": state.get("baseBuildDuration_days"),
+        "appliedBuildConstructionBonus": state.get("appliedBuildConstructionBonus"),
+    }
+
+
+def hab_planned_empty_slots(slots: dict[str, int], upgrade: dict[str, Any], current_tier: int | None) -> dict[str, int]:
+    current_empty = int(slots.get("empty", 0))
+    future_unlocks = 0
+    target_tier = upgrade.get("targetTier")
+    if upgrade.get("isUpgrading") and target_tier is not None and current_tier is not None and int(target_tier) > current_tier:
+        future_unlocks = int(slots.get("lockedEmpty", 0))
+    return {
+        "currentUsableEmpty": current_empty,
+        "futureUnlockedEmpty": future_unlocks,
+        "plannedEmpty": current_empty + future_unlocks,
+    }
+
+
+def module_is_relevant_to_hab_type(template: dict[str, Any], hab: dict[str, Any]) -> bool:
+    hab_type = template.get("habType") or "Any"
+    return hab_type == "Any" or hab_type == hab.get("habType")
+
+
+def module_has_economic_planning_value(template: dict[str, Any]) -> bool:
+    if as_float(template.get("power"), 0.0) > 0.0:
+        return True
+    if as_float(template.get("missionControl"), 0.0) != 0.0:
+        return True
+    if as_float(template.get("controlPointCapacity"), 0.0) != 0.0:
+        return True
+    if template.get("techBonuses"):
+        return True
+    if any(as_float(template.get(field), 0.0) != 0.0 for field in HAB_INCOME_FIELDS.values()):
+        return True
+    rules = set(hab_template_special_rules(template))
+    return bool(rules & {"Efficiency", "Farm", "Shipyard", "CanFoundTier1Habs", "CanFoundTier2Habs", "CanFoundTier3Habs"})
+
+
+def hab_barycenter_state(indexed: IndexedState, hab: dict[str, Any]) -> dict[str, Any]:
+    return state_value_by_id(indexed, ref_id(hab.get("barycenter"))) or {}
+
+
+def hab_body_site_states(indexed: IndexedState, body: dict[str, Any]) -> list[dict[str, Any]]:
+    refs = body.get("habSites") if isinstance(body.get("habSites"), list) else []
+    sites: list[dict[str, Any]] = []
+    for site_ref in refs:
+        site = state_value_by_id(indexed, ref_id(site_ref))
+        if site:
+            sites.append(site)
+    return sites
+
+
+def hab_body_is_colonized(indexed: IndexedState, hab: dict[str, Any]) -> bool:
+    if hab.get("habSite"):
+        return True
+    body = hab_barycenter_state(indexed, hab)
+    if str(body.get("templateName") or "") == "Earth":
+        return True
+    return any(site.get("hab") for site in hab_body_site_states(indexed, body))
+
+
+def hab_body_is_inhabited(indexed: IndexedState, hab: dict[str, Any]) -> bool:
+    body = hab_barycenter_state(indexed, hab)
+    if str(body.get("templateName") or "") == "Earth":
+        return True
+    return hab_body_is_colonized(indexed, hab)
+
+
+def hab_body_is_irradiated(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]] | None = None,
+) -> bool:
+    body = hab_barycenter_state(indexed, hab)
+    template_name = str(body.get("templateName") or "")
+    body_template = (body_templates or {}).get(template_name, {})
+    return max(
+        as_float(body.get("irradiatedMultiplier"), 1.0),
+        as_float(body_template.get("irradiatedMultiplier"), 1.0),
+    ) > 1.0
+
+
+def module_unmet_requirements(
+    indexed: IndexedState,
+    template: dict[str, Any],
+    hab: dict[str, Any],
+    faction: dict[str, Any],
+    target_tier: int,
+    module_counts: dict[str, int],
+    body_templates: dict[str, dict[str, Any]] | None = None,
+) -> list[str]:
+    reasons: list[str] = []
+    template_name = str(template.get("dataName"))
+    if template.get("coreModule"):
+        reasons.append("core module")
+    if template.get("alienModule"):
+        reasons.append("alien module")
+    if template.get("disable") or template.get("noBuild") or template.get("destroyed"):
+        reasons.append("not normally buildable")
+    if template.get("spaceCombatModule"):
+        reasons.append("combat module outside economic planner")
+    if template.get("objectiveModule") and not module_has_economic_planning_value(template):
+        reasons.append("objective-only module outside economic planner")
+    if not module_is_relevant_to_hab_type(template, hab):
+        reasons.append(f"habType {template.get('habType')} only")
+    if int(as_float(template.get("tier"), 0.0)) > target_tier:
+        reasons.append("above target tier")
+    required_project = template.get("requiredProjectName")
+    finished_projects = faction.get("finishedProjectNames") if isinstance(faction.get("finishedProjectNames"), list) else []
+    if required_project and required_project not in finished_projects:
+        reasons.append(f"missing project {required_project}")
+    if template.get("onePerHab") and module_counts.get(template_name, 0) > 0:
+        reasons.append("one per hab already present")
+
+    rules = hab_template_special_rules(template)
+    if "EarthLEOOnly" in rules and not hab.get("inEarthLEO"):
+        reasons.append("Earth LEO only")
+    if "Requires_Interface_Orbit" in rules and not hab.get("interfaceOrbit"):
+        reasons.append("requires interface orbit")
+    if "Requires_GasGiant_Orbit" in rules:
+        location = hab_barycenter_state(indexed, hab)
+        body = str(location.get("templateName") or "")
+        if "Jupiter" not in body and "Saturn" not in body and "Uranus" not in body and "Neptune" not in body:
+            reasons.append("requires gas giant orbit")
+    if "Requires_Colonized_Body" in rules and not hab_body_is_colonized(indexed, hab):
+        reasons.append("requires colonized body")
+    if "Requires_Inhabited_Body" in rules and not hab_body_is_inhabited(indexed, hab):
+        reasons.append("requires inhabited body")
+    if "NotInIrradiated" in rules and hab_body_is_irradiated(indexed, hab, body_templates):
+        reasons.append("not buildable on irradiated body")
+    return reasons
+
+
+def module_build_cost_map(template: dict[str, Any]) -> dict[str, float]:
+    raw = template.get("weightedBuildMaterials")
+    if not isinstance(raw, dict):
+        raw = template.get("weightBuildMaterials")
+    if not isinstance(raw, dict):
+        return {}
+    resource_names = {
+        "money": "Money",
+        "influence": "Influence",
+        "ops": "Operations",
+        "boost": "Boost",
+        "water": "Water",
+        "volatiles": "Volatiles",
+        "metals": "Metals",
+        "nobleMetals": "NobleMetals",
+        "fissiles": "Fissiles",
+        "antimatter": "Antimatter",
+        "exotics": "Exotics",
+    }
+    return {
+        resource_names[key]: as_float(value, 0.0)
+        for key, value in raw.items()
+        if key in resource_names and as_float(value, 0.0) > 0.0
+    }
+
+
+def faction_stockpile(faction: dict[str, Any], resource: str) -> float:
+    resources = faction.get("resources") if isinstance(faction.get("resources"), dict) else {}
+    return as_float(resources.get(resource), 0.0)
+
+
+def module_affordable_with_template_weights(template: dict[str, Any], faction: dict[str, Any]) -> bool:
+    return all(faction_stockpile(faction, resource) >= amount for resource, amount in module_build_cost_map(template).items())
+
+
+def resource_scarcity_weights(topbar: dict[str, Any]) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    resource_rows = topbar.get("resources") if isinstance(topbar.get("resources"), dict) else {}
+    for resource in ("Money", "Boost", "Water", "Volatiles", "Metals", "NobleMetals", "Fissiles", "Antimatter", "Exotics"):
+        row = resource_rows.get(resource) if isinstance(resource_rows.get(resource), dict) else {}
+        monthly = as_float(row.get("monthly"), 0.0)
+        current = as_float(row.get("current"), 0.0)
+        weight = 1.0
+        if monthly < 0.0:
+            weight += 2.0
+            months_left = current / abs(monthly) if current > 0.0 else 0.0
+            if months_left < 12.0:
+                weight += 2.0
+        if resource in {"NobleMetals", "Fissiles", "Antimatter", "Exotics"}:
+            weight += 1.0
+        if resource == "Money":
+            weight *= 0.05
+        elif resource == "Boost":
+            weight *= 0.5
+        weights[resource] = weight
+    return weights
+
+
+def candidate_module_monthly_delta(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    records: list[dict[str, Any]],
+    faction: dict[str, Any],
+    template: dict[str, Any],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+    mining_rate: float,
+    councilor_by_id: dict[int, dict[str, Any]],
+) -> dict[str, dict[str, float]]:
+    administration_modifier = hab_administration_modifier(records)
+    science_adviser_multiplier = 1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Science")
+    administration_adviser_multiplier = 1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Administration")
+    hab_site = state_value_by_id(indexed, ref_id(hab.get("habSite")))
+    projected_crew = hab_crew(records)
+    existing_farm_discount = hab_farm_crew_discount(records, any_core_completed=True)
+    candidate_crew = int(as_float(template.get("crew"), 0.0))
+    candidate_farm_discount = (
+        int(as_float(template.get("specialRulesValue"), 0.0))
+        if "Farm" in hab_template_special_rules(template)
+        else 0
+    )
+    extra_farm_coverage = max(
+        min(existing_farm_discount + candidate_farm_discount, projected_crew + candidate_crew)
+        - min(existing_farm_discount, projected_crew),
+        0,
+    )
+
+    deltas: dict[str, dict[str, float]] = {}
+    for resource in HAB_MONTHLY_RESOURCES:
+        income = hab_template_income(
+            resource,
+            template,
+            False,
+            indexed=indexed,
+            faction=faction,
+            hab_site=hab_site,
+            effect_contexts=effect_contexts,
+            effect_templates=effect_templates,
+            mining_rate=mining_rate,
+        )
+        support = hab_template_support(resource, template, include_crew_support=True)
+        if resource == "Water":
+            support -= (
+                extra_farm_coverage
+                * DEFAULT_GLOBAL_CONFIG["crewWaterConsumptionTons_year"]
+                * DEFAULT_GLOBAL_CONFIG["spaceResourceToTons"]
+                / 12.0
+            )
+        elif resource == "Volatiles":
+            support -= (
+                extra_farm_coverage
+                * DEFAULT_GLOBAL_CONFIG["crewVolatilesConsumptionTons_year"]
+                * DEFAULT_GLOBAL_CONFIG["spaceResourceToTons"]
+                / 12.0
+            )
+
+        if resource in HAB_ADMIN_ADVISER_RESOURCES:
+            income *= administration_adviser_multiplier
+            income *= administration_modifier
+        elif resource == "Research":
+            income *= science_adviser_multiplier
+            income *= administration_modifier
+        elif resource in {"Influence", "Operations", "Exotics"}:
+            income *= administration_modifier
+        support = max(support, 0.0)
+        net = income - support
+        if income or support or net:
+            deltas[resource] = {"income": income, "support": support, "net": net}
+    return deltas
+
+
+HAB_PLAN_TECH_BONUS_CATEGORIES = (
+    "Energy",
+    "InformationScience",
+    "LifeScience",
+    "Materials",
+    "MilitaryScience",
+    "SocialScience",
+    "SpaceScience",
+    "Xenology",
+)
+
+HAB_PLAN_FOCUS_CHOICES = ("balanced", "research", "projects", "category-bonus", "resources")
+
+
+def module_research_score(monthly_delta: dict[str, dict[str, float]]) -> float:
+    return as_float(monthly_delta.get("Research", {}).get("net"), 0.0)
+
+
+def module_project_score(monthly_delta: dict[str, dict[str, float]]) -> float:
+    return as_float(monthly_delta.get("Projects", {}).get("net"), 0.0)
+
+
+def module_category_bonus_score(template: dict[str, Any]) -> float:
+    return sum(tech_bonus_sum(template.get("techBonuses"), category) for category in HAB_PLAN_TECH_BONUS_CATEGORIES)
+
+
+def module_balanced_score(research_score: float, resource_score: float) -> float:
+    return research_score + resource_score
+
+
+def module_resource_score(monthly_delta: dict[str, dict[str, float]], scarcity_weights: dict[str, float]) -> float:
+    return sum(
+        as_float(row.get("net"), 0.0) * scarcity_weights.get(resource, 1.0)
+        for resource, row in monthly_delta.items()
+        if resource in scarcity_weights
+    )
+
+
+def module_candidate_row(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    records: list[dict[str, Any]],
+    faction: dict[str, Any],
+    template: dict[str, Any],
+    projected_power: dict[str, int],
+    mission_control_available: float,
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+    mining_rate: float,
+    scarcity_weights: dict[str, float],
+    councilor_by_id: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    monthly_delta = candidate_module_monthly_delta(
+        indexed,
+        hab,
+        records,
+        faction,
+        template,
+        effect_contexts,
+        effect_templates,
+        mining_rate,
+        councilor_by_id,
+    )
+    power = int(as_float(template.get("power"), 0.0))
+    mission_control = int(as_float(template.get("missionControl"), 0.0))
+    research_score = module_research_score(monthly_delta)
+    project_score = module_project_score(monthly_delta)
+    category_bonus_score = module_category_bonus_score(template)
+    resource_score = module_resource_score(monthly_delta, scarcity_weights)
+    return {
+        "template": template.get("dataName"),
+        "display": template_display(str(template.get("dataName")), template),
+        "tier": int(as_float(template.get("tier"), 0.0)),
+        "habType": template.get("habType") or "Any",
+        "power": power,
+        "projectedPowerAfterOne": projected_power.get("net", 0) + power,
+        "missionControl": mission_control,
+        "onePerHab": bool(template.get("onePerHab")),
+        "fitsCurrentProjectedPower": projected_power.get("net", 0) + power >= 0,
+        "fitsCurrentMissionControl": mission_control >= 0 or mission_control_available + mission_control >= 0,
+        "crew": int(as_float(template.get("crew"), 0.0)),
+        "buildTime_Days": as_float(template.get("buildTime_Days"), 0.0),
+        "buildCostTemplateWeights": module_build_cost_map(template),
+        "affordableByTemplateWeights": module_affordable_with_template_weights(template, faction),
+        "monthlyDelta": monthly_delta,
+        "techBonuses": tech_bonus_map_for_template(template),
+        "specialRules": hab_template_special_rules(template),
+        "scores": {
+            "research": research_score,
+            "projects": project_score,
+            "category-bonus": category_bonus_score,
+            "resources": resource_score,
+            "balanced": module_balanced_score(research_score, resource_score),
+        },
+        "scoreComponents": {
+            "researchMonthlyNet": research_score,
+            "projectsMonthlyNet": project_score,
+            "categoryBonusSum": category_bonus_score,
+            "resourceScarcityWeightedNet": resource_score,
+        },
+    }
+
+
+def tech_bonus_map_for_template(template: dict[str, Any]) -> dict[str, float]:
+    bonuses: dict[str, float] = {}
+    for item in template.get("techBonuses") if isinstance(template.get("techBonuses"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        category = str(item.get("category"))
+        bonuses[category] = bonuses.get(category, 0.0) + as_float(item.get("bonus"), 0.0)
+    return bonuses
+
+
+def hab_module_candidate_rows(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    hab: dict[str, Any],
+    records: list[dict[str, Any]],
+    faction_id: int,
+    faction: dict[str, Any],
+    target_tier: int,
+    projected_power: dict[str, int],
+    mission_control_available: float,
+    topbar: dict[str, Any],
+) -> list[dict[str, Any]]:
+    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
+    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    trait_templates = load_trait_templates(templates_dir)
+    _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
+    effect_contexts = faction_effect_contexts(indexed, faction_id)
+    mining_rate = faction_mining_rate(indexed, faction)
+    scarcity_weights = resource_scarcity_weights(topbar)
+    module_counts = hab_module_counts(records)
+    rows: list[dict[str, Any]] = []
+    for template in hab_module_templates.values():
+        reasons = module_unmet_requirements(indexed, template, hab, faction, target_tier, module_counts, body_templates)
+        if reasons:
+            continue
+        row = module_candidate_row(
+            indexed,
+            hab,
+            records,
+            faction,
+            template,
+            projected_power,
+            mission_control_available,
+            effect_contexts,
+            effect_templates,
+            mining_rate,
+            scarcity_weights,
+            councilor_by_id,
+        )
+        has_score = any(abs(as_float(value, 0.0)) > 0.0 for value in row.get("scores", {}).values())
+        if not has_score and row["power"] <= 0 and row["missionControl"] <= 0:
+            continue
+        rows.append(clean_numbers(row, 6))
+    return rows
+
+
+def sorted_candidates(candidates: list[dict[str, Any]], focus: str, top: int) -> list[dict[str, Any]]:
+    return sorted(
+        candidates,
+        key=lambda row: (
+            not bool(row.get("affordableByTemplateWeights")),
+            -as_float((row.get("scores") or {}).get(focus), 0.0),
+            not bool(row.get("fitsCurrentProjectedPower")),
+            -int(as_float(row.get("tier"), 0.0)),
+            -as_float((row.get("scores") or {}).get("balanced"), 0.0),
+            str(row.get("display") or row.get("template")),
+        ),
+    )[:top]
+
+
+def power_candidates(candidates: list[dict[str, Any]], top: int) -> list[dict[str, Any]]:
+    return sorted(
+        [candidate for candidate in candidates if as_float(candidate.get("power"), 0.0) > 0.0],
+        key=lambda row: (
+            not bool(row.get("affordableByTemplateWeights")),
+            -as_float(row.get("power"), 0.0),
+            -int(as_float(row.get("tier"), 0.0)),
+            str(row.get("display") or row.get("template")),
+        ),
+    )[:top]
+
+
+def candidate_affordable(row: dict[str, Any]) -> bool:
+    return bool(row.get("affordableByTemplateWeights", True))
+
+
+def monthly_delta_times(delta: dict[str, dict[str, float]], count: int) -> dict[str, dict[str, float]]:
+    result: dict[str, dict[str, float]] = {}
+    for resource, row in delta.items():
+        if not isinstance(row, dict):
+            continue
+        result[resource] = {
+            key: as_float(value, 0.0) * count
+            for key, value in row.items()
+            if key in {"income", "support", "net"}
+        }
+    return result
+
+
+def add_monthly_delta(target: dict[str, dict[str, float]], delta: dict[str, dict[str, float]], count: int = 1) -> None:
+    for resource, row in monthly_delta_times(delta, count).items():
+        target_row = target.setdefault(resource, {"income": 0.0, "support": 0.0, "net": 0.0})
+        for key, value in row.items():
+            target_row[key] = as_float(target_row.get(key), 0.0) + value
+
+
+def suggested_fill_entry(candidate: dict[str, Any], count: int, reason: str) -> dict[str, Any]:
+    return {
+        "count": count,
+        "template": candidate.get("template"),
+        "display": candidate.get("display"),
+        "reason": reason,
+        "tier": candidate.get("tier"),
+        "powerEach": candidate.get("power"),
+        "powerTotal": int(as_float(candidate.get("power"), 0.0)) * count,
+        "missionControlEach": candidate.get("missionControl"),
+        "missionControlTotal": int(as_float(candidate.get("missionControl"), 0.0)) * count,
+        "monthlyDeltaTotal": monthly_delta_times(candidate.get("monthlyDelta") or {}, count),
+        "scoresEach": candidate.get("scores"),
+    }
+
+
+def suggested_hab_fill(
+    candidates: list[dict[str, Any]],
+    slots: int,
+    focus: str,
+    projected_power: int,
+    mc_available: float,
+) -> dict[str, Any]:
+    if slots <= 0:
+        return {
+            "slotsRequested": slots,
+            "slotsFilled": 0,
+            "unfilledSlots": 0,
+            "projectedPowerNetAfter": projected_power,
+            "missionControlAvailableAfter": mc_available,
+            "monthlyDeltaTotal": {},
+            "moduleCounts": [],
+            "method": "no planned empty slots",
+        }
+
+    affordable_candidates = [candidate for candidate in candidates if candidate_affordable(candidate)]
+    focus_pool = sorted_candidates(affordable_candidates, focus, len(affordable_candidates))
+    support_pool = power_candidates(affordable_candidates, len(affordable_candidates))
+    best_plan: dict[str, Any] | None = None
+
+    for focus_candidate in focus_pool[:20]:
+        focus_limit = 1 if focus_candidate.get("onePerHab") else slots
+        focus_power = int(as_float(focus_candidate.get("power"), 0.0))
+        focus_mc = int(as_float(focus_candidate.get("missionControl"), 0.0))
+        focus_score = as_float((focus_candidate.get("scores") or {}).get(focus), 0.0)
+        for focus_count in range(1, focus_limit + 1):
+            remaining_slots = slots - focus_count
+            support_options: list[tuple[dict[str, Any] | None, int]] = [(None, 0)]
+            for support_candidate in support_pool[:20]:
+                if support_candidate.get("template") == focus_candidate.get("template"):
+                    continue
+                support_limit = 1 if support_candidate.get("onePerHab") else remaining_slots
+                support_options.extend((support_candidate, count) for count in range(1, support_limit + 1))
+
+            for support_candidate, support_count in support_options:
+                if support_count > remaining_slots:
+                    continue
+                support_power = int(as_float((support_candidate or {}).get("power"), 0.0))
+                support_mc = int(as_float((support_candidate or {}).get("missionControl"), 0.0))
+                power_after = projected_power + focus_power * focus_count + support_power * support_count
+                mc_after = mc_available + focus_mc * focus_count + support_mc * support_count
+                if power_after < 0 or mc_after < 0:
+                    continue
+                slots_filled = focus_count + support_count
+                support_score = as_float(((support_candidate or {}).get("scores") or {}).get(focus), 0.0)
+                plan_score = (
+                    focus_score * focus_count
+                    + support_score * support_count
+                )
+                plan = {
+                    "score": plan_score,
+                    "slotsFilled": slots_filled,
+                    "powerAfter": power_after,
+                    "mcAfter": mc_after,
+                    "focusCandidate": focus_candidate,
+                    "focusCount": focus_count,
+                    "supportCandidate": support_candidate,
+                    "supportCount": support_count,
+                }
+                if best_plan is None or (
+                    plan["score"],
+                    plan["focusCount"],
+                    -plan["supportCount"],
+                    plan["powerAfter"],
+                ) > (
+                    best_plan["score"],
+                    best_plan["focusCount"],
+                    -best_plan["supportCount"],
+                    best_plan["powerAfter"],
+                ):
+                    best_plan = plan
+
+    if best_plan is None:
+        return {
+            "slotsRequested": slots,
+            "slotsFilled": 0,
+            "unfilledSlots": slots,
+            "projectedPowerNetAfter": projected_power,
+            "missionControlAvailableAfter": mc_available,
+            "monthlyDeltaTotal": {},
+            "moduleCounts": [],
+            "method": "no feasible candidate set under projected power and MC",
+        }
+
+    monthly_total: dict[str, dict[str, float]] = {}
+    entries = [
+        suggested_fill_entry(best_plan["focusCandidate"], best_plan["focusCount"], f"top {focus} score"),
+    ]
+    add_monthly_delta(monthly_total, best_plan["focusCandidate"].get("monthlyDelta") or {}, best_plan["focusCount"])
+    if best_plan["supportCandidate"] and best_plan["supportCount"]:
+        entries.append(
+            suggested_fill_entry(
+                best_plan["supportCandidate"],
+                best_plan["supportCount"],
+                "power support for selected fill",
+            )
+        )
+        add_monthly_delta(monthly_total, best_plan["supportCandidate"].get("monthlyDelta") or {}, best_plan["supportCount"])
+
+    return clean_numbers(
+        {
+            "slotsRequested": slots,
+            "slotsFilled": best_plan["slotsFilled"],
+            "unfilledSlots": slots - best_plan["slotsFilled"],
+            "projectedPowerNetAfter": best_plan["powerAfter"],
+            "missionControlAvailableAfter": best_plan["mcAfter"],
+            "monthlyDeltaTotal": monthly_total,
+            "moduleCounts": entries,
+            "method": "single focus module type plus optional single power-support type",
+        },
+        6,
+    )
+
+
+def hab_plan_row(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    hab_id: int,
+    hab: dict[str, Any],
+    faction_id: int,
+    faction: dict[str, Any],
+    focus: str,
+    top: int,
+    topbar: dict[str, Any],
+) -> dict[str, Any]:
+    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    records = hab_module_records(indexed, hab, hab_module_templates)
+    slots = hab_slot_summary(records)
+    upgrade = hab_upgrade_info(records)
+    current_tier = int(as_float(hab.get("tier"), 0.0)) or None
+    target_tier = int(as_float(upgrade.get("targetTier"), 0.0)) or current_tier or 1
+    planned_slots = hab_planned_empty_slots(slots, upgrade, current_tier)
+    projected_power = hab_projected_power_summary(records)
+    topbar_mc = topbar.get("resources", {}).get("MissionControl", {}) if isinstance(topbar.get("resources"), dict) else {}
+    mc_available = as_float(topbar_mc.get("available"), 0.0)
+    candidates = hab_module_candidate_rows(
+        indexed,
+        templates_dir,
+        hab,
+        records,
+        faction_id,
+        faction,
+        target_tier,
+        projected_power,
+        mc_available,
+        topbar,
+    )
+    return {
+        "id": hab_id,
+        "display": hab.get("displayName"),
+        "habType": hab.get("habType"),
+        "tier": current_tier,
+        "targetTier": target_tier,
+        "location": hab_location_summary(indexed, templates_dir, hab),
+        "upgrade": upgrade,
+        "slots": {
+            "current": slots,
+            "planning": planned_slots,
+        },
+        "power": {
+            "active": hab_power_summary(records),
+            "projectedAfterCurrentQueue": projected_power,
+        },
+        "moduleCounts": hab_module_counts(records),
+        "underConstruction": [
+            {
+                "sectorNum": record.get("sectorNum"),
+                "slot": record.get("slot"),
+                "template": record.get("templateName"),
+                "display": record.get("display"),
+                "priorTemplate": record.get("priorTemplateName"),
+                "completionDate": (record.get("state") or {}).get("completionDate"),
+            }
+            for record in records
+            if hab_module_okay(record) and not record.get("completed")
+        ],
+        "candidateSummary": {
+            "count": len(candidates),
+            "topBalanced": sorted_candidates(candidates, "balanced", top),
+            "topResearch": sorted_candidates(candidates, "research", top),
+            "topProjects": sorted_candidates(candidates, "projects", top),
+            "topCategoryBonus": sorted_candidates(candidates, "category-bonus", top),
+            "topResources": sorted_candidates(candidates, "resources", top),
+            "topPower": power_candidates(candidates, top),
+        },
+        "suggestedFill": suggested_hab_fill(
+            candidates,
+            int(planned_slots.get("plannedEmpty", 0)),
+            focus,
+            int(projected_power.get("net", 0)),
+            mc_available,
+        ),
+    }
+
+
+def calculate_hab_plan(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction_name: str | None = None,
+    hab_name: str | None = None,
+    upgrading_to_tier: int | None = None,
+    include_all: bool = False,
+    focus: str = "balanced",
+    top: int = 8,
+) -> dict[str, Any]:
+    faction_id, faction = find_faction_state(indexed, faction_name)
+    topbar = calculate_topbar(indexed, templates_dir, faction.get("templateName"), include_details=False)
+    if hab_name:
+        found = match_raw_state(indexed, "TIHabState", hab_name)
+        if not found or found[0] is None:
+            raise SystemExit(f"Hab not found: {hab_name}")
+        habs = [(found[0], found[1])]
+    else:
+        habs = faction_hab_states(indexed, faction)
+
+    rows = [
+        hab_plan_row(indexed, templates_dir, hab_id, hab, faction_id, faction, focus, top, topbar)
+        for hab_id, hab in habs
+        if ref_id(hab.get("faction")) == faction_id
+    ]
+    if upgrading_to_tier is not None:
+        rows = [row for row in rows if int(as_float(row.get("targetTier"), 0.0)) == upgrading_to_tier and row["upgrade"].get("isUpgrading")]
+    if not include_all:
+        rows = [row for row in rows if int(row["slots"]["planning"].get("plannedEmpty", 0)) > 0]
+    rows.sort(
+        key=lambda row: (
+            -int(row["slots"]["planning"].get("plannedEmpty", 0)),
+            str(row.get("display") or ""),
+        )
+    )
+
+    return clean_numbers(
+        {
+            "faction": faction_brief(faction_id, faction),
+            "focus": focus,
+            "filters": {
+                "hab": hab_name,
+                "upgradingToTier": upgrading_to_tier,
+                "includeAll": include_all,
+                "top": top,
+                "returnedHabs": len(rows),
+            },
+            "scoreModel": {
+                "research": "monthly Research net only; Projects and tech category bonuses are not folded into this score",
+                "projects": "monthly Projects net only",
+                "category-bonus": "raw sum of techBonuses across research categories",
+                "resources": "monthly resource net weighted by current scarcity heuristic",
+                "balanced": {
+                    "formula": "research + resources",
+                    "weights": {"research": 1.0, "resources": 1.0, "projects": 0.0, "category-bonus": 0.0},
+                },
+            },
+            "factionConstraints": {
+                "missionControl": topbar.get("resources", {}).get("MissionControl") if isinstance(topbar.get("resources"), dict) else None,
+                "monthlyResourceDeltas": {
+                    resource: row.get("monthly")
+                    for resource, row in (topbar.get("resources") or {}).items()
+                    if isinstance(row, dict) and resource in {"Money", "Boost", "Water", "Volatiles", "Metals", "NobleMetals", "Fissiles"}
+                },
+            },
+            "habs": rows,
+            "sourceNotes": [
+                "This is a planning model, not an exact in-game optimizer.",
+                "plannedEmpty includes currently usable empty slots plus locked empty placeholders only when the core is upgrading to a higher tier.",
+                "Candidates are filtered by known project unlocks, target tier, hab type, one-per-hab rules, and simple location-only special rules.",
+                "Scores are separated by output type: research is Research/month, projects is Projects/month, category-bonus is raw tech bonus sum, resources is scarcity-weighted net resource flow.",
+                "Template build materials are relative template weights, not exact final construction costs at location.",
+            ],
+        },
+        6,
+    )
+
+
+def command_hab_plan(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    result = calculate_hab_plan(
+        indexed,
+        templates_dir,
+        faction_name=args.faction,
+        hab_name=args.name,
+        upgrading_to_tier=args.upgrading_to_tier,
+        include_all=args.all,
+        focus=args.focus,
+        top=args.top,
+    )
     print_json(result, compact=args.compact)
 
 
@@ -2409,7 +3344,12 @@ def hab_research_and_mc(
 
 def research_distribution(faction: dict[str, Any]) -> tuple[int, float]:
     weights = faction.get("researchWeights") if isinstance(faction.get("researchWeights"), list) else []
-    slots = sum(1 for weight in weights if as_float(weight, 0.0) > 0.0)
+    slots = 0
+    for slot, weight in enumerate(weights[:6]):
+        if as_float(weight, 0.0) <= 0.0:
+            continue
+        if slot <= 3 or faction_project_allowed(faction, slot):
+            slots += 1
     return slots, slots * DEFAULT_GLOBAL_CONFIG["researchBonusPerSlotInUse"]
 
 
@@ -2574,6 +3514,635 @@ def scenario_customizations(indexed: IndexedState) -> dict[str, Any]:
 
 def scenario_float(indexed: IndexedState, key: str, default: float = 1.0) -> float:
     return as_float(scenario_customizations(indexed).get(key), default)
+
+
+def research_speed_modifier(indexed: IndexedState) -> float:
+    value = scenario_float(indexed, "researchSpeedMultiplier", 1.0)
+    return value if value > 0.0 else 1.0
+
+
+def template_display(template_name: str | None, template: dict[str, Any]) -> str | None:
+    if not template_name and not template:
+        return None
+    return template.get("_displayName") or template.get("friendlyName") or template_name
+
+
+def tech_template_cost(indexed: IndexedState, template: dict[str, Any]) -> float:
+    cost = as_float(template.get("researchCost"), 0.0)
+    if template.get("endGameTech"):
+        global_research = first_value(indexed, "TIGlobalResearchState") or {}
+        category = template.get("techCategory")
+        completed_by_category = global_research.get("endGameTechsCompletedByCategory")
+        completed = as_float(completed_by_category.get(category), 0.0) if isinstance(completed_by_category, dict) else 0.0
+        cost *= 1.0 + completed
+    return cost / research_speed_modifier(indexed)
+
+
+def project_template_cost(indexed: IndexedState, template: dict[str, Any], faction: dict[str, Any]) -> float:
+    cost = as_float(template.get("researchCost"), 0.0)
+    if template.get("repeatable"):
+        template_name = template.get("dataName")
+        finished = faction.get("finishedProjectNames") if isinstance(faction.get("finishedProjectNames"), list) else []
+        cost *= 1.0 + sum(1 for name in finished if name == template_name)
+    return cost / research_speed_modifier(indexed)
+
+
+def current_save_datetime(indexed: IndexedState) -> datetime | None:
+    time_state = first_value(indexed, "TITimeState") or {}
+    return ti_datetime(time_state.get("currentDateTime"))
+
+
+def eta_from_daily(indexed: IndexedState, remaining: float, daily: float) -> dict[str, Any]:
+    if remaining <= 0.0:
+        days = 0.0
+    elif daily > 0.0:
+        days = remaining / daily
+    else:
+        return {"days": None, "date": None}
+    current = current_save_datetime(indexed)
+    eta_date = None
+    if current is not None:
+        try:
+            eta_date = (current + timedelta(days=days)).date().isoformat()
+        except OverflowError:
+            eta_date = None
+    return {"days": days, "date": eta_date}
+
+
+def faction_project_allowed(faction: dict[str, Any], slot: int) -> bool:
+    if slot == 3:
+        return True
+    if slot == 4:
+        return bool(faction.get("orgProjectSlotUnlocked"))
+    if slot == 5:
+        return bool(faction.get("habProjectSlotUnlocked"))
+    return False
+
+
+def faction_project_slots(faction: dict[str, Any]) -> list[int]:
+    return [slot for slot in range(3, 6) if faction_project_allowed(faction, slot)]
+
+
+def faction_research_weights(faction: dict[str, Any]) -> list[float]:
+    raw = faction.get("researchWeights") if isinstance(faction.get("researchWeights"), list) else []
+    return [as_float(raw[index], 0.0) if index < len(raw) else 0.0 for index in range(6)]
+
+
+def faction_total_research_weights(faction: dict[str, Any]) -> float:
+    weights = faction_research_weights(faction)
+    return (
+        weights[0]
+        + weights[1]
+        + weights[2]
+        + weights[3]
+        + (weights[4] if faction_project_allowed(faction, 4) else 0.0)
+        + (weights[5] if faction_project_allowed(faction, 5) else 0.0)
+    )
+
+
+def faction_fraction_weight_in_slot(faction: dict[str, Any], slot: int) -> float:
+    weights = faction_research_weights(faction)
+    total = faction_total_research_weights(faction)
+    if slot < 0 or slot >= len(weights) or total <= 0.0:
+        return 0.0
+    return weights[slot] / total
+
+
+def project_progress_by_slot(faction: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    projects = faction.get("currentProjectProgress") if isinstance(faction.get("currentProjectProgress"), list) else []
+    result: dict[int, dict[str, Any]] = {}
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        slot = int(as_float(project.get("slot"), -1.0))
+        if slot >= 0:
+            result[slot] = project
+    return result
+
+
+def tech_bonus_sum(bonuses: Any, category: str | None) -> float:
+    if not category or not isinstance(bonuses, list):
+        return 0.0
+    total = 0.0
+    for bonus in bonuses:
+        if isinstance(bonus, dict) and bonus.get("category") == category:
+            total += as_float(bonus.get("bonus"), 0.0)
+    return total
+
+
+def diminishing_research_modifier(value: float) -> float:
+    if value > 0.5:
+        overage = value - 0.5
+        return 0.5 + 0.5 * (overage / (overage + 2.0))
+    return value
+
+
+def active_faction_councilors(indexed: IndexedState, faction: dict[str, Any]) -> list[dict[str, Any]]:
+    councilors: list[dict[str, Any]] = []
+    for councilor_id in faction_councilor_ids(faction):
+        councilor = state_value_by_id(indexed, councilor_id)
+        if isinstance(councilor, dict):
+            councilors.append(councilor)
+    return councilors
+
+
+def faction_hab_category_modifier(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]],
+    category: str | None,
+) -> float:
+    total = 0.0
+    for module in active_modules_in_sectors(indexed, faction_sector_states(indexed, faction)):
+        template = hab_module_templates.get(module.get("templateName"), {})
+        total += tech_bonus_sum(template.get("techBonuses"), category)
+    return diminishing_research_modifier(total)
+
+
+def faction_org_category_modifier(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    org_templates: dict[str, dict[str, Any]],
+    category: str | None,
+) -> float:
+    total = 0.0
+    for councilor in active_faction_councilors(indexed, faction):
+        for org_ref in councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []:
+            org = state_value_by_id(indexed, ref_id(org_ref))
+            if not isinstance(org, dict) or not org.get("applyingBonuses"):
+                continue
+            template = org_templates.get(org.get("templateName"), {})
+            bonuses = org.get("techBonuses")
+            if not isinstance(bonuses, list) or not bonuses:
+                bonuses = template.get("techBonuses")
+            total += tech_bonus_sum(bonuses, category)
+    return diminishing_research_modifier(total)
+
+
+def faction_trait_category_modifier(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    category: str | None,
+) -> float:
+    total = 0.0
+    for councilor in active_faction_councilors(indexed, faction):
+        for trait_name in councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []:
+            total += tech_bonus_sum(trait_templates.get(trait_name, {}).get("techBonuses"), category)
+    return diminishing_research_modifier(total)
+
+
+def faction_investigations_modifier(faction: dict[str, Any], category: str | None) -> float:
+    return as_float(faction.get("alienInvestigations"), 0.0) / 100.0 if category == "Xenology" else 0.0
+
+
+def fleet_in_earth_system(indexed: IndexedState, fleet: dict[str, Any]) -> bool:
+    body_refs = []
+    orbit = state_value_by_id(indexed, ref_id(fleet.get("orbitState")))
+    if isinstance(orbit, dict):
+        body_refs.append(orbit.get("barycenter"))
+    body_refs.append(fleet.get("barycenter"))
+    trajectory = fleet.get("trajectory") if isinstance(fleet.get("trajectory"), dict) else {}
+    body_refs.append(trajectory.get("commonBarycenter"))
+    for body_ref in body_refs:
+        body = state_value_by_id(indexed, ref_id(body_ref))
+        if isinstance(body, dict) and body.get("templateName") in {"Earth", "Luna"}:
+            return True
+    return False
+
+
+def faction_fleet_category_modifier(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    utility_module_templates: dict[str, dict[str, Any]],
+    category: str | None,
+) -> float:
+    if category != "SpaceScience":
+        return 0.0
+    designs = faction_ship_designs(faction)
+    total = 0.0
+    for fleet_ref in faction.get("fleets") if isinstance(faction.get("fleets"), list) else []:
+        fleet = state_value_by_id(indexed, ref_id(fleet_ref))
+        if not isinstance(fleet, dict) or fleet.get("dockedLocation") or fleet_in_earth_system(indexed, fleet):
+            continue
+        for ship_ref in fleet.get("ships") if isinstance(fleet.get("ships"), list) else []:
+            ship = state_value_by_id(indexed, ref_id(ship_ref))
+            if not isinstance(ship, dict):
+                continue
+            design = designs.get(str(ship.get("templateName")), {})
+            for entry in design.get("moduleTemplateEntries") if isinstance(design.get("moduleTemplateEntries"), list) else []:
+                if not isinstance(entry, dict):
+                    continue
+                module = utility_module_templates.get(str(entry.get("moduleName")), {})
+                special_rules = module.get("specialModuleRules") if isinstance(module.get("specialModuleRules"), list) else []
+                if "GenerateSpaceScienceBonus" in special_rules:
+                    total += as_float(module.get("specialModuleValue"), 0.0)
+    return diminishing_research_modifier(total)
+
+
+def faction_category_modifier_components(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    org_templates: dict[str, dict[str, Any]],
+    hab_module_templates: dict[str, dict[str, Any]],
+    utility_module_templates: dict[str, dict[str, Any]],
+    category: str | None,
+) -> dict[str, float]:
+    components = {
+        "habs": faction_hab_category_modifier(indexed, faction, hab_module_templates, category),
+        "orgs": faction_org_category_modifier(indexed, faction, org_templates, category),
+        "traits": faction_trait_category_modifier(indexed, faction, trait_templates, category),
+        "investigations": faction_investigations_modifier(faction, category),
+        "fleets": faction_fleet_category_modifier(indexed, faction, utility_module_templates, category),
+    }
+    components["sum"] = sum(components.values())
+    return components
+
+
+def project_facility_counts(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    hab_module_templates: dict[str, dict[str, Any]],
+) -> dict[str, float]:
+    base_incomes = faction.get("baseIncomes_year") if isinstance(faction.get("baseIncomes_year"), dict) else {}
+    trait_projects = 0.0
+    org_projects = 0.0
+    for councilor in active_faction_councilors(indexed, faction):
+        for trait_name in councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []:
+            trait_projects += as_float(trait_templates.get(trait_name, {}).get("incomeProjects"), 0.0)
+        for org_ref in councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []:
+            org = state_value_by_id(indexed, ref_id(org_ref))
+            if isinstance(org, dict) and org.get("applyingBonuses"):
+                org_projects += as_float(org.get("projectCapacityGranted"), 0.0)
+
+    hab_projects = 0.0
+    for module in active_modules_in_sectors(indexed, faction_sector_states(indexed, faction)):
+        template = hab_module_templates.get(module.get("templateName"), {})
+        hab_projects += as_float(template.get("incomeProjects"), 0.0)
+
+    return {
+        "base": as_float(base_incomes.get("Projects"), 0.0),
+        "traits": trait_projects,
+        "orgs": org_projects,
+        "habs": hab_projects,
+    }
+
+
+def multiple_facilities_multiplier(counts: dict[str, float]) -> float:
+    facilities = (
+        counts.get("base", 0.0)
+        + counts.get("traits", 0.0)
+        + max(0.0, counts.get("orgs", 0.0) - 1.0)
+        + max(0.0, counts.get("habs", 0.0) - 1.0)
+    )
+    if facilities <= 0.0:
+        return 0.0
+    return (
+        min(facilities, 20.0) * DEFAULT_GLOBAL_CONFIG["first20ExtraProjectBonusPct"]
+        + min(max(facilities - 20.0, 0.0), 20.0) * DEFAULT_GLOBAL_CONFIG["second20ExtraProjectBonusPct"]
+        + max(facilities - 40.0, 0.0) * DEFAULT_GLOBAL_CONFIG["overageExtraProjectBonusPct"]
+    )
+
+
+def active_slots_with_category(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    tech_templates: dict[str, dict[str, Any]],
+    project_templates: dict[str, dict[str, Any]],
+    category: str | None,
+) -> int:
+    if not category:
+        return 0
+    weights = faction_research_weights(faction)
+    count = 0
+    global_research = first_value(indexed, "TIGlobalResearchState") or {}
+    tech_progress = global_research.get("techProgress") if isinstance(global_research.get("techProgress"), list) else []
+    for slot in range(3):
+        if weights[slot] <= 0.0 or slot >= len(tech_progress):
+            continue
+        template = tech_templates.get((tech_progress[slot] or {}).get("techTemplateName"), {})
+        if template.get("techCategory") == category:
+            count += 1
+
+    projects = project_progress_by_slot(faction)
+    for slot in range(3, 6):
+        if weights[slot] <= 0.0 or not faction_project_allowed(faction, slot):
+            continue
+        template = project_templates.get(projects.get(slot, {}).get("projectTemplateName"), {})
+        if template.get("techCategory") == category:
+            count += 1
+    return count
+
+
+def distributed_category_modifier(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    org_templates: dict[str, dict[str, Any]],
+    hab_module_templates: dict[str, dict[str, Any]],
+    utility_module_templates: dict[str, dict[str, Any]],
+    tech_templates: dict[str, dict[str, Any]],
+    project_templates: dict[str, dict[str, Any]],
+    category: str | None,
+) -> dict[str, Any]:
+    components = faction_category_modifier_components(
+        indexed,
+        faction,
+        trait_templates,
+        org_templates,
+        hab_module_templates,
+        utility_module_templates,
+        category,
+    )
+    active_same_category = active_slots_with_category(indexed, faction, tech_templates, project_templates, category)
+    penalty_power = max(active_same_category - 1, 0)
+    distributed = components["sum"] * (DEFAULT_GLOBAL_CONFIG["categoryBonusPenaltyPerExtraSlot"] ** penalty_power)
+    return {
+        "category": category,
+        "components": components,
+        "activeSlotsWithCategory": active_same_category,
+        "extraSlotPenaltyPower": penalty_power,
+        "distributed": distributed,
+    }
+
+
+def research_points_to_slot(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    slot: int,
+    base_daily: float,
+    tech_templates: dict[str, dict[str, Any]],
+    project_templates: dict[str, dict[str, Any]],
+    trait_templates: dict[str, dict[str, Any]],
+    org_templates: dict[str, dict[str, Any]],
+    hab_module_templates: dict[str, dict[str, Any]],
+    utility_module_templates: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    weights = faction_research_weights(faction)
+    total_weights = faction_total_research_weights(faction)
+    if slot < 0 or slot >= len(weights) or total_weights <= 0.0:
+        return {"daily": 0.0, "weight": 0.0, "weightFraction": 0.0, "modifiers": None}
+
+    is_project = slot >= 3
+    template: dict[str, Any] = {}
+    if is_project:
+        template = project_templates.get(project_progress_by_slot(faction).get(slot, {}).get("projectTemplateName"), {})
+    else:
+        global_research = first_value(indexed, "TIGlobalResearchState") or {}
+        tech_progress = global_research.get("techProgress") if isinstance(global_research.get("techProgress"), list) else []
+        if slot < len(tech_progress):
+            template = tech_templates.get((tech_progress[slot] or {}).get("techTemplateName"), {})
+
+    category = template.get("techCategory")
+    category_modifier = distributed_category_modifier(
+        indexed,
+        faction,
+        trait_templates,
+        org_templates,
+        hab_module_templates,
+        utility_module_templates,
+        tech_templates,
+        project_templates,
+        category,
+    )
+    project_facilities = project_facility_counts(indexed, faction, trait_templates, hab_module_templates) if is_project else None
+    project_bonus = multiple_facilities_multiplier(project_facilities or {}) if is_project else 0.0
+    effective_daily = base_daily * (1.0 + as_float(category_modifier["distributed"], 0.0) + project_bonus)
+    weight_fraction = weights[slot] / total_weights
+    return {
+        "daily": effective_daily * weight_fraction,
+        "weight": weights[slot],
+        "weightFraction": weight_fraction,
+        "category": category,
+        "modifiers": {
+            "category": category_modifier,
+            "projectFacilities": project_facilities,
+            "projectFacilityBonus": project_bonus if is_project else None,
+            "effectiveMultiplier": 1.0 + as_float(category_modifier["distributed"], 0.0) + project_bonus,
+        },
+    }
+
+
+def faction_base_research_daily(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction: dict[str, Any],
+) -> float:
+    name = faction.get("templateName") or faction.get("displayName")
+    if not name or faction.get("templateName") == "AlienCouncil":
+        return 0.0
+    return as_float(calculate_research_breakdown(indexed, templates_dir, str(name), include_details=False)["daily"]["beforeDistribution"], 0.0)
+
+
+def global_research_contributions(indexed: IndexedState, progress: dict[str, Any]) -> list[dict[str, Any]]:
+    contributions = []
+    for pair in progress.get("factionContributions") if isinstance(progress.get("factionContributions"), list) else []:
+        if not isinstance(pair, dict):
+            continue
+        faction_id = ref_id(pair.get("Key"))
+        faction = state_value_by_id(indexed, faction_id)
+        amount = as_float(pair.get("Value"), 0.0)
+        contributions.append(
+            {
+                "faction": faction_brief(faction_id, faction) if isinstance(faction, dict) else {"id": faction_id},
+                "amount": amount,
+            }
+        )
+    contributions.sort(key=lambda item: -as_float(item.get("amount"), 0.0))
+    return contributions
+
+
+def research_progress_row(
+    indexed: IndexedState,
+    template_name: str | None,
+    template: dict[str, Any],
+    accumulated: float,
+    cost: float,
+) -> dict[str, Any]:
+    remaining = max(cost - accumulated, 0.0)
+    return {
+        "template": template_name,
+        "display": template_display(template_name, template),
+        "category": template.get("techCategory"),
+        "progress": accumulated,
+        "cost": cost,
+        "remaining": remaining,
+        "progressFraction": accumulated / cost if cost > 0.0 else None,
+    }
+
+
+def calculate_research_ui(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction_name: str | None = None,
+) -> dict[str, Any]:
+    trait_templates = load_trait_templates(templates_dir)
+    org_templates = load_named_templates(templates_dir, "TIOrgTemplate.json")
+    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    utility_module_templates = load_named_templates(templates_dir, "TIUtilityModuleTemplate.json")
+    tech_templates = load_named_templates(templates_dir, "TITechTemplate.json")
+    project_templates = load_named_templates(templates_dir, "TIProjectTemplate.json")
+
+    faction_id, faction = find_faction_state(indexed, faction_name)
+    selected_base_daily = faction_base_research_daily(indexed, templates_dir, faction)
+    all_human_factions = [
+        (other_id, other, faction_base_research_daily(indexed, templates_dir, other))
+        for other_id, other in human_faction_entries(indexed)
+    ]
+
+    global_research = first_value(indexed, "TIGlobalResearchState") or {}
+    tech_progress = global_research.get("techProgress") if isinstance(global_research.get("techProgress"), list) else []
+    global_slots = []
+    for slot, progress in enumerate(tech_progress[:3]):
+        if not isinstance(progress, dict):
+            continue
+        template_name = progress.get("techTemplateName")
+        template = tech_templates.get(template_name, {})
+        accumulated = as_float(progress.get("accumulatedResearch"), 0.0)
+        cost = tech_template_cost(indexed, template)
+        row = research_progress_row(indexed, template_name, template, accumulated, cost)
+        selected_slot = research_points_to_slot(
+            indexed,
+            faction,
+            slot,
+            selected_base_daily,
+            tech_templates,
+            project_templates,
+            trait_templates,
+            org_templates,
+            hab_module_templates,
+            utility_module_templates,
+        )
+        total_daily = 0.0
+        faction_daily = []
+        for other_id, other, other_base_daily in all_human_factions:
+            points = research_points_to_slot(
+                indexed,
+                other,
+                slot,
+                other_base_daily,
+                tech_templates,
+                project_templates,
+                trait_templates,
+                org_templates,
+                hab_module_templates,
+                utility_module_templates,
+            )
+            total_daily += as_float(points.get("daily"), 0.0)
+            faction_daily.append(
+                {
+                    "faction": faction_brief(other_id, other),
+                    "daily": points.get("daily"),
+                    "weightFraction": points.get("weightFraction"),
+                }
+            )
+        faction_daily.sort(key=lambda item: -as_float(item.get("daily"), 0.0))
+        row.update(
+            {
+                "slot": slot,
+                "selector": ref_summary(indexed, progress.get("selector")),
+                "selectedFactionDaily": selected_slot["daily"],
+                "selectedFactionWeight": selected_slot["weight"],
+                "selectedFactionWeightFraction": selected_slot["weightFraction"],
+                "totalDaily": total_daily,
+                "eta": eta_from_daily(indexed, as_float(row["remaining"], 0.0), total_daily),
+                "selectedFactionModifiers": selected_slot["modifiers"],
+                "contributions": global_research_contributions(indexed, progress),
+                "dailyByFaction": faction_daily,
+            }
+        )
+        global_slots.append(clean_numbers(row, 6))
+
+    project_slots = []
+    paused_projects = []
+    projects_by_slot = project_progress_by_slot(faction)
+    for slot in faction_project_slots(faction):
+        progress = projects_by_slot.get(slot)
+        if not progress:
+            project_slots.append({"slot": slot, "empty": True})
+            continue
+        template_name = progress.get("projectTemplateName")
+        template = project_templates.get(template_name, {})
+        accumulated = as_float(progress.get("accumulatedResearch"), 0.0)
+        cost = project_template_cost(indexed, template, faction)
+        row = research_progress_row(indexed, template_name, template, accumulated, cost)
+        selected_slot = research_points_to_slot(
+            indexed,
+            faction,
+            slot,
+            selected_base_daily,
+            tech_templates,
+            project_templates,
+            trait_templates,
+            org_templates,
+            hab_module_templates,
+            utility_module_templates,
+        )
+        row.update(
+            {
+                "slot": slot,
+                "daily": selected_slot["daily"],
+                "weight": selected_slot["weight"],
+                "weightFraction": selected_slot["weightFraction"],
+                "eta": eta_from_daily(indexed, as_float(row["remaining"], 0.0), as_float(selected_slot["daily"], 0.0)),
+                "modifiers": selected_slot["modifiers"],
+            }
+        )
+        project_slots.append(clean_numbers(row, 6))
+
+    active_project_slots = set(faction_project_slots(faction))
+    for slot, progress in sorted(projects_by_slot.items()):
+        if slot in active_project_slots:
+            continue
+        template_name = progress.get("projectTemplateName")
+        template = project_templates.get(template_name, {})
+        cost = project_template_cost(indexed, template, faction)
+        accumulated = as_float(progress.get("accumulatedResearch"), 0.0)
+        row = research_progress_row(indexed, template_name, template, accumulated, cost)
+        row.update({"slot": slot, "paused": True, "reason": "slot>=6 or project slot not currently unlocked"})
+        paused_projects.append(clean_numbers(row, 6))
+
+    weights = faction_research_weights(faction)
+    fractions = {str(slot): faction_fraction_weight_in_slot(faction, slot) for slot in range(6)}
+    return clean_numbers(
+        {
+            "faction": faction_brief(faction_id, faction),
+            "date": (first_value(indexed, "TITimeState") or {}).get("currentDateTime"),
+            "researchIncome": {
+                "baseDailyBeforeDistribution": selected_base_daily,
+                "note": "Research screen slot rates use TIFactionState.GetDailyIncome(Research) before distribution-slot bonus.",
+            },
+            "slotAllocation": {
+                "weights": weights,
+                "totalActiveWeights": faction_total_research_weights(faction),
+                "fractions": fractions,
+                "activeProjectSlots": faction_project_slots(faction),
+                "orgProjectSlotUnlocked": bool(faction.get("orgProjectSlotUnlocked")),
+                "habProjectSlotUnlocked": bool(faction.get("habProjectSlotUnlocked")),
+            },
+            "globalResearch": global_slots,
+            "projects": {
+                "active": project_slots,
+                "pausedOrStored": paused_projects,
+            },
+            "sourceNotes": [
+                "Global research progress comes from TIGlobalResearchState.techProgress.",
+                "Faction projects come from TIFactionState.currentProjectProgress; only slots 3, 4, and 5 can be currently active.",
+                "Displayed slot rates follow ResearchPanelController: PointsToSlot(slot, GetDailyIncome(Research), TotalResearchWeights).",
+                "Global tech ETA follows TIGlobalResearchState.TechCompletionDate by summing all human factions' slot output.",
+            ],
+        },
+        6,
+    )
+
+
+def command_research_ui(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    result = calculate_research_ui(indexed, templates_dir, args.faction)
+    print_json(result, compact=args.compact)
 
 
 def faction_is_player(indexed: IndexedState, faction: dict[str, Any]) -> bool:
@@ -3965,6 +5534,10 @@ def build_parser() -> argparse.ArgumentParser:
     research.add_argument("--details", action="store_true", help="Include nation/councilor/hab source details.")
     add_compact_flag(research)
 
+    research_ui = subparsers.add_parser("research-ui", help="Reconstruct the Research screen's active global techs and projects.")
+    research_ui.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
+    add_compact_flag(research_ui)
+
     topbar = subparsers.add_parser("topbar", help="Reconstruct the top resource bar values for a faction.")
     topbar.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
     topbar.add_argument("--details", action="store_true", help="Include yearly source components for each resource.")
@@ -3988,6 +5561,21 @@ def build_parser() -> argparse.ArgumentParser:
     hab_ui = subparsers.add_parser("hab-ui", help="Calculate hab UI panel values from raw save values.")
     hab_ui.add_argument("name")
     add_compact_flag(hab_ui)
+
+    hab_slots = subparsers.add_parser("hab-slots", help="List habs with currently usable empty slots.")
+    hab_slots.add_argument("--faction", help="Faction template/display/code. Defaults to the player faction.")
+    hab_slots.add_argument("--all", action="store_true", help="Include habs with zero usable empty slots.")
+    hab_slots.add_argument("--module-counts", action="store_true", help="Include per-hab module template counts.")
+    add_compact_flag(hab_slots)
+
+    hab_plan = subparsers.add_parser("hab-plan", help="Recommend module candidates for current or future hab slots.")
+    hab_plan.add_argument("name", nargs="?", help="Specific hab name/id fragment. Omit to scan faction habs.")
+    hab_plan.add_argument("--faction", help="Faction template/display/code. Defaults to the player faction.")
+    hab_plan.add_argument("--upgrading-to-tier", type=int, help="Only include habs whose core is upgrading to this tier.")
+    hab_plan.add_argument("--focus", choices=HAB_PLAN_FOCUS_CHOICES, default="balanced")
+    hab_plan.add_argument("--top", type=int, default=8, help="Candidate rows per category.")
+    hab_plan.add_argument("--all", action="store_true", help="Include habs with no planned empty slots.")
+    add_compact_flag(hab_plan)
 
     types = subparsers.add_parser("types", help="Print gamestate type counts.")
     types.add_argument("--limit", type=int, default=0)
@@ -4027,6 +5615,9 @@ def main(argv: list[str] | None = None) -> int:
         if command == "research":
             command_research(save_path, templates_dir, args)
             return 0
+        if command == "research-ui":
+            command_research_ui(save_path, templates_dir, args)
+            return 0
         if command == "topbar":
             command_topbar(save_path, templates_dir, args)
             return 0
@@ -4041,6 +5632,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if command == "hab-ui":
             command_hab_ui(save_path, templates_dir, args)
+            return 0
+        if command == "hab-slots":
+            command_hab_slots(save_path, templates_dir, args)
+            return 0
+        if command == "hab-plan":
+            command_hab_plan(save_path, templates_dir, args)
             return 0
 
         snapshot, cache_path_value, cache_hit = load_or_build_snapshot(
