@@ -2944,6 +2944,61 @@ def sorted_candidates(candidates: list[dict[str, Any]], focus: str, top: int) ->
     )[:top]
 
 
+def candidate_focus_score(candidate: dict[str, Any] | None, focus: str) -> float:
+    if not candidate:
+        return 0.0
+    return as_float((candidate.get("scores") or {}).get(focus), 0.0)
+
+
+def opportunity_cost_baseline(candidates: list[dict[str, Any]], focus: str) -> dict[str, Any]:
+    affordable = [candidate for candidate in candidates if candidate_affordable(candidate)]
+    if not affordable:
+        return {"template": None, "display": None, "score": 0.0}
+    best = max(
+        affordable,
+        key=lambda candidate: (
+            candidate_focus_score(candidate, focus),
+            candidate_focus_score(candidate, "balanced"),
+            int(as_float(candidate.get("tier"), 0.0)),
+            str(candidate.get("display") or candidate.get("template")),
+        ),
+    )
+    score = max(candidate_focus_score(best, focus), 0.0)
+    if score <= 0.0:
+        return {"template": None, "display": None, "score": 0.0}
+    return {
+        "template": best.get("template"),
+        "display": best.get("display"),
+        "score": score,
+    }
+
+
+def opportunity_cost_for_score(score: float, baseline_score: float) -> float:
+    return max(baseline_score - score, 0.0)
+
+
+def opportunity_costs_for_candidate(candidate: dict[str, Any], baselines: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    costs: dict[str, Any] = {}
+    for focus, baseline in baselines.items():
+        baseline_score = as_float(baseline.get("score"), 0.0)
+        score = candidate_focus_score(candidate, focus)
+        cost = opportunity_cost_for_score(score, baseline_score)
+        costs[focus] = {
+            "bestAlternative": baseline,
+            "score": score,
+            "cost": cost,
+            "scoreAfterOpportunityCost": score - cost,
+        }
+    return costs
+
+
+def annotate_candidate_opportunity_costs(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    baselines = {focus: opportunity_cost_baseline(candidates, focus) for focus in HAB_PLAN_FOCUS_CHOICES}
+    for candidate in candidates:
+        candidate["opportunityCosts"] = clean_numbers(opportunity_costs_for_candidate(candidate, baselines), 6)
+    return candidates
+
+
 def power_candidates(candidates: list[dict[str, Any]], top: int) -> list[dict[str, Any]]:
     return sorted(
         [candidate for candidate in candidates if as_float(candidate.get("power"), 0.0) > 0.0],
@@ -2980,7 +3035,15 @@ def add_monthly_delta(target: dict[str, dict[str, float]], delta: dict[str, dict
             target_row[key] = as_float(target_row.get(key), 0.0) + value
 
 
-def suggested_fill_entry(candidate: dict[str, Any], count: int, reason: str) -> dict[str, Any]:
+def suggested_fill_entry(
+    candidate: dict[str, Any],
+    count: int,
+    reason: str,
+    focus: str,
+    baseline_score: float,
+) -> dict[str, Any]:
+    score_each = candidate_focus_score(candidate, focus)
+    opportunity_cost_each = opportunity_cost_for_score(score_each, baseline_score)
     return {
         "count": count,
         "template": candidate.get("template"),
@@ -2993,6 +3056,14 @@ def suggested_fill_entry(candidate: dict[str, Any], count: int, reason: str) -> 
         "missionControlTotal": int(as_float(candidate.get("missionControl"), 0.0)) * count,
         "monthlyDeltaTotal": monthly_delta_times(candidate.get("monthlyDelta") or {}, count),
         "scoresEach": candidate.get("scores"),
+        "opportunityCost": {
+            "focus": focus,
+            "scoreEach": score_each,
+            "bestAlternativeScoreEach": baseline_score,
+            "costEach": opportunity_cost_each,
+            "costTotal": opportunity_cost_each * count,
+            "scoreAfterOpportunityCostTotal": (score_each - opportunity_cost_each) * count,
+        },
     }
 
 
@@ -3018,6 +3089,8 @@ def suggested_hab_fill(
     affordable_candidates = [candidate for candidate in candidates if candidate_affordable(candidate)]
     focus_pool = sorted_candidates(affordable_candidates, focus, len(affordable_candidates))
     support_pool = power_candidates(affordable_candidates, len(affordable_candidates))
+    opportunity_baseline = opportunity_cost_baseline(affordable_candidates, focus)
+    baseline_score = as_float(opportunity_baseline.get("score"), 0.0)
     best_plan: dict[str, Any] | None = None
 
     for focus_candidate in focus_pool[:20]:
@@ -3049,8 +3122,14 @@ def suggested_hab_fill(
                     focus_score * focus_count
                     + support_score * support_count
                 )
+                opportunity_cost = max(baseline_score * slots_filled - plan_score, 0.0)
+                unfilled_opportunity_cost = baseline_score * max(slots - slots_filled, 0)
+                score_after_opportunity_cost = plan_score - opportunity_cost
                 plan = {
                     "score": plan_score,
+                    "opportunityCost": opportunity_cost,
+                    "unfilledOpportunityCost": unfilled_opportunity_cost,
+                    "scoreAfterOpportunityCost": score_after_opportunity_cost,
                     "slotsFilled": slots_filled,
                     "powerAfter": power_after,
                     "mcAfter": mc_after,
@@ -3060,11 +3139,13 @@ def suggested_hab_fill(
                     "supportCount": support_count,
                 }
                 if best_plan is None or (
+                    plan["scoreAfterOpportunityCost"],
                     plan["score"],
                     plan["focusCount"],
                     -plan["supportCount"],
                     plan["powerAfter"],
                 ) > (
+                    best_plan["scoreAfterOpportunityCost"],
                     best_plan["score"],
                     best_plan["focusCount"],
                     -best_plan["supportCount"],
@@ -3086,7 +3167,13 @@ def suggested_hab_fill(
 
     monthly_total: dict[str, dict[str, float]] = {}
     entries = [
-        suggested_fill_entry(best_plan["focusCandidate"], best_plan["focusCount"], f"top {focus} score"),
+        suggested_fill_entry(
+            best_plan["focusCandidate"],
+            best_plan["focusCount"],
+            f"top {focus} score",
+            focus,
+            baseline_score,
+        ),
     ]
     add_monthly_delta(monthly_total, best_plan["focusCandidate"].get("monthlyDelta") or {}, best_plan["focusCount"])
     if best_plan["supportCandidate"] and best_plan["supportCount"]:
@@ -3095,6 +3182,8 @@ def suggested_hab_fill(
                 best_plan["supportCandidate"],
                 best_plan["supportCount"],
                 "power support for selected fill",
+                focus,
+                baseline_score,
             )
         )
         add_monthly_delta(monthly_total, best_plan["supportCandidate"].get("monthlyDelta") or {}, best_plan["supportCount"])
@@ -3108,7 +3197,21 @@ def suggested_hab_fill(
             "missionControlAvailableAfter": best_plan["mcAfter"],
             "monthlyDeltaTotal": monthly_total,
             "moduleCounts": entries,
-            "method": "single focus module type plus optional single power-support type",
+            "score": {
+                "focus": focus,
+                "gross": best_plan["score"],
+                "opportunityCost": best_plan["opportunityCost"],
+                "unfilledSlotOpportunityCost": best_plan["unfilledOpportunityCost"],
+                "totalOpportunityCostIncludingUnfilledSlots": (
+                    best_plan["opportunityCost"] + best_plan["unfilledOpportunityCost"]
+                ),
+                "afterOpportunityCost": best_plan["scoreAfterOpportunityCost"],
+                "afterOpportunityCostIncludingUnfilledSlots": (
+                    best_plan["scoreAfterOpportunityCost"] - best_plan["unfilledOpportunityCost"]
+                ),
+                "bestAlternativePerSlot": opportunity_baseline,
+            },
+            "method": "single focus module type plus optional single power-support type, ranked by focus score after slot opportunity cost",
         },
         6,
     )
@@ -3147,6 +3250,7 @@ def hab_plan_row(
         mc_available,
         topbar,
     )
+    annotate_candidate_opportunity_costs(candidates)
     return {
         "id": hab_id,
         "display": hab.get("displayName"),
@@ -3250,6 +3354,11 @@ def calculate_hab_plan(
                 "balanced": {
                     "formula": "research + resources",
                     "weights": {"research": 1.0, "resources": 1.0, "projects": 0.0, "category-bonus": 0.0},
+                },
+                "opportunityCost": {
+                    "formula": "max(max(best affordable candidate score for focus, 0) - candidate score for focus, 0) per occupied slot",
+                    "suggestedFill": "plans are ranked by gross focus score minus slot opportunity cost",
+                    "unfilledSlots": "reported separately as foregone best-alternative score, but not charged when ranking occupied-module choices",
                 },
             },
             "factionConstraints": {
