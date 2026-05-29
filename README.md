@@ -17,6 +17,7 @@ python .\tools\ti_save_parser.py nation-ui "유럽 연합"
 python .\tools\ti_save_parser.py hab-ui "제303기초연구단"
 python .\tools\ti_save_parser.py hab-slots --faction ResistCouncil
 python .\tools\ti_save_parser.py hab-plan --upgrading-to-tier 3 --focus research
+python .\tools\ti_save_parser.py project-analysis --top 10 --sort research-sustainable
 python .\tools\ti_save_parser.py research --details
 python .\tools\ti_save_parser.py research-ui
 python .\tools\ti_save_parser.py topbar --details
@@ -111,3 +112,16 @@ to a higher tier that will unlock those sectors.
 material weights rather than exact location-adjusted costs, filters out combat
 and objective-only modules for the economic planning view, and should be treated
 as a shortlist generator before committing construction in-game.
+Candidate monthly deltas are calculated by comparing the whole hab before and
+after a hypothetical completed module. For farm-style modules, negative support
+means reduced existing crew upkeep rather than resource production.
+
+The `project-analysis` command ranks available and stored faction projects on
+multiple transparent heuristic axes instead of choosing a final answer. It
+combines the current research slot model, active resource bottlenecks, direct
+project effects/resource grants, and hab modules that a project would unlock.
+Unlocked-module samples pretend the project is complete, scan current/planned
+empty hab slots, and report 1/2/4-module effects using the best current hab
+option. Treat those samples as LLM/human decision inputs: they do not solve the
+global construction queue, reserve power-support modules, or enforce global MC
+across every hypothetical build.
