@@ -106,6 +106,64 @@ class HabPlanTests(unittest.TestCase):
         self.assertEqual(fill["moduleCounts"][1]["count"], 1)
         self.assertEqual(fill["monthlyDeltaTotal"]["Research"]["net"], 40.0)
         self.assertNotIn("Projects", fill["monthlyDeltaTotal"])
+        self.assertEqual(fill["score"]["gross"], 40.0)
+        self.assertEqual(fill["score"]["opportunityCost"], 10.0)
+        self.assertEqual(fill["score"]["unfilledSlotOpportunityCost"], 0.0)
+        self.assertEqual(fill["score"]["totalOpportunityCostIncludingUnfilledSlots"], 10.0)
+        self.assertEqual(fill["score"]["afterOpportunityCost"], 30.0)
+        self.assertEqual(fill["score"]["afterOpportunityCostIncludingUnfilledSlots"], 30.0)
+        self.assertEqual(fill["score"]["bestAlternativePerSlot"]["template"], "ResearchLab")
+        self.assertEqual(fill["moduleCounts"][0]["opportunityCost"]["costTotal"], 0.0)
+        self.assertEqual(fill["moduleCounts"][1]["opportunityCost"]["costTotal"], 10.0)
+
+    def test_candidate_opportunity_costs_compare_against_best_affordable_slot_alternative(self):
+        candidates = [
+            {
+                "template": "ResearchLab",
+                "display": "Research Lab",
+                "tier": 2,
+                "affordableByTemplateWeights": True,
+                "scores": {"research": 10.0, "projects": 0.0, "category-bonus": 0.0, "resources": -1.0, "balanced": 9.0},
+            },
+            {
+                "template": "Reactor",
+                "display": "Reactor",
+                "tier": 2,
+                "affordableByTemplateWeights": True,
+                "scores": {"research": 0.0, "projects": 0.0, "category-bonus": 0.0, "resources": -2.0, "balanced": -2.0},
+            },
+        ]
+
+        ti.annotate_candidate_opportunity_costs(candidates)
+
+        self.assertEqual(candidates[0]["opportunityCosts"]["research"]["cost"], 0.0)
+        self.assertEqual(candidates[1]["opportunityCosts"]["research"]["bestAlternative"]["template"], "ResearchLab")
+        self.assertEqual(candidates[1]["opportunityCosts"]["research"]["cost"], 10.0)
+        self.assertEqual(candidates[1]["opportunityCosts"]["research"]["scoreAfterOpportunityCost"], -10.0)
+
+    def test_suggested_fill_reports_unfilled_slot_opportunity_separately(self):
+        candidates = [
+            {
+                "template": "UniqueLab",
+                "display": "Unique Lab",
+                "tier": 2,
+                "power": 0,
+                "missionControl": 0,
+                "onePerHab": True,
+                "affordableByTemplateWeights": True,
+                "fitsCurrentProjectedPower": True,
+                "scores": {"research": 10.0, "resources": 0.0, "balanced": 10.0},
+                "monthlyDelta": {"Research": {"income": 10.0, "support": 0.0, "net": 10.0}},
+            },
+        ]
+
+        fill = ti.suggested_hab_fill(candidates, slots=2, focus="research", projected_power=0, mc_available=0)
+
+        self.assertEqual(fill["slotsFilled"], 1)
+        self.assertEqual(fill["unfilledSlots"], 1)
+        self.assertEqual(fill["score"]["opportunityCost"], 0.0)
+        self.assertEqual(fill["score"]["unfilledSlotOpportunityCost"], 10.0)
+        self.assertEqual(fill["score"]["afterOpportunityCostIncludingUnfilledSlots"], 0.0)
 
     def test_projects_focus_is_explicitly_separate_from_research_focus(self):
         candidates = [

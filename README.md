@@ -19,10 +19,12 @@ python .\tools\ti_save_parser.py nation-ui "유럽 연합"
 python .\tools\ti_save_parser.py hab-ui "제303기초연구단"
 python .\tools\ti_save_parser.py hab-slots --faction ResistCouncil
 python .\tools\ti_save_parser.py hab-plan --upgrading-to-tier 3 --focus research
+python .\tools\ti_save_parser.py project-analysis --top 10 --sort research-sustainable
 python .\tools\ti_save_parser.py research --details
 python .\tools\ti_save_parser.py research-ui
 python .\tools\ti_save_parser.py research-plan --top 5
 python .\tools\ti_save_parser.py topbar --details
+python .\tools\build_research_catalog.py
 python .\tools\build_module_catalog.py
 python .\tools\ti_save_parser.py world-ui
 python .\tools\ti_save_parser.py advise "Lati Wirya" "중화민국"
@@ -84,6 +86,14 @@ Invicta install and writes `data/module_catalog.json` plus
 human-readable reference for module income, upkeep, crew, power, MC, CP cap,
 build cost, requirements, and derived tags.
 
+The research catalog generator reads global tech and faction project templates
+from the local Terra Invicta install and writes `data/research_catalog.json`
+plus `docs/research_catalog.md`. The JSON stores research prerequisites as
+explicit `all`/`any` boolean trees, plus derived graph indexes such as `edges`
+and `childrenByPrereq`. Save-specific completion, objectives, milestones,
+faction gates, and nation gates should be evaluated against that static catalog
+rather than baked into it.
+
 The `world-ui` command reconstructs the Intel screen's world tab values:
 population, GDP, global public opinion, resource market prices, environmental
 damage, active wars, and faction atrocity counts.
@@ -113,11 +123,28 @@ means monthly `Research` output only; `Projects` output and tech category
 bonuses are separate score axes and are not silently converted into research.
 Its `suggestedFill` output aggregates a transparent heuristic fill plan by
 module count and includes projected final power, MC availability, and monthly
-resource/research deltas. Locked placeholder slots are only included in
-`plannedEmpty` when the current core module is actively upgrading to a higher
-tier that will unlock those sectors.
+resource/research deltas. Candidate rows and suggested fills include slot
+opportunity costs: for each focus, the best affordable candidate's score is
+treated as the per-slot alternative value, and selected modules are charged for
+the focus score they give up. If every candidate is non-positive for that
+focus, the alternative value is zero. Locked placeholder slots are only
+included in `plannedEmpty` when the current core module is actively upgrading
+to a higher tier that will unlock those sectors.
 
 `hab-plan` is intentionally not a full optimizer yet. It uses template build
 material weights rather than exact location-adjusted costs, filters out combat
 and objective-only modules for the economic planning view, and should be treated
 as a shortlist generator before committing construction in-game.
+Candidate monthly deltas are calculated by comparing the whole hab before and
+after a hypothetical completed module. For farm-style modules, negative support
+means reduced existing crew upkeep rather than resource production.
+
+The `project-analysis` command ranks available and stored faction projects on
+multiple transparent heuristic axes instead of choosing a final answer. It
+combines the current research slot model, active resource bottlenecks, direct
+project effects/resource grants, and hab modules that a project would unlock.
+Unlocked-module samples pretend the project is complete, scan current/planned
+empty hab slots, and report 1/2/4-module effects using the best current hab
+option. Treat those samples as LLM/human decision inputs: they do not solve the
+global construction queue, reserve power-support modules, or enforce global MC
+across every hypothetical build.
