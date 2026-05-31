@@ -17,6 +17,7 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from itertools import combinations
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -230,6 +231,14 @@ ORG_ATTRIBUTE_FIELDS = {
     "Administration": "administration",
     "Science": "science",
     "Security": "security",
+}
+ORG_PLAN_SCORE_ATTRIBUTES = tuple(ORG_ATTRIBUTE_FIELDS)
+ORG_PLAN_FOCUS_CHOICES = ("balanced", *(attribute.casefold() for attribute in ORG_PLAN_SCORE_ATTRIBUTES))
+ORG_PLAN_COST_FIELDS = {
+    "Money": "costMoney",
+    "Influence": "costInfluence",
+    "Operations": "costOps",
+    "Boost": "costBoost",
 }
 NATION_CONDITION_FIELDS = {
     "TINationCondition_fCohesion": "cohesion",
@@ -1394,6 +1403,590 @@ def councilor_summary_maps(
 def faction_councilor_ids(faction: dict[str, Any]) -> list[int]:
     refs = faction.get("councilors") if isinstance(faction.get("councilors"), list) else []
     return [state_id for state_id in (ref_id(item) for item in refs) if state_id is not None]
+
+
+def org_attribute_values(org: dict[str, Any]) -> dict[str, int]:
+    return {
+        attribute: int(as_float(org.get(field), 0.0))
+        for attribute, field in ORG_ATTRIBUTE_FIELDS.items()
+    }
+
+
+def org_acquisition_cost(org: dict[str, Any]) -> dict[str, float]:
+    return {
+        resource: as_float(org.get(field), 0.0)
+        for resource, field in ORG_PLAN_COST_FIELDS.items()
+        if as_float(org.get(field), 0.0) != 0.0
+    }
+
+
+def org_plan_cost_affordable(resources: dict[str, Any], cost: dict[str, Any]) -> bool:
+    return all(as_float(resources.get(resource), 0.0) >= as_float(amount, 0.0) for resource, amount in cost.items())
+
+
+def org_plan_normalize_focus(focus: str) -> str | None:
+    if focus == "balanced":
+        return None
+    for attribute in ORG_PLAN_SCORE_ATTRIBUTES:
+        if attribute.casefold() == focus.casefold():
+            return attribute
+    raise ValueError(f"Unsupported org-plan focus: {focus}")
+
+
+def org_plan_objective_score(attributes: dict[str, Any], focus: str = "balanced") -> float:
+    attribute = org_plan_normalize_focus(focus)
+    if attribute:
+        return as_float(attributes.get(attribute), 0.0)
+    return sum(as_float(attributes.get(key), 0.0) for key in ORG_PLAN_SCORE_ATTRIBUTES)
+
+
+def org_plan_final_attributes(profile: dict[str, Any], orgs: Iterable[dict[str, Any]]) -> dict[str, int]:
+    base_attributes = profile.get("baseAttributes") if isinstance(profile.get("baseAttributes"), dict) else {}
+    trait_totals = profile.get("traitAttributeMods") if isinstance(profile.get("traitAttributeMods"), dict) else {}
+    org_totals = {attribute: 0 for attribute in COUNCILOR_ATTRIBUTES}
+    for org in orgs:
+        for attribute, value in org_attribute_values(org).items():
+            org_totals[attribute] += value
+
+    final_attributes: dict[str, int] = {}
+    for attribute in COUNCILOR_ATTRIBUTES:
+        trait_value = int(as_float(trait_totals.get(attribute), 0.0))
+        org_value = int(as_float(org_totals.get(attribute), 0.0))
+        unclamped = int(as_float(base_attributes.get(attribute), 0.0)) + trait_value + org_value
+        clamped_max = DEFAULT_MAX_COUNCILOR_ATTRIBUTE + min(0, trait_value) + min(0, org_value)
+        final_attributes[attribute] = clamp_attribute(unclamped, clamped_max)
+    return final_attributes
+
+
+def org_plan_roster_summary(
+    profile: dict[str, Any],
+    org_by_id: dict[int, dict[str, Any]],
+    org_ids: Iterable[int],
+) -> dict[str, Any]:
+    ids = tuple(org_ids)
+    orgs = [org_by_id[org_id] for org_id in ids if org_id in org_by_id]
+    attributes = org_plan_final_attributes(profile, orgs)
+    tier_total = sum(int(as_float(org.get("tier"), 0.0)) for org in orgs)
+    administration = int(as_float(attributes.get("Administration"), 0.0))
+    return {
+        "orgIds": list(ids),
+        "attributes": attributes,
+        "tierTotal": tier_total,
+        "administration": administration,
+        "freeCapacity": administration - tier_total,
+        "validCapacity": tier_total <= administration,
+    }
+
+
+def org_plan_attribute_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, int]:
+    return {
+        attribute: int(as_float(after.get(attribute), 0.0) - as_float(before.get(attribute), 0.0))
+        for attribute in ORG_PLAN_SCORE_ATTRIBUTES
+        if int(as_float(after.get(attribute), 0.0) - as_float(before.get(attribute), 0.0)) != 0
+    }
+
+
+def org_plan_org_row(org: dict[str, Any], source: str | None = None) -> dict[str, Any]:
+    row = {
+        "id": ref_id(org.get("ID")),
+        "template": org.get("templateName"),
+        "display": org.get("displayName"),
+        "tier": int(as_float(org.get("tier"), 0.0)),
+        "attributes": {key: value for key, value in org_attribute_values(org).items() if value != 0},
+        "cost": org_acquisition_cost(org),
+    }
+    if source:
+        row["source"] = source
+    return row
+
+
+def org_plan_region_nation_id(indexed: IndexedState | None, region_ref: Any) -> int | None:
+    if indexed is None:
+        return None
+    found = resolve_ref(indexed, region_ref)
+    if not found:
+        return None
+    return ref_id(found[2].get("nation"))
+
+
+def org_plan_owner_eligibility(
+    indexed: IndexedState | None,
+    councilor: dict[str, Any],
+    org: dict[str, Any],
+    org_templates: dict[str, dict[str, Any]] | None,
+) -> tuple[bool, list[str]]:
+    template = (org_templates or {}).get(str(org.get("templateName")), {})
+    traits = set(councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else [])
+    reasons: list[str] = []
+
+    required_traits = template.get("requiredOwnerTraits") if isinstance(template.get("requiredOwnerTraits"), list) else []
+    prohibited_traits = template.get("prohibitedOwnerTraits") if isinstance(template.get("prohibitedOwnerTraits"), list) else []
+    missing_traits = [trait for trait in required_traits if trait not in traits]
+    blocked_traits = [trait for trait in prohibited_traits if trait in traits]
+    if missing_traits:
+        reasons.append(f"missing required owner traits: {', '.join(str(value) for value in missing_traits)}")
+    if blocked_traits:
+        reasons.append(f"prohibited owner traits: {', '.join(str(value) for value in blocked_traits)}")
+
+    if template.get("requiresNationality"):
+        councilor_nation_id = org_plan_region_nation_id(indexed, councilor.get("homeRegion"))
+        org_nation_id = org_plan_region_nation_id(indexed, org.get("homeRegion"))
+        if councilor_nation_id is None or org_nation_id is None:
+            reasons.append("nationality requirement could not be resolved")
+        elif councilor_nation_id != org_nation_id:
+            reasons.append("nationality requirement does not match")
+    return not reasons, reasons
+
+
+def org_plan_major_attributes(attributes: dict[str, Any], limit: int = 2) -> list[str]:
+    mission_attributes = [attribute for attribute in ORG_PLAN_SCORE_ATTRIBUTES if attribute != "Administration"]
+    return sorted(
+        mission_attributes,
+        key=lambda attribute: (-as_float(attributes.get(attribute), 0.0), attribute),
+    )[:limit]
+
+
+def councilor_org_plan_profile(
+    indexed: IndexedState,
+    councilor_id: int,
+    councilor: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    breakdown = councilor_attribute_breakdown(indexed, councilor, trait_templates)
+    org_refs = councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []
+    org_ids = [
+        org_id
+        for org_id in (ref_id(value) for value in org_refs)
+        if org_id is not None
+    ]
+    return {
+        "id": councilor_id,
+        "display": councilor.get("displayName"),
+        "template": councilor.get("templateName"),
+        "councilor": councilor,
+        "baseAttributes": breakdown.get("baseAttributes") or {},
+        "traitAttributeMods": breakdown.get("traitAttributeMods") or {},
+        "currentAttributes": breakdown.get("finalAttributes") or {},
+        "assignedOrgIds": org_ids,
+    }
+
+
+def org_plan_best_assignment(
+    profile: dict[str, Any],
+    org_by_id: dict[int, dict[str, Any]],
+    assigned_org_ids: Iterable[int],
+    candidate_id: int,
+    source: str,
+    resources: dict[str, Any],
+    focus: str,
+    indexed: IndexedState | None = None,
+    org_templates: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    candidate = org_by_id.get(candidate_id)
+    if not candidate:
+        return None
+    eligible, eligibility_reasons = org_plan_owner_eligibility(
+        indexed,
+        profile.get("councilor") if isinstance(profile.get("councilor"), dict) else {},
+        candidate,
+        org_templates,
+    )
+    if not eligible:
+        return None
+
+    current_ids = tuple(org_id for org_id in assigned_org_ids if org_id != candidate_id)
+    before = org_plan_roster_summary(profile, org_by_id, current_ids)
+    cost = org_acquisition_cost(candidate) if source == "market" else {}
+    affordable = org_plan_cost_affordable(resources, cost)
+    candidate_tier = max(0, int(as_float(candidate.get("tier"), 0.0)))
+    # A valid current roster only needs to free at most the incoming org's tier.
+    # Enumerating larger removal sets adds exponential work and cannot improve a
+    # non-negative capped stat objective.
+    max_removed = min(len(current_ids), max(candidate_tier, 1))
+    best: tuple[tuple[float, float, int, int], dict[str, Any]] | None = None
+
+    for remove_count in range(max_removed + 1):
+        for removed_ids in combinations(current_ids, remove_count):
+            removed = set(removed_ids)
+            after_ids = tuple(org_id for org_id in current_ids if org_id not in removed) + (candidate_id,)
+            after = org_plan_roster_summary(profile, org_by_id, after_ids)
+            if not after["validCapacity"]:
+                continue
+            gain = org_plan_objective_score(after["attributes"], focus) - org_plan_objective_score(before["attributes"], focus)
+            balanced_gain = org_plan_objective_score(after["attributes"]) - org_plan_objective_score(before["attributes"])
+            rank = (gain, balanced_gain, -remove_count, after["freeCapacity"])
+            action = {
+                "councilorId": profile.get("id"),
+                "councilor": profile.get("display"),
+                "source": source,
+                "candidate": org_plan_org_row(candidate, source),
+                "cost": cost,
+                "affordableNow": affordable,
+                "eligible": True,
+                "eligibilityNotes": eligibility_reasons,
+                "removedOrgs": [
+                    org_plan_org_row(org_by_id[org_id], "returnedToInventory")
+                    for org_id in removed_ids
+                    if org_id in org_by_id
+                ],
+                "attributesBefore": before["attributes"],
+                "attributesAfter": after["attributes"],
+                "attributeDelta": org_plan_attribute_delta(before["attributes"], after["attributes"]),
+                "tierTotalBefore": before["tierTotal"],
+                "tierTotalAfter": after["tierTotal"],
+                "freeCapacityBefore": before["freeCapacity"],
+                "freeCapacityAfter": after["freeCapacity"],
+                "objective": focus,
+                "objectiveScoreBefore": org_plan_objective_score(before["attributes"], focus),
+                "objectiveScoreAfter": org_plan_objective_score(after["attributes"], focus),
+                "objectiveGain": gain,
+                "balancedScoreBefore": org_plan_objective_score(before["attributes"]),
+                "balancedScoreAfter": org_plan_objective_score(after["attributes"]),
+                "balancedGain": balanced_gain,
+            }
+            if best is None or rank > best[0]:
+                best = (rank, action)
+    return clean_numbers(best[1], 6) if best else None
+
+
+def org_plan_committee_totals(
+    profiles: dict[int, dict[str, Any]],
+    org_by_id: dict[int, dict[str, Any]],
+    roster: dict[int, tuple[int, ...]],
+) -> dict[str, int]:
+    totals = {attribute: 0 for attribute in ORG_PLAN_SCORE_ATTRIBUTES}
+    for councilor_id, profile in profiles.items():
+        attributes = org_plan_roster_summary(profile, org_by_id, roster.get(councilor_id, ()))["attributes"]
+        for attribute in totals:
+            totals[attribute] += int(as_float(attributes.get(attribute), 0.0))
+    return totals
+
+
+def org_plan_committee_score(
+    profiles: dict[int, dict[str, Any]],
+    org_by_id: dict[int, dict[str, Any]],
+    roster: dict[int, tuple[int, ...]],
+    focus: str,
+) -> float:
+    return org_plan_objective_score(org_plan_committee_totals(profiles, org_by_id, roster), focus)
+
+
+def org_plan_state_key(state: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        tuple((councilor_id, tuple(sorted(org_ids))) for councilor_id, org_ids in sorted(state["roster"].items())),
+        tuple(sorted(state["market"])),
+        tuple(sorted(state["inventory"])),
+    )
+
+
+def search_org_committee_plan(
+    profiles: dict[int, dict[str, Any]] | Iterable[dict[str, Any]],
+    org_by_id: dict[int, dict[str, Any]],
+    market_ids: Iterable[int],
+    inventory_ids: Iterable[int],
+    resources: dict[str, Any],
+    focus: str = "balanced",
+    max_actions: int = 4,
+    beam_width: int = 8,
+    indexed: IndexedState | None = None,
+    org_templates: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(profiles, dict):
+        profiles = {
+            int(profile["id"]): profile
+            for profile in profiles
+            if isinstance(profile.get("id"), int)
+        }
+    roster = {
+        councilor_id: tuple(profile.get("assignedOrgIds") if isinstance(profile.get("assignedOrgIds"), list) else [])
+        for councilor_id, profile in profiles.items()
+    }
+    initial = {
+        "roster": roster,
+        "market": frozenset(market_ids),
+        "inventory": frozenset(inventory_ids),
+        "resources": {resource: as_float(value, 0.0) for resource, value in resources.items()},
+        "actions": [],
+    }
+    initial["score"] = org_plan_committee_score(profiles, org_by_id, roster, focus)
+    initial["balancedScore"] = org_plan_committee_score(profiles, org_by_id, roster, "balanced")
+    initial_totals = org_plan_committee_totals(profiles, org_by_id, roster)
+    beam = [initial]
+    best = initial
+    explored_states = 1
+
+    for _ in range(max(0, max_actions)):
+        next_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for state in beam:
+            pool_ids = sorted(set(state["market"]) | set(state["inventory"]))
+            for candidate_id in pool_ids:
+                source = "market" if candidate_id in state["market"] else "ownedInventory"
+                for councilor_id, profile in profiles.items():
+                    action = org_plan_best_assignment(
+                        profile,
+                        org_by_id,
+                        state["roster"].get(councilor_id, ()),
+                        candidate_id,
+                        source,
+                        state["resources"],
+                        focus,
+                        indexed=indexed,
+                        org_templates=org_templates,
+                    )
+                    capacity_gain = as_float(action.get("freeCapacityAfter"), 0.0) - as_float(action.get("freeCapacityBefore"), 0.0) if action else 0.0
+                    if (
+                        not action
+                        or not action["affordableNow"]
+                        or (
+                            as_float(action.get("objectiveGain"), 0.0) <= 0.0
+                            and capacity_gain <= 0.0
+                        )
+                    ):
+                        continue
+
+                    removed_ids = {
+                        row["id"]
+                        for row in action["removedOrgs"]
+                        if isinstance(row.get("id"), int)
+                    }
+                    current_ids = state["roster"].get(councilor_id, ())
+                    next_roster = dict(state["roster"])
+                    next_roster[councilor_id] = tuple(org_id for org_id in current_ids if org_id not in removed_ids) + (candidate_id,)
+                    next_market = set(state["market"])
+                    next_inventory = set(state["inventory"])
+                    if source == "market":
+                        next_market.discard(candidate_id)
+                    else:
+                        next_inventory.discard(candidate_id)
+                    next_inventory.update(removed_ids)
+                    next_resources = dict(state["resources"])
+                    for resource, amount in action["cost"].items():
+                        next_resources[resource] = as_float(next_resources.get(resource), 0.0) - as_float(amount, 0.0)
+                    score = org_plan_committee_score(profiles, org_by_id, next_roster, focus)
+                    balanced_score = org_plan_committee_score(profiles, org_by_id, next_roster, "balanced")
+                    next_action = dict(action)
+                    next_action["step"] = len(state["actions"]) + 1
+                    next_action["committeeObjectiveScoreAfter"] = score
+                    next_action["committeeBalancedScoreAfter"] = balanced_score
+                    next_state = {
+                        "roster": next_roster,
+                        "market": frozenset(next_market),
+                        "inventory": frozenset(next_inventory),
+                        "resources": next_resources,
+                        "actions": [*state["actions"], next_action],
+                        "score": score,
+                        "balancedScore": balanced_score,
+                    }
+                    key = org_plan_state_key(next_state)
+                    existing = next_by_key.get(key)
+                    if existing is None or (score, balanced_score) > (existing["score"], existing["balancedScore"]):
+                        next_by_key[key] = next_state
+        if not next_by_key:
+            break
+        explored_states += len(next_by_key)
+        beam = sorted(
+            next_by_key.values(),
+            key=lambda state: (-state["score"], -state["balancedScore"], len(state["actions"])),
+        )[: max(1, beam_width)]
+        if (beam[0]["score"], beam[0]["balancedScore"]) > (best["score"], best["balancedScore"]):
+            best = beam[0]
+
+    final_totals = org_plan_committee_totals(profiles, org_by_id, best["roster"])
+    final_roster = []
+    for councilor_id, profile in profiles.items():
+        summary = org_plan_roster_summary(profile, org_by_id, best["roster"].get(councilor_id, ()))
+        final_roster.append(
+            {
+                "id": councilor_id,
+                "display": profile.get("display"),
+                "majorAttributes": org_plan_major_attributes(summary["attributes"]),
+                **summary,
+            }
+        )
+    return clean_numbers(
+        {
+            "objective": focus,
+            "objectiveScoreBefore": initial["score"],
+            "objectiveScoreAfter": best["score"],
+            "objectiveGain": best["score"] - initial["score"],
+            "balancedScoreBefore": initial["balancedScore"],
+            "balancedScoreAfter": best["balancedScore"],
+            "balancedGain": best["balancedScore"] - initial["balancedScore"],
+            "committeeAttributesBefore": initial_totals,
+            "committeeAttributesAfter": final_totals,
+            "committeeAttributeDelta": org_plan_attribute_delta(initial_totals, final_totals),
+            "actions": best["actions"],
+            "marketAcquisitions": sum(1 for action in best["actions"] if action.get("source") == "market"),
+            "remainingResources": best["resources"],
+            "remainingMarketOrgIds": sorted(best["market"]),
+            "remainingOwnedInventoryOrgIds": sorted(best["inventory"]),
+            "finalRoster": final_roster,
+            "search": {
+                "maxActions": max_actions,
+                "beamWidth": beam_width,
+                "exploredStates": explored_states,
+                "boundedHeuristic": True,
+            },
+        },
+        6,
+    )
+
+
+def calculate_org_plan(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction_name: str | None = None,
+    focus: str = "balanced",
+    top: int = 5,
+    include_unassigned: bool = True,
+    max_actions: int = 4,
+    beam_width: int = 8,
+    include_all_candidates: bool = False,
+) -> dict[str, Any]:
+    trait_templates = load_trait_templates(templates_dir)
+    org_templates = load_named_templates(templates_dir, "TIOrgTemplate.json")
+    faction_id, faction = find_faction_state(indexed, faction_name)
+    profiles = {
+        councilor_id: councilor_org_plan_profile(indexed, councilor_id, councilor, trait_templates)
+        for councilor_id in faction_councilor_ids(faction)
+        for councilor in [state_value_by_id(indexed, councilor_id)]
+        if councilor
+    }
+    org_by_id = {
+        org_id: org
+        for entry in type_entries(indexed, "TIOrgState")
+        for org in [entry.get("Value") or {}]
+        for org_id in [ref_id(entry.get("Key")) or ref_id(org.get("ID"))]
+        if org_id is not None
+    }
+    market_refs = faction.get("availableOrgs") if isinstance(faction.get("availableOrgs"), list) else []
+    inventory_refs = faction.get("unassignedOrgs") if include_unassigned and isinstance(faction.get("unassignedOrgs"), list) else []
+    market_ids = [
+        org_id
+        for org_id in (ref_id(value) for value in market_refs)
+        if org_id is not None and org_id in org_by_id
+    ]
+    inventory_ids = [
+        org_id
+        for org_id in (ref_id(value) for value in inventory_refs)
+        if org_id is not None and org_id in org_by_id
+    ]
+    resources = faction.get("resources") if isinstance(faction.get("resources"), dict) else {}
+    source_by_id = {org_id: "market" for org_id in market_ids}
+    source_by_id.update({org_id: "ownedInventory" for org_id in inventory_ids})
+    candidate_ids = sorted(source_by_id)
+
+    councilor_rows = []
+    for councilor_id, profile in profiles.items():
+        current = org_plan_roster_summary(profile, org_by_id, profile["assignedOrgIds"])
+        goal_views: dict[str, list[dict[str, Any]]] = {}
+        all_actions: dict[str, list[dict[str, Any]]] = {}
+        for view_focus in ORG_PLAN_FOCUS_CHOICES:
+            actions = [
+                action
+                for candidate_id in candidate_ids
+                for action in [
+                    org_plan_best_assignment(
+                        profile,
+                        org_by_id,
+                        profile["assignedOrgIds"],
+                        candidate_id,
+                        source_by_id[candidate_id],
+                        resources,
+                        view_focus,
+                        indexed=indexed,
+                        org_templates=org_templates,
+                    )
+                ]
+                if action and as_float(action.get("objectiveGain"), 0.0) > 0.0
+            ]
+            actions.sort(
+                key=lambda action: (
+                    -as_float(action.get("objectiveGain"), 0.0),
+                    0 if action.get("affordableNow") else 1,
+                    str((action.get("candidate") or {}).get("display")),
+                )
+            )
+            goal_views[view_focus] = actions[: max(0, top)]
+            if include_all_candidates:
+                all_actions[view_focus] = actions
+        councilor_rows.append(
+            {
+                "id": councilor_id,
+                "display": profile.get("display"),
+                "majorAttributes": org_plan_major_attributes(current["attributes"]),
+                "current": current,
+                "goalViews": goal_views,
+                **({"allCandidateActions": all_actions} if include_all_candidates else {}),
+            }
+        )
+
+    committee_plan = search_org_committee_plan(
+        profiles,
+        org_by_id,
+        market_ids,
+        inventory_ids,
+        resources,
+        focus=focus,
+        max_actions=max_actions,
+        beam_width=beam_width,
+        indexed=indexed,
+        org_templates=org_templates,
+    )
+    return clean_numbers(
+        {
+            "faction": faction_brief(faction_id, faction),
+            "focus": focus,
+            "candidateSources": {
+                "market": {
+                    "count": len(market_ids),
+                    "orgs": [
+                        {
+                            **org_plan_org_row(org_by_id[org_id], "market"),
+                            "affordableNow": org_plan_cost_affordable(resources, org_acquisition_cost(org_by_id[org_id])),
+                        }
+                        for org_id in market_ids
+                    ],
+                },
+                "ownedInventory": {
+                    "included": include_unassigned,
+                    "count": len(inventory_ids),
+                    "orgs": [org_plan_org_row(org_by_id[org_id], "ownedInventory") for org_id in inventory_ids],
+                },
+            },
+            "councilors": councilor_rows,
+            "committeePlan": committee_plan,
+            "scoreModel": {
+                "balanced": f"Sum of capped councilor stats: {', '.join(ORG_PLAN_SCORE_ATTRIBUTES)}.",
+                "attributeFocus": "A named focus maximizes the committee total for that capped attribute.",
+                "majorAttributes": "Each councilor's two highest current non-Administration mission stats; use the matching goalViews for specialization.",
+            },
+            "limitations": [
+                "The market candidate set comes from TIFactionState.availableOrgs, which is the save's faction-visible acquisition list.",
+                "Owned unassigned orgs are included by default so the plan does not recommend spending resources before using existing inventory; pass --market-only to exclude them.",
+                "The committee plan is a bounded beam-search heuristic, not a proof of the mathematical global optimum.",
+                "The planner optimizes capped councilor stats and Administration capacity. Income, mining, tech-category bonuses, granted missions, and takeover defense remain visible on org states but are not folded into the score.",
+            ],
+        },
+        6,
+    )
+
+
+def command_org_plan(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    result = calculate_org_plan(
+        indexed,
+        templates_dir,
+        faction_name=args.faction,
+        focus=args.focus,
+        top=args.top,
+        include_unassigned=not args.market_only,
+        max_actions=args.max_actions,
+        beam_width=args.beam_width,
+        include_all_candidates=args.all_candidates,
+    )
+    print_json(result, compact=args.compact)
 
 
 def councilor_is_income_active(councilor: dict[str, Any]) -> bool:
@@ -4145,6 +4738,592 @@ def command_research_ui(save_path: Path, templates_dir: Path | None, args: argpa
     print_json(result, compact=args.compact)
 
 
+RESEARCH_PLAN_SCORE_AXES = (
+    "fastCompletion",
+    "factionSynergy",
+    "unlockBreadth",
+    "criticalTemplate",
+    "resourceReliefCoverage",
+    "currentProgress",
+)
+
+
+def string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    if isinstance(value, str) and value:
+        return [value]
+    return []
+
+
+def research_template_prereqs(template: dict[str, Any]) -> list[str]:
+    prereqs = string_list(template.get("prereqs"))
+    for key in ("altPrereq0",):
+        for name in string_list(template.get(key)):
+            if name not in prereqs:
+                prereqs.append(name)
+    return prereqs
+
+
+def research_template_effects(template: dict[str, Any]) -> list[str]:
+    return string_list(template.get("effects"))
+
+
+def research_template_resources_granted(template: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for item in template.get("resourcesGranted") if isinstance(template.get("resourcesGranted"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        resource = item.get("resource")
+        if not resource:
+            continue
+        rows.append({"resource": str(resource), "value": as_float(item.get("value"), 0.0)})
+    return rows
+
+
+def active_global_research_names(indexed: IndexedState) -> set[str]:
+    global_research = first_value(indexed, "TIGlobalResearchState") or {}
+    progress = global_research.get("techProgress") if isinstance(global_research.get("techProgress"), list) else []
+    return {
+        str(row.get("techTemplateName"))
+        for row in progress
+        if isinstance(row, dict) and row.get("techTemplateName")
+    }
+
+
+def finished_global_research_names(indexed: IndexedState) -> set[str]:
+    global_research = first_value(indexed, "TIGlobalResearchState") or {}
+    return set(string_list(global_research.get("finishedTechsNames")))
+
+
+def available_global_research_templates(
+    indexed: IndexedState,
+    tech_templates: dict[str, dict[str, Any]],
+) -> list[tuple[str, dict[str, Any]]]:
+    finished = finished_global_research_names(indexed)
+    active = active_global_research_names(indexed)
+    rows = []
+    for name, template in tech_templates.items():
+        if name in finished or name in active:
+            continue
+        if as_float(template.get("researchCost"), 0.0) <= 0.0:
+            continue
+        prereqs = research_template_prereqs(template)
+        if all(prereq in finished for prereq in prereqs):
+            rows.append((name, template))
+    rows.sort(key=lambda item: (as_float(item[1].get("researchCost"), 0.0), item[1].get("friendlyName") or item[0]))
+    return rows
+
+
+def project_progress_records_by_template(faction: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    progress = faction.get("currentProjectProgress") if isinstance(faction.get("currentProjectProgress"), list) else []
+    for item in progress:
+        if not isinstance(item, dict) or not item.get("projectTemplateName"):
+            continue
+        name = str(item.get("projectTemplateName"))
+        existing = rows.get(name)
+        if existing is None or as_float(item.get("accumulatedResearch"), 0.0) > as_float(existing.get("accumulatedResearch"), 0.0):
+            rows[name] = item
+    return rows
+
+
+def active_project_research_names(faction: dict[str, Any]) -> set[str]:
+    progress_by_slot = project_progress_by_slot(faction)
+    names = set()
+    for slot in faction_project_slots(faction):
+        progress = progress_by_slot.get(slot)
+        if progress and progress.get("projectTemplateName"):
+            names.add(str(progress.get("projectTemplateName")))
+    return names
+
+
+def available_project_research_templates(
+    faction: dict[str, Any],
+    project_templates: dict[str, dict[str, Any]],
+) -> list[tuple[str, dict[str, Any]]]:
+    available = string_list(faction.get("availableProjectNames"))
+    active = active_project_research_names(faction)
+    rows = []
+    for name in available:
+        if name in active:
+            continue
+        template = project_templates.get(name)
+        if not template:
+            continue
+        if as_float(template.get("researchCost"), 0.0) <= 0.0:
+            continue
+        rows.append((name, template))
+    rows.sort(key=lambda item: (as_float(item[1].get("researchCost"), 0.0), item[1].get("friendlyName") or item[0]))
+    return rows
+
+
+def research_plan_reference_weight_fraction(faction: dict[str, Any], kind: str) -> float:
+    weights = faction_research_weights(faction)
+    total = faction_total_research_weights(faction)
+    if total <= 0.0:
+        return 0.0
+    slots = range(0, 3) if kind == "global" else faction_project_slots(faction)
+    fractions = [weights[slot] / total for slot in slots if slot < len(weights) and weights[slot] > 0.0]
+    return max(fractions) if fractions else 0.0
+
+
+def direct_unlocks_for_template(
+    template_name: str,
+    tech_templates: dict[str, dict[str, Any]],
+    project_templates: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    techs = [
+        {"template": name, "display": template_display(name, template), "category": template.get("techCategory")}
+        for name, template in tech_templates.items()
+        if template_name in research_template_prereqs(template)
+    ]
+    projects = [
+        {"template": name, "display": template_display(name, template), "category": template.get("techCategory")}
+        for name, template in project_templates.items()
+        if template_name in research_template_prereqs(template)
+    ]
+    techs.sort(key=lambda row: str(row.get("display") or row.get("template")))
+    projects.sort(key=lambda row: str(row.get("display") or row.get("template")))
+    return {"globalTechs": techs, "projects": projects, "count": len(techs) + len(projects)}
+
+
+def research_plan_keyword_tags(template: dict[str, Any]) -> list[str]:
+    text = " ".join(
+        [
+            str(template.get("dataName") or ""),
+            str(template.get("friendlyName") or ""),
+            str(template.get("AI_techRole") or ""),
+            str(template.get("AI_projectRole") or ""),
+            " ".join(research_template_effects(template)),
+        ]
+    ).casefold()
+    rules = {
+        "alien-xeno": ("alien", "xeno", "hydra", "pherocyte", "salamander"),
+        "ship-combat": ("ship", "weapon", "laser", "missile", "torpedo", "armor", "navy", "fleet", "combat"),
+        "space-economy": ("hab", "mining", "colony", "outpost", "space", "missioncontrol", "shipbuilding"),
+        "earth-economy": ("economy", "funding", "welfare", "climate", "gdp", "development"),
+        "council-ops": ("council", "ops", "investigation", "espionage", "security", "administration"),
+        "research-infrastructure": ("research", "lab", "science", "university", "institute"),
+        "resources": ("resource", "water", "volatile", "metals", "fissile", "antimatter", "exotic"),
+    }
+    return [tag for tag, needles in rules.items() if any(needle in text for needle in needles)]
+
+
+def research_plan_category_context(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    category: str | None,
+    kind: str,
+    trait_templates: dict[str, dict[str, Any]],
+    org_templates: dict[str, dict[str, Any]],
+    hab_module_templates: dict[str, dict[str, Any]],
+    utility_module_templates: dict[str, dict[str, Any]],
+    tech_templates: dict[str, dict[str, Any]],
+    project_templates: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    components = faction_category_modifier_components(
+        indexed,
+        faction,
+        trait_templates,
+        org_templates,
+        hab_module_templates,
+        utility_module_templates,
+        category,
+    )
+    current_active = active_slots_with_category(indexed, faction, tech_templates, project_templates, category)
+    added_penalty_power = current_active
+    category_bonus_if_added = as_float(components.get("sum"), 0.0) * (
+        DEFAULT_GLOBAL_CONFIG["categoryBonusPenaltyPerExtraSlot"] ** added_penalty_power
+    )
+    project_facilities = project_facility_counts(indexed, faction, trait_templates, hab_module_templates) if kind == "project" else None
+    project_bonus = multiple_facilities_multiplier(project_facilities or {}) if kind == "project" else 0.0
+    return clean_numbers(
+        {
+            "category": category,
+            "components": components,
+            "currentActiveSlotsWithCategory": current_active,
+            "addedSlotPenaltyPower": added_penalty_power,
+            "categoryBonusIfAddedToCurrentMix": category_bonus_if_added,
+            "projectFacilities": project_facilities,
+            "projectFacilityBonus": project_bonus if kind == "project" else None,
+            "effectiveMultiplierIfAddedToCurrentMix": 1.0 + category_bonus_if_added + project_bonus,
+        },
+        6,
+    )
+
+
+def research_plan_resource_grant_maps(
+    resources_granted: list[dict[str, Any]],
+    cost_remaining: float,
+    deficient_resources: set[str],
+) -> dict[str, Any]:
+    by_resource = {row["resource"]: row["value"] for row in resources_granted}
+    per_research = {
+        resource: value / cost_remaining
+        for resource, value in by_resource.items()
+        if cost_remaining > 0.0
+    }
+    deficient = {resource: value for resource, value in by_resource.items() if resource in deficient_resources}
+    return clean_numbers(
+        {
+            "byResource": by_resource,
+            "perRemainingResearch": per_research,
+            "currentlyDeficientResourcesGranted": deficient,
+            "deficientResourceTypesCovered": len(deficient),
+        },
+        6,
+    )
+
+
+def research_plan_candidate_row(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    template_name: str,
+    template: dict[str, Any],
+    kind: str,
+    base_daily: float,
+    reference_weight_fraction: float,
+    progress: dict[str, Any] | None,
+    topbar: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    org_templates: dict[str, dict[str, Any]],
+    hab_module_templates: dict[str, dict[str, Any]],
+    utility_module_templates: dict[str, dict[str, Any]],
+    tech_templates: dict[str, dict[str, Any]],
+    project_templates: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    category = template.get("techCategory")
+    cost = tech_template_cost(indexed, template) if kind == "global" else project_template_cost(indexed, template, faction)
+    accumulated = as_float((progress or {}).get("accumulatedResearch"), 0.0)
+    remaining = max(cost - accumulated, 0.0)
+    category_context = research_plan_category_context(
+        indexed,
+        faction,
+        category,
+        kind,
+        trait_templates,
+        org_templates,
+        hab_module_templates,
+        utility_module_templates,
+        tech_templates,
+        project_templates,
+    )
+    estimated_daily = base_daily * reference_weight_fraction * as_float(category_context.get("effectiveMultiplierIfAddedToCurrentMix"), 0.0)
+    effects = research_template_effects(template)
+    resources_granted = research_template_resources_granted(template)
+    deficient_resources = set(string_list(topbar.get("resourceIncomeDeficiencies")))
+    grants = research_plan_resource_grant_maps(resources_granted, remaining, deficient_resources)
+    unlocks = direct_unlocks_for_template(template_name, tech_templates, project_templates)
+    eta = eta_from_daily(indexed, remaining, estimated_daily)
+    progress_fraction = accumulated / cost if cost > 0.0 else None
+    return clean_numbers(
+        {
+            "kind": kind,
+            "template": template_name,
+            "display": template_display(template_name, template),
+            "category": category,
+            "classification": {
+                "aiTechRole": template.get("AI_techRole"),
+                "aiProjectRole": template.get("AI_projectRole"),
+                "aiCriticalTech": bool(template.get("AI_criticalTech")),
+                "keywordTags": research_plan_keyword_tags(template),
+            },
+            "research": {
+                "cost": cost,
+                "accumulated": accumulated,
+                "remaining": remaining,
+                "progressFraction": progress_fraction,
+                "referenceWeightFraction": reference_weight_fraction,
+                "estimatedDailyAtReferenceWeight": estimated_daily,
+                "etaAtReferenceWeight": eta,
+                "progressSlot": (progress or {}).get("slot"),
+                "repeatable": bool(template.get("repeatable")) if kind == "project" else None,
+                "oneTimeGlobally": bool(template.get("oneTimeGlobally")) if kind == "project" else None,
+            },
+            "requirements": {
+                "prereqs": research_template_prereqs(template),
+                "factionPrereq": string_list(template.get("factionPrereq")),
+                "requiredMilestone": template.get("requiredMilestone"),
+                "requiredObjectiveName": template.get("requiredObjectiveName"),
+                "altRequiredObjectiveName": template.get("altRequiredObjectiveName"),
+                "requiresNation": template.get("requiresNation"),
+            },
+            "effects": effects,
+            "resourcesGranted": grants,
+            "orgGranted": template.get("orgGranted"),
+            "unlocks": unlocks,
+            "categoryContext": category_context,
+            "scoreEvidence": {
+                "estimatedDaysAtReferenceWeight": eta.get("days"),
+                "categoryEffectiveMultiplier": category_context.get("effectiveMultiplierIfAddedToCurrentMix"),
+                "directUnlockCount": unlocks.get("count"),
+                "aiCriticalTech": bool(template.get("AI_criticalTech")),
+                "deficientResourceTypesCovered": grants.get("deficientResourceTypesCovered"),
+                "progressFraction": progress_fraction or 0.0,
+            },
+        },
+        6,
+    )
+
+
+def score_research_plan_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    positive_days = [
+        as_float((candidate.get("scoreEvidence") or {}).get("estimatedDaysAtReferenceWeight"), 0.0)
+        for candidate in candidates
+        if as_float((candidate.get("scoreEvidence") or {}).get("estimatedDaysAtReferenceWeight"), 0.0) > 0.0
+    ]
+    min_days = min(positive_days) if positive_days else 0.0
+    max_category = max(
+        [as_float((candidate.get("scoreEvidence") or {}).get("categoryEffectiveMultiplier"), 0.0) for candidate in candidates]
+        or [0.0]
+    )
+    max_unlocks = max(
+        [as_float((candidate.get("scoreEvidence") or {}).get("directUnlockCount"), 0.0) for candidate in candidates]
+        or [0.0]
+    )
+    max_deficient = max(
+        [as_float((candidate.get("scoreEvidence") or {}).get("deficientResourceTypesCovered"), 0.0) for candidate in candidates]
+        or [0.0]
+    )
+    for candidate in candidates:
+        evidence = candidate.get("scoreEvidence") if isinstance(candidate.get("scoreEvidence"), dict) else {}
+        days = as_float(evidence.get("estimatedDaysAtReferenceWeight"), 0.0)
+        category = as_float(evidence.get("categoryEffectiveMultiplier"), 0.0)
+        unlocks = as_float(evidence.get("directUnlockCount"), 0.0)
+        deficient = as_float(evidence.get("deficientResourceTypesCovered"), 0.0)
+        progress = as_float(evidence.get("progressFraction"), 0.0)
+        scores = {
+            "fastCompletion": 100.0 * min_days / days if min_days > 0.0 and days > 0.0 else 0.0,
+            "factionSynergy": 100.0 * category / max_category if max_category > 0.0 else 0.0,
+            "unlockBreadth": 100.0 * unlocks / max_unlocks if max_unlocks > 0.0 else 0.0,
+            "criticalTemplate": 100.0 if evidence.get("aiCriticalTech") else 0.0,
+            "resourceReliefCoverage": 100.0 * deficient / max_deficient if max_deficient > 0.0 else 0.0,
+            "currentProgress": min(max(progress * 100.0, 0.0), 100.0),
+        }
+        candidate["objectiveScores"] = clean_numbers(scores, 6)
+    return candidates
+
+
+def research_plan_goal_views(candidates: list[dict[str, Any]], top: int) -> dict[str, list[dict[str, Any]]]:
+    views: dict[str, list[dict[str, Any]]] = {}
+    for axis in RESEARCH_PLAN_SCORE_AXES:
+        rows = sorted(
+            candidates,
+            key=lambda candidate: (
+                -as_float((candidate.get("objectiveScores") or {}).get(axis), 0.0),
+                as_float((candidate.get("scoreEvidence") or {}).get("estimatedDaysAtReferenceWeight"), 1_000_000_000.0),
+                str(candidate.get("display") or candidate.get("template")),
+            ),
+        )
+        views[axis] = [
+            {
+                "template": row.get("template"),
+                "display": row.get("display"),
+                "kind": row.get("kind"),
+                "category": row.get("category"),
+                "score": (row.get("objectiveScores") or {}).get(axis),
+                "scoreEvidence": row.get("scoreEvidence"),
+            }
+            for row in rows[:top]
+            if as_float((row.get("objectiveScores") or {}).get(axis), 0.0) > 0.0
+        ]
+    return views
+
+
+def research_plan_shortlist(candidates: list[dict[str, Any]], top: int) -> list[dict[str, Any]]:
+    selected: dict[tuple[str, str], dict[str, Any]] = {}
+    for rows in research_plan_goal_views(candidates, top).values():
+        for row in rows:
+            key = (str(row.get("kind")), str(row.get("template")))
+            found = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if candidate.get("kind") == row.get("kind") and candidate.get("template") == row.get("template")
+                ),
+                None,
+            )
+            if found:
+                selected[key] = found
+    return sorted(
+        selected.values(),
+        key=lambda candidate: (
+            str(candidate.get("kind")),
+            str(candidate.get("category")),
+            as_float((candidate.get("scoreEvidence") or {}).get("estimatedDaysAtReferenceWeight"), 1_000_000_000.0),
+            str(candidate.get("display") or candidate.get("template")),
+        ),
+    )
+
+
+def calculate_research_plan(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction_name: str | None = None,
+    top: int = 8,
+    mode: str = "all",
+    include_all_candidates: bool = False,
+) -> dict[str, Any]:
+    trait_templates = load_trait_templates(templates_dir)
+    org_templates = load_named_templates(templates_dir, "TIOrgTemplate.json")
+    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    utility_module_templates = load_named_templates(templates_dir, "TIUtilityModuleTemplate.json")
+    tech_templates = load_named_templates(templates_dir, "TITechTemplate.json")
+    project_templates = load_named_templates(templates_dir, "TIProjectTemplate.json")
+
+    faction_id, faction = find_faction_state(indexed, faction_name)
+    base_daily = faction_base_research_daily(indexed, templates_dir, faction)
+    topbar = calculate_topbar(indexed, templates_dir, faction_name, include_details=False)
+    research_ui = calculate_research_ui(indexed, templates_dir, faction_name)
+    progress_by_project = project_progress_records_by_template(faction)
+
+    global_candidates: list[dict[str, Any]] = []
+    if mode in {"all", "global"}:
+        global_fraction = research_plan_reference_weight_fraction(faction, "global")
+        global_candidates = [
+            research_plan_candidate_row(
+                indexed,
+                faction,
+                name,
+                template,
+                "global",
+                base_daily,
+                global_fraction,
+                None,
+                topbar,
+                trait_templates,
+                org_templates,
+                hab_module_templates,
+                utility_module_templates,
+                tech_templates,
+                project_templates,
+            )
+            for name, template in available_global_research_templates(indexed, tech_templates)
+        ]
+        score_research_plan_candidates(global_candidates)
+
+    project_candidates: list[dict[str, Any]] = []
+    if mode in {"all", "project"}:
+        project_fraction = research_plan_reference_weight_fraction(faction, "project")
+        project_candidates = [
+            research_plan_candidate_row(
+                indexed,
+                faction,
+                name,
+                template,
+                "project",
+                base_daily,
+                project_fraction,
+                progress_by_project.get(name),
+                topbar,
+                trait_templates,
+                org_templates,
+                hab_module_templates,
+                utility_module_templates,
+                tech_templates,
+                project_templates,
+            )
+            for name, template in available_project_research_templates(faction, project_templates)
+        ]
+        score_research_plan_candidates(project_candidates)
+
+    current_projects = research_ui.get("projects") if isinstance(research_ui.get("projects"), dict) else {}
+    report = {
+        "faction": faction_brief(faction_id, faction),
+        "date": (first_value(indexed, "TITimeState") or {}).get("currentDateTime"),
+        "questionSupported": "다음 글로벌 연구/프로젝트 연구는 어떤 기술이 좋아?",
+        "mode": mode,
+        "templateAvailability": {
+            "templatesDir": str(templates_dir) if templates_dir else None,
+            "globalTechTemplates": len(tech_templates),
+            "projectTemplates": len(project_templates),
+            "warning": None if tech_templates and project_templates else "Template files are required for candidate collection.",
+        },
+        "currentState": {
+            "researchIncome": research_ui.get("researchIncome"),
+            "slotAllocation": research_ui.get("slotAllocation"),
+            "activeGlobalResearch": research_ui.get("globalResearch"),
+            "activeProjects": current_projects.get("active"),
+            "pausedOrStoredProjects": current_projects.get("pausedOrStored"),
+            "resourceConstraints": {
+                "resourceIncomeDeficiencies": topbar.get("resourceIncomeDeficiencies"),
+                "missionControl": (topbar.get("resources") or {}).get("MissionControl"),
+                "monthlyResourceDeltas": {
+                    resource: row.get("monthly")
+                    for resource, row in (topbar.get("resources") or {}).items()
+                    if isinstance(row, dict) and resource in {"Money", "Boost", "Water", "Volatiles", "Metals", "NobleMetals", "Fissiles"}
+                },
+            },
+        },
+        "globalResearchCandidates": {
+            "count": len(global_candidates),
+            "source": "TITechTemplate entries whose prereqs are all in TIGlobalResearchState.finishedTechsNames, excluding finished and active techs.",
+            "goalViews": research_plan_goal_views(global_candidates, top),
+            "shortlist": research_plan_shortlist(global_candidates, top),
+        },
+        "projectResearchCandidates": {
+            "count": len(project_candidates),
+            "source": "TIFactionState.availableProjectNames, excluding active project slots; paused/stored progress is included as candidate progress.",
+            "goalViews": research_plan_goal_views(project_candidates, top),
+            "shortlist": research_plan_shortlist(project_candidates, top),
+        },
+        "scoreModel": {
+            "automatedJudgmentBoundary": "Scores are objective proxy signals for LLM review, not a final utility ranking.",
+            "axes": {
+                "fastCompletion": "100 for the fastest candidate in the same candidate pool; uses remaining research divided by estimated daily output at the current reference slot weight.",
+                "factionSynergy": "Normalized effective multiplier from current category bonuses if this candidate were added to the current research mix.",
+                "unlockBreadth": "Normalized count of direct downstream global tech and project templates listing this template as a prereq or alternate prereq.",
+                "criticalTemplate": "100 when template metadata marks AI_criticalTech true; otherwise 0.",
+                "resourceReliefCoverage": "Normalized count of resource types granted by the project that are currently listed as faction resource-income deficiencies; quantities are kept separately by resource.",
+                "currentProgress": "Existing accumulated progress divided by cost, useful for paused/stored projects.",
+            },
+            "referenceSlotWeights": {
+                "global": research_plan_reference_weight_fraction(faction, "global"),
+                "project": research_plan_reference_weight_fraction(faction, "project"),
+            },
+            "limitations": [
+                "The tool does not decide strategic priority weights such as whether war, economy, alien-objective progress, or expansion matters most.",
+                "Global candidate ETA assumes adding the candidate to the current research mix and current slot weights; actual UI selection may replace a completed slot and change category-penalty math.",
+                "Project availability is taken from the save's availableProjectNames; hidden unlock chance mechanics are not re-simulated.",
+                "Resource grants are not converted into a single cross-resource utility value.",
+            ],
+        },
+        "llmDecision": {
+            "recommendedUse": [
+                "Pick the user's strategic goal first.",
+                "Use goalViews to find candidates high on the relevant objective signal.",
+                "Use shortlist rows for effects, unlocks, costs, ETA, current constraints, and deficiencies.",
+                "Make the final recommendation in natural language, explicitly separating automated facts from strategic judgment.",
+            ],
+            "finalRecommendationAutomated": False,
+        },
+        "sourceNotes": [
+            "This report combines research-ui, topbar, global tech templates, project templates, and faction available-project state.",
+            "ObjectiveScores are normalized within global and project candidate pools separately.",
+            "Keyword tags are transparent string matches over template names, AI roles, and effect names; they are aids for scanning, not game rules.",
+        ],
+    }
+    if include_all_candidates:
+        report["globalResearchCandidates"]["all"] = global_candidates
+        report["projectResearchCandidates"]["all"] = project_candidates
+    return clean_numbers(report, 6)
+
+
+def command_research_plan(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    result = calculate_research_plan(
+        indexed,
+        templates_dir,
+        faction_name=args.faction,
+        top=args.top,
+        mode=args.mode,
+        include_all_candidates=args.all_candidates,
+    )
+    print_json(result, compact=args.compact)
+
+
 def faction_is_player(indexed: IndexedState, faction: dict[str, Any]) -> bool:
     metadata = first_value(indexed, "TIMetadataState") or {}
     player_name = metadata.get("playerFactionName")
@@ -5529,6 +6708,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_compact_flag(councilor)
 
+    org_plan = subparsers.add_parser(
+        "org-plan",
+        help="Recommend acquirable org assignments for councilor specialization and committee-wide stats.",
+    )
+    org_plan.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
+    org_plan.add_argument("--focus", choices=ORG_PLAN_FOCUS_CHOICES, default="balanced")
+    org_plan.add_argument("--top", type=int, default=5, help="Candidate rows per councilor objective view.")
+    org_plan.add_argument("--market-only", action="store_true", help="Exclude already-owned unassigned orgs from planning.")
+    org_plan.add_argument("--max-actions", type=int, default=4, help="Maximum assignment and replacement steps in committee search.")
+    org_plan.add_argument("--beam-width", type=int, default=8, help="Number of committee states retained at each search step.")
+    org_plan.add_argument("--all-candidates", action="store_true", help="Include full positive candidate action lists.")
+    add_compact_flag(org_plan)
+
     research = subparsers.add_parser("research", help="Calculate faction research income from raw save values.")
     research.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
     research.add_argument("--details", action="store_true", help="Include nation/councilor/hab source details.")
@@ -5537,6 +6729,16 @@ def build_parser() -> argparse.ArgumentParser:
     research_ui = subparsers.add_parser("research-ui", help="Reconstruct the Research screen's active global techs and projects.")
     research_ui.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
     add_compact_flag(research_ui)
+
+    research_plan = subparsers.add_parser(
+        "research-plan",
+        help="Build an LLM-ready report for choosing next global tech or project research.",
+    )
+    research_plan.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
+    research_plan.add_argument("--top", type=int, default=8, help="Rows per objective signal view.")
+    research_plan.add_argument("--mode", choices=("all", "global", "project"), default="all")
+    research_plan.add_argument("--all-candidates", action="store_true", help="Include full candidate lists, not just shortlists.")
+    add_compact_flag(research_plan)
 
     topbar = subparsers.add_parser("topbar", help="Reconstruct the top resource bar values for a faction.")
     topbar.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
@@ -5612,11 +6814,17 @@ def main(argv: list[str] | None = None) -> int:
         if command == "raw":
             command_raw(save_path, args)
             return 0
+        if command == "org-plan":
+            command_org_plan(save_path, templates_dir, args)
+            return 0
         if command == "research":
             command_research(save_path, templates_dir, args)
             return 0
         if command == "research-ui":
             command_research_ui(save_path, templates_dir, args)
+            return 0
+        if command == "research-plan":
+            command_research_plan(save_path, templates_dir, args)
             return 0
         if command == "topbar":
             command_topbar(save_path, templates_dir, args)

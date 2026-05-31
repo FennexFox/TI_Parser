@@ -13,12 +13,15 @@ python .\tools\ti_save_parser.py nation KOR
 python .\tools\ti_save_parser.py councilor Hanna
 python .\tools\ti_save_parser.py councilor Hanna --target-nation USA --details
 python .\tools\ti_save_parser.py councilor Hanna --current-location-context
+python .\tools\ti_save_parser.py org-plan --focus balanced
+python .\tools\ti_save_parser.py org-plan --focus science --market-only --top 3
 python .\tools\ti_save_parser.py nation-ui "유럽 연합"
 python .\tools\ti_save_parser.py hab-ui "제303기초연구단"
 python .\tools\ti_save_parser.py hab-slots --faction ResistCouncil
 python .\tools\ti_save_parser.py hab-plan --upgrading-to-tier 3 --focus research
 python .\tools\ti_save_parser.py research --details
 python .\tools\ti_save_parser.py research-ui
+python .\tools\ti_save_parser.py research-plan --top 5
 python .\tools\ti_save_parser.py topbar --details
 python .\tools\build_module_catalog.py
 python .\tools\ti_save_parser.py world-ui
@@ -36,6 +39,16 @@ Conditional trait modifiers are not mixed into `finalAttributes`; use
 `--target-nation <name/code>` or `--current-location-context` to get
 `contextualAttributes` for a specific situation.
 
+The `org-plan` command evaluates the faction's currently acquirable
+`availableOrgs` against every councilor. It reports per-councilor views for
+balanced stats and each individual stat, applies the Administration capacity
+limit, checks acquisition costs and owner eligibility, and recommends a
+committee-wide assignment sequence. Already-owned unassigned orgs are included
+by default so useful inventory is assigned before spending resources; pass
+`--market-only` to evaluate acquisitions only. The committee plan uses a
+bounded beam search with practical defaults; increase `--max-actions` or
+`--beam-width` when a slower, broader search is useful.
+
 The `research` command recalculates the UI's daily research tooltip from raw
 save values, including councilor trait/org income, CP research effects,
 knowledge-sector bonuses, hab efficiency modules, excess MC research, and
@@ -50,6 +63,16 @@ weights from `researchWeights`, category/project-facility modifiers, current
 progress, daily slot output, faction contribution bars, and ETA dates. Project
 records in slots 6+ are reported separately as paused/stored progress, not as
 currently active project research slots.
+
+The `research-plan` command builds an LLM-ready report for the question "what
+global tech or faction project should I research next?" It automates objective
+candidate collection and evidence shaping: currently active slots, paused
+projects, available global techs, available projects, research costs, ETA
+estimates at current slot weights, category synergy, downstream unlock counts,
+critical template flags, resource-deficiency coverage, and existing progress.
+It intentionally does not collapse those signals into a final strategic utility
+ranking; the output includes goal-specific score views and source notes so an
+LLM can make the value judgment explicitly.
 
 The `topbar` command reconstructs the top resource bar from the save, including
 current stockpiles, monthly/yearly net resource income, research distribution,
