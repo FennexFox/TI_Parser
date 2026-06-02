@@ -4,6 +4,17 @@ Small local parser for Terra Invicta `.gz` saves. It reads the full save once,
 builds a compact indexed snapshot, and reuses a cache keyed by save path, size,
 and modification time.
 
+Implementation layout:
+
+- `tools/ti_parser_core.py` owns save loading, template loading, indexing, and reference helpers.
+- `tools/ti_parser_snapshot.py` owns compact snapshot summaries and snapshot cache handling.
+- `tools/ti_parser_income.py` owns councilor and nation income calculations.
+- `tools/ti_parser_hab.py` owns hab module, support, mining, and power calculations.
+- `tools/ti_parser_org.py` owns org-plan parsing, conditional evaluation, and committee assignment search.
+- `tools/ti_parser_cli.py` owns argument parsing and command dispatch.
+- `tools/ti_save_parser.py` keeps the public script entrypoint and thin compatibility wrappers.
+- `tools/catalog_utils.py` contains shared catalog-generator helpers.
+
 Examples:
 
 ```powershell

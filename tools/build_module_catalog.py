@@ -9,11 +9,18 @@ parser because mining, adviser, power, and faction effects depend on state.
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 from typing import Any
 
 import ti_save_parser as ti
+from catalog_utils import (
+    compact_number,
+    parse_languages,
+    read_localization_file,
+    source_fingerprint,
+    write_json_output,
+    write_text_output,
+)
 
 
 SCHEMA_VERSION = 1
@@ -61,37 +68,12 @@ SUPPORT_FIELDS = {
 }
 
 
-def compact_number(value: Any, digits: int = 6) -> Any:
-    if not isinstance(value, float):
-        return value
-    rounded = round(value, digits)
-    if rounded == 0:
-        return 0
-    if rounded.is_integer():
-        return int(rounded)
-    return rounded
-
-
 def nonzero_values(values: dict[str, Any]) -> dict[str, Any]:
     return {
         key: compact_number(value)
         for key, value in values.items()
         if isinstance(value, (int, float)) and value != 0
     }
-
-
-def read_localization_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.is_file():
-        return values
-    with path.open("r", encoding="utf-8-sig") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip()
-    return values
 
 
 def load_module_localizations(templates_dir: Path, languages: list[str]) -> dict[str, dict[str, dict[str, str]]]:
@@ -166,17 +148,6 @@ def tech_bonus_map(template: dict[str, Any]) -> dict[str, Any]:
         category = str(item.get("category"))
         bonuses[category] = bonuses.get(category, 0.0) + ti.as_float(item.get("bonus"), 0.0)
     return nonzero_values(bonuses)
-
-
-def source_fingerprint(path: Path) -> dict[str, Any]:
-    fingerprint = ti.file_fingerprint(path)
-    if not fingerprint:
-        return {"file": path.name}
-    return {
-        "file": path.name,
-        "size": fingerprint["size"],
-        "mtime_ns": fingerprint["mtime_ns"],
-    }
 
 
 def derive_tags(template: dict[str, Any], income: dict[str, Any], support: dict[str, Any]) -> list[str]:
@@ -438,16 +409,14 @@ def main() -> int:
     templates_dir = ti.resolve_templates_dir(args.templates_dir)
     if templates_dir is None:
         raise SystemExit("Templates directory not found. Pass --templates-dir.")
-    languages = [item.strip() for item in args.languages.split(",") if item.strip()]
+    languages = parse_languages(args.languages)
     catalog = build_catalog(templates_dir, languages)
 
     json_output = Path(args.json_output)
-    json_output.parent.mkdir(parents=True, exist_ok=True)
-    json_output.write_text(json.dumps(catalog, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_output(json_output, catalog)
 
     markdown_output = Path(args.markdown_output)
-    markdown_output.parent.mkdir(parents=True, exist_ok=True)
-    markdown_output.write_text(build_markdown(catalog, args.markdown_language), encoding="utf-8")
+    write_text_output(markdown_output, build_markdown(catalog, args.markdown_language))
 
     ti.print_json(
         {

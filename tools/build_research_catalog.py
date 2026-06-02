@@ -9,12 +9,19 @@ only decide which nodes are completed, available, or blocked.
 from __future__ import annotations
 
 import argparse
-import json
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 import ti_save_parser as ti
+from catalog_utils import (
+    compact_number,
+    parse_languages,
+    read_localization_file,
+    source_fingerprint,
+    write_json_output,
+    write_text_output,
+)
 
 
 SCHEMA_VERSION = 1
@@ -31,17 +38,6 @@ LOCALIZATION_FILES = {
 LOCALIZATION_FIELDS = ("displayName",)
 
 
-def compact_number(value: Any, digits: int = 6) -> Any:
-    if not isinstance(value, float):
-        return value
-    rounded = round(value, digits)
-    if rounded == 0:
-        return 0
-    if rounded.is_integer():
-        return int(rounded)
-    return rounded
-
-
 def clean_value(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): clean_value(item) for key, item in value.items() if item is not None}
@@ -52,20 +48,6 @@ def clean_value(value: Any) -> Any:
 
 def nonempty_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
-
-
-def read_localization_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.is_file():
-        return values
-    with path.open("r", encoding="utf-8-sig") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip()
-    return values
 
 
 def load_research_localizations(
@@ -87,17 +69,6 @@ def load_research_localizations(
                 entries.setdefault(data_name, {})[field] = value
             localizations[kind][language] = entries
     return localizations
-
-
-def source_fingerprint(path: Path) -> dict[str, Any]:
-    fingerprint = ti.file_fingerprint(path)
-    if not fingerprint:
-        return {"file": path.name}
-    return {
-        "file": path.name,
-        "size": fingerprint["size"],
-        "mtime_ns": fingerprint["mtime_ns"],
-    }
 
 
 def infer_node_kind(data_name: str) -> str:
@@ -486,16 +457,14 @@ def main() -> int:
     templates_dir = ti.resolve_templates_dir(args.templates_dir)
     if templates_dir is None:
         raise SystemExit("Templates directory not found. Pass --templates-dir.")
-    languages = [item.strip() for item in args.languages.split(",") if item.strip()]
+    languages = parse_languages(args.languages)
     catalog = build_catalog(templates_dir, languages)
 
     json_output = Path(args.json_output)
-    json_output.parent.mkdir(parents=True, exist_ok=True)
-    json_output.write_text(json.dumps(catalog, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_output(json_output, catalog)
 
     markdown_output = Path(args.markdown_output)
-    markdown_output.parent.mkdir(parents=True, exist_ok=True)
-    markdown_output.write_text(build_markdown(catalog, args.markdown_language), encoding="utf-8")
+    write_text_output(markdown_output, build_markdown(catalog, args.markdown_language))
 
     ti.print_json(
         {
