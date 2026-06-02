@@ -20,6 +20,162 @@ def add_state(gamestates, type_name, state_id, value):
 
 
 class HabPlanTests(unittest.TestCase):
+    def test_location_adjusted_upgrade_cost_adds_radiation_metals_and_discount(self):
+        gamestates = {}
+        add_state(gamestates, "TISpaceBodyState", 10, {"templateName": "Mercury"})
+        indexed = ti.build_index(
+            {
+                "gamestates": {
+                    **gamestates,
+                    "TIGlobalValuesState": [
+                        {
+                            "Key": ref(99),
+                            "Value": {
+                                "ID": ref(99),
+                                "resourceMarketValues": {"Volatiles": 5.0, "Metals": 10.0},
+                            },
+                        }
+                    ],
+                }
+            }
+        )
+        template = {
+            "dataName": "Upgrade",
+            "baseMass_tons": 1000,
+            "buildTime_Days": 120,
+            "weightedBuildMaterials": {"volatiles": 0.2, "metals": 0.8},
+        }
+        body_templates = {
+            "Mercury": {"dataName": "Mercury", "irradiatedMultiplier": 2.0},
+        }
+        hab = {"habType": "Base", "barycenter": ref(10)}
+
+        construction = ti.hab_module_construction_analysis(
+            indexed,
+            hab,
+            [],
+            {"resources": {"Volatiles": 1000, "Metals": 1000}},
+            template,
+            body_templates,
+            {},
+            is_upgrade=True,
+        )
+
+        self.assertAlmostEqual(construction["materials"]["Volatiles"], 13.333333)
+        self.assertAlmostEqual(construction["materials"]["Metals"], 120.0)
+        self.assertAlmostEqual(construction["constructionTime_Days"], 80.0)
+        self.assertAlmostEqual(construction["mass"]["radiationAdded_tons"], 1000.0)
+        self.assertAlmostEqual(construction["penalties"]["irradiatedMultiplier"], 2.0)
+        self.assertAlmostEqual(construction["marketEquivalentMoney"], 1266.666667)
+
+    def test_break_even_includes_construction_time_from_start(self):
+        break_even = ti.module_break_even_analysis(
+            {
+                "constructionTime_Days": ti.DAYS_PER_YEAR / 12.0,
+                "marketEquivalentMoney": 100.0,
+                "materials": {"Metals": 10.0},
+            },
+            {"Metals": {"net": 5.0}},
+            {"Metals": 10.0},
+        )
+
+        self.assertEqual(break_even["paybackAfterCompletion_months"], 2.0)
+        self.assertEqual(break_even["breakEvenFromStart_months"], 3.0)
+        self.assertEqual(break_even["resourceRecoveryAfterCompletion_months"]["Metals"], 2.0)
+
+    def test_construction_waits_for_in_progress_core_completion(self):
+        indexed = ti.build_index(
+            {
+                "gamestates": {
+                    "TITimeState": [
+                        {
+                            "Key": ref(1),
+                            "Value": {
+                                "ID": ref(1),
+                                "currentDateTime": {"year": 2035, "month": 10, "day": 10},
+                            },
+                        }
+                    ],
+                }
+            }
+        )
+        records = [
+            {
+                "templateName": "ColonyCore",
+                "template": {"dataName": "ColonyCore", "coreModule": True, "tier": 3},
+                "completed": False,
+                "state": {"completionDate": "2035-10-19T00:00:00.0000000"},
+            }
+        ]
+
+        construction = ti.hab_module_construction_analysis(
+            indexed,
+            {"tier": 2},
+            records,
+            {},
+            {"dataName": "ShortBuild", "tier": 3, "baseMass_tons": 0, "buildTime_Days": 2},
+            {},
+            {},
+        )
+
+        self.assertEqual(construction["localConstructionTime_Days"], 2.0)
+        self.assertEqual(construction["coreCompletionMinimum_Days"], 9.0)
+        self.assertEqual(construction["constructionTime_Days"], 9.0)
+
+        lower_tier = ti.hab_module_construction_analysis(
+            indexed,
+            {"tier": 2},
+            records,
+            {},
+            {"dataName": "TierOneBuild", "tier": 1, "baseMass_tons": 0, "buildTime_Days": 2},
+            {},
+            {},
+        )
+
+        self.assertEqual(lower_tier["coreCompletionMinimum_Days"], 0.0)
+        self.assertEqual(lower_tier["constructionTime_Days"], 2.0)
+
+    def test_helium3_access_replaces_fissiles_build_cost_with_water(self):
+        gamestates = {}
+        add_state(gamestates, "TIHabSectorState", 20, {"habModules": [ref(30)]})
+        add_state(
+            gamestates,
+            "TIHabModuleState",
+            30,
+            {
+                "templateName": "Helium-3Mine",
+                "constructionCompleted": True,
+                "powered": True,
+            },
+        )
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        materials = ti.hab_module_build_materials(
+            indexed,
+            {},
+            {"habSectors": [ref(20)]},
+            {
+                "dataName": "Fusion",
+                "baseMass_tons": 100,
+                "specialRules": ["UsesHelium3"],
+                "weightedBuildMaterials": {"fissiles": 0.4, "metals": 0.6},
+            },
+            {},
+            {},
+        )
+
+        self.assertEqual(materials["Water"], 4.0)
+        self.assertEqual(materials["Metals"], 6.0)
+        self.assertNotIn("Fissiles", materials)
+
+    def test_payback_candidates_omit_candidates_that_never_recover_cost(self):
+        candidates = [
+            {"template": "NoPayback", "breakEven": {"breakEvenFromStart_months": None}},
+            {"template": "Payback", "breakEven": {"breakEvenFromStart_months": 3.0}},
+        ]
+
+        self.assertEqual([row["template"] for row in ti.payback_candidates(candidates, 8)], ["Payback"])
+
     def test_research_projects_and_category_scores_are_separate(self):
         monthly_delta = {
             "Research": {"income": 10.0, "support": 0.0, "net": 10.0},

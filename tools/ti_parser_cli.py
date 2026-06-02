@@ -21,6 +21,7 @@ RAW_COMMANDS = {
     "hab-ui": "command_hab_ui",
     "hab-slots": "command_hab_slots",
     "hab-plan": "command_hab_plan",
+    "ship-plan": "command_ship_plan",
     "project-analysis": "command_project_analysis",
 }
 
@@ -141,6 +142,18 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     hab_plan.add_argument("--top", type=int, default=8, help="Candidate rows per category.")
     hab_plan.add_argument("--all", action="store_true", help="Include habs with no planned empty slots.")
     add_compact_flag(hab_plan)
+
+    ship_plan = subparsers.add_parser(
+        "ship-plan",
+        help="Build an LLM-ready report for designing ships from currently unlocked parts.",
+    )
+    ship_plan.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
+    ship_plan.add_argument("--role", choices=api.SHIP_PLAN_ROLE_CHOICES, default="balanced")
+    ship_plan.add_argument("--top", type=int, default=8, help="Rows per drive, weapon, and role-utility shortlist.")
+    ship_plan.add_argument("--include-obsolete", action="store_true", help="Include ship parts marked obsolete by the faction.")
+    ship_plan.add_argument("--all-components", action="store_true", help="Include full unlocked drive, utility, and weapon lists.")
+    ship_plan.add_argument("--design", help="Select one saved ship design by display-name or template fragment.")
+    add_compact_flag(ship_plan)
 
     project_analysis = subparsers.add_parser("project-analysis", help="Rank available project candidates on transparent heuristic axes.")
     project_analysis.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")

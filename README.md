@@ -30,6 +30,9 @@ python .\tools\ti_save_parser.py nation-ui "유럽 연합"
 python .\tools\ti_save_parser.py hab-ui "제303기초연구단"
 python .\tools\ti_save_parser.py hab-slots --faction ResistCouncil
 python .\tools\ti_save_parser.py hab-plan --upgrading-to-tier 3 --focus research
+python .\tools\ti_save_parser.py ship-plan --role colony --top 5
+python .\tools\ti_save_parser.py ship-plan --role combat --include-obsolete
+python .\tools\ti_save_parser.py ship-plan --design "PKG Defiant"
 python .\tools\ti_save_parser.py project-analysis --top 10 --sort research-sustainable
 python .\tools\ti_save_parser.py research --details
 python .\tools\ti_save_parser.py research-ui
@@ -115,7 +118,8 @@ share, control-point priority weights, accumulated investment points, public
 opinion, army/navy limits, nukes, and diplomacy lists.
 
 The `hab-ui` command reconstructs a hab panel from raw sector/module state and
-module templates, including crew, power, monthly net resources, research
+module templates, including crew, location-adjusted solar power with active
+solar-mirror bonuses, monthly net resources, research
 category bonuses, Earth LEO priority bonuses, construction modifiers, and
 `modules.slots` slot accounting. Raw saves can include locked future sector
 placeholders with empty module slots; these should not be treated as currently
@@ -140,12 +144,17 @@ treated as the per-slot alternative value, and selected modules are charged for
 the focus score they give up. If every candidate is non-positive for that
 focus, the alternative value is zero. Locked placeholder slots are only
 included in `plannedEmpty` when the current core module is actively upgrading
-to a higher tier that will unlock those sectors.
+to a higher tier that will unlock those sectors. Candidate and upgrade rows
+also report location-adjusted construction materials, build time, and
+market-value break-even estimates. Location costs include gravity scaling,
+solar-mirror distance scaling, irradiated-location extra metals, and the
+two-thirds module-upgrade discount. Helium-3 access substitutes water for
+eligible fissiles costs. Build time includes hab construction-speed modifiers
+and any minimum wait for an in-progress core upgrade to complete.
 
-`hab-plan` is intentionally not a full optimizer yet. It uses template build
-material weights rather than exact location-adjusted costs, filters out combat
-and objective-only modules for the economic planning view, and should be treated
-as a shortlist generator before committing construction in-game.
+`hab-plan` is intentionally not a full optimizer yet. It filters out combat and
+objective-only modules for the economic planning view and should be treated as
+a shortlist generator before committing construction in-game.
 Candidate monthly deltas are calculated by comparing the whole hab before and
 after a hypothetical completed module. For farm-style modules, negative support
 means reduced existing crew upkeep rather than resource production.
@@ -159,3 +168,23 @@ empty hab slots, and report 1/2/4-module effects using the best current hab
 option. Treat those samples as LLM/human decision inputs: they do not solve the
 global construction queue, reserve power-support modules, or enforce global MC
 across every hypothetical build.
+
+The `ship-plan` command builds an LLM-ready ship-design report from the player's
+finished projects, obsolete-part settings, existing designs, resource state, and
+local ship-component templates. It reports unlocked hulls and core components,
+separate drive shortlists for thrust and exhaust velocity, legal power-plant
+pairings, weapon shortlists, and role-specific utility modules for `balanced`,
+`combat`, `intercept`, `transfer`, `colony`, `assault`, or `science` planning.
+Use `--include-obsolete` when a hidden legacy component is still useful and
+`--all-components` when the full unlocked drive, utility, and weapon lists are
+needed. Pass `--design <name-or-template-fragment>` to inspect one saved design
+without printing the large candidate catalog.
+
+Saved designs include a non-combat ship-builder simulation reconstructed from
+the local game templates. It reports crew; wet, dry, propellant, component, and
+armor mass; cruise and combat acceleration; delta-v; angular acceleration;
+power demand; waste heat; radiator mass; battery and heat-sink storage;
+construction resources with component breakdowns; tier 1/2/3 shipyard build
+times; MC; and monthly money upkeep. It intentionally excludes combat
+performance ratings. Drive and weapon shortlist scores remain transparent
+comparison proxies rather than a transfer or combat simulation.

@@ -83,9 +83,14 @@ DEFAULT_GLOBAL_CONFIG = {
     "overageExtraProjectBonusPct": 0.01,
     "spaceMineFreebies": 0,
     "spaceResourceToTons": 0.1,
+    "crewBaselineWater_tons": 2.0,
+    "crewBaselineVolatiles_tons": 2.0,
     "crewWaterConsumptionTons_year": 3.5,
     "crewVolatilesConsumptionTons_year": 3.5,
     "crewSalary_year": 0.1,
+    "baselineMaxHumanCruiseAcceleration_g": 2.0,
+    "baselineMaxHumanCombatAcceleration_g": 3.0,
+    "smallShipyardPenaltyPowerPerTier": 1.5,
 }
 MIN_POPULATION_FOR_FIRST_ARMY_MILLIONS = 5.0
 MIN_POPULATION_FOR_ADDITIONAL_ARMIES_PER_MILLIONS = 25.0
@@ -94,6 +99,8 @@ MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION = 3
 PCGDP_FOR_NAVY_EXCEPTION = 40000.0
 STANDARD_GRAVITY_MPS2 = 9.806650161743164
 GRAVITATIONAL_CONSTANT = 6.67384e-11
+ASTRONOMICAL_UNIT_KM = 149_597_870.7
+MAX_SOLAR_POWER_MULTIPLIER = 8.0
 NATION_PRIORITY_ROWS = (
     ("Economy", "경제", "Economy", "Economy", 1),
     ("Welfare", "복지", "Welfare", "Welfare", 1),
@@ -302,6 +309,42 @@ ORG_PLAN_COST_FIELDS = {
     "Influence": "costInfluence",
     "Operations": "costOps",
     "Boost": "costBoost",
+}
+SHIP_PLAN_ROLE_CHOICES = ("balanced", "combat", "intercept", "transfer", "colony", "assault", "science")
+SHIP_PLAN_WEAPON_TEMPLATE_FILES = (
+    ("gun", "TIGunTemplate.json"),
+    ("magnetic", "TIMagneticGunTemplate.json"),
+    ("missile", "TIMissileTemplate.json"),
+    ("laser", "TILaserWeaponTemplate.json"),
+    ("particle", "TIParticleWeaponTemplate.json"),
+    ("plasma", "TIPlasmaWeaponTemplate.json"),
+)
+SHIP_PLAN_UTILITY_TEMPLATE_FILES = (
+    ("utility", "TIUtilityModuleTemplate.json"),
+    ("battery", "TIBatteryTemplate.json"),
+    ("heatSink", "TIHeatSinkTemplate.json"),
+)
+SHIP_PLAN_SHIPYARD_TIERS = {
+    1: {"template": "SpaceDock", "constructionTimeModifier": 1.0},
+    2: {"template": "Shipyard", "constructionTimeModifier": 0.8},
+    3: {"template": "Spaceworks", "constructionTimeModifier": 0.6},
+}
+SHIP_PLAN_SELF_POWERED_DRIVE_CLASSES = {
+    "Chemical",
+    "Fission_Pulse",
+    "NuclearSaltWater",
+    "Fusion_Pulse",
+}
+SHIP_PLAN_MOUNT_SLOTS = {
+    "HalfHull": ("hull", 0.5),
+    "HalfNose": ("nose", 0.5),
+    "OneHull": ("hull", 1.0),
+    "TwoHullHoriz": ("hull", 2.0),
+    "FourHull": ("hull", 4.0),
+    "OneNose": ("nose", 1.0),
+    "TwoNoseVert": ("nose", 2.0),
+    "ThreeNoseAngle": ("nose", 3.0),
+    "FourNose": ("nose", 4.0),
 }
 NATION_CONDITION_FIELDS = {
     "TINationCondition_fCohesion": "cohesion",
@@ -810,8 +853,304 @@ def hab_monthly_resource_income(
     )
 
 
-def hab_power_summary(records: list[dict[str, Any]]) -> dict[str, int]:
-    return hab_layer.hab_power_summary(records)
+def space_body_template(
+    body: dict[str, Any] | None,
+    body_templates: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any]:
+    if not body:
+        return {}
+    return (body_templates or {}).get(str(body.get("templateName") or ""), {})
+
+
+def space_body_mean_radius_km(template: dict[str, Any]) -> float:
+    mean_radius = as_float(template.get("meanRadius_km"), 0.0)
+    if mean_radius > 0.0:
+        return mean_radius
+    equatorial_radius = as_float(template.get("equatorialRadius_km"), 0.0)
+    if equatorial_radius > 0.0:
+        polar_radius = equatorial_radius * (1.0 - as_float(template.get("oblateness"), 0.0))
+        return (equatorial_radius * 2.0 + polar_radius) / 3.0
+    dimensions = [
+        dimension
+        for field in ("dimensionX_km", "dimensionY_km", "dimensionZ_km")
+        if (dimension := as_float(template.get(field), 0.0)) > 0.0
+    ]
+    return sum(dimensions) / len(dimensions) / 2.0 if dimensions else 0.0
+
+
+def space_body_max_radius_km(template: dict[str, Any]) -> float:
+    dimensions = [
+        dimension
+        for field in ("dimensionX_km", "dimensionY_km", "dimensionZ_km")
+        if (dimension := as_float(template.get(field), 0.0)) > 0.0
+    ]
+    if dimensions:
+        return max(dimensions) / 2.0
+    equatorial_radius = as_float(template.get("equatorialRadius_km"), 0.0)
+    return equatorial_radius if equatorial_radius > 0.0 else space_body_mean_radius_km(template)
+
+
+def natural_space_object_sun_distance_au(
+    indexed: IndexedState,
+    location: dict[str, Any] | None,
+    body_templates: dict[str, dict[str, Any]],
+) -> float | None:
+    current = location
+    visited: set[int] = set()
+    while current:
+        current_id = ref_id(current.get("ID"))
+        if current_id is not None:
+            if current_id in visited:
+                return None
+            visited.add(current_id)
+        secondary = state_value_by_id(indexed, ref_id(current.get("secondaryObject")))
+        if secondary:
+            current = secondary
+            continue
+        template = space_body_template(current, body_templates)
+        distance_au = as_float(template.get("semiMajorAxis_AU"), 0.0)
+        if distance_au > 0.0:
+            return distance_au
+        current = state_value_by_id(indexed, ref_id(current.get("barycenter")))
+    return None
+
+
+def space_body_atmosphere_solar_modifier(template: dict[str, Any]) -> float:
+    return {
+        "Massive": 0.0,
+        "Thick": 0.25,
+        "Standard": 0.5,
+        "Thin": 0.75,
+    }.get(str(template.get("atmosphere") or ""), 1.0)
+
+
+def space_body_surface_solar_visibility(
+    indexed: IndexedState,
+    body: dict[str, Any],
+    hab_site: dict[str, Any] | None,
+    body_templates: dict[str, dict[str, Any]],
+) -> float:
+    template = space_body_template(body, body_templates)
+    object_type = str(template.get("objectType") or "")
+    if object_type == "Star":
+        return 1.0
+    if object_type in {"Asteroid", "AsteroidalMoon"}:
+        return 0.6
+    if object_type == "Comet":
+        return 0.3
+
+    daylight_fraction = 0.5
+    parent = state_value_by_id(indexed, ref_id(body.get("barycenter")))
+    parent_template = space_body_template(parent, body_templates)
+    latitude = abs(as_float((hab_site or {}).get("latitude"), 0.0))
+    if (
+        hab_site
+        and str(parent_template.get("objectType") or "") == "Star"
+        and as_float(template.get("tilt_Deg"), 0.0) < 5.0
+        and latitude > 85.0
+    ):
+        daylight_fraction += latitude / 360.0
+    return space_body_atmosphere_solar_modifier(template) * daylight_fraction
+
+
+def orbit_template_semi_major_axis_km(
+    orbit_template: dict[str, Any],
+    barycenter_template: dict[str, Any],
+) -> float:
+    semi_major_axis_km = as_float(orbit_template.get("semiMajorAxis_km"), 0.0)
+    altitude_km = as_float(orbit_template.get("altitude_km"), 0.0)
+    semi_major_axis_au = as_float(orbit_template.get("semiMajorAxis_AU"), 0.0)
+    if semi_major_axis_km <= 0.0 and altitude_km > 0.0:
+        semi_major_axis_km = space_body_mean_radius_km(barycenter_template) + altitude_km
+    elif semi_major_axis_km <= 0.0 and semi_major_axis_au > 0.0:
+        semi_major_axis_km = semi_major_axis_au * ASTRONOMICAL_UNIT_KM
+    elif semi_major_axis_km <= 0.0 and orbit_template.get("radialOrbit"):
+        semi_major_axis_km = space_body_max_radius_km(barycenter_template) * 3.25
+
+    max_radius_km = space_body_max_radius_km(barycenter_template)
+    hill_radius_km = as_float(barycenter_template.get("Hill Radius in km"), 0.0)
+    if semi_major_axis_km > 0.0 and max_radius_km > 0.0:
+        if hill_radius_km > 0.0:
+            semi_major_axis_km = min(semi_major_axis_km, hill_radius_km)
+        semi_major_axis_km = max(semi_major_axis_km, max_radius_km + 10.0)
+    return semi_major_axis_km
+
+
+def space_body_orbit_solar_visibility(
+    indexed: IndexedState,
+    body: dict[str, Any],
+    orbit_template: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]],
+) -> float:
+    template = space_body_template(body, body_templates)
+    semi_major_axis_km = orbit_template_semi_major_axis_km(orbit_template, template)
+    mean_radius_km = space_body_mean_radius_km(template)
+    if semi_major_axis_km <= 0.0 or mean_radius_km <= 0.0:
+        return 1.0
+    visibility = 1.0 - math.atan(mean_radius_km / semi_major_axis_km) / math.pi
+
+    parent = state_value_by_id(indexed, ref_id(body.get("barycenter")))
+    parent_template = space_body_template(parent, body_templates)
+    grandparent = state_value_by_id(indexed, ref_id((parent or {}).get("barycenter")))
+    grandparent_template = space_body_template(grandparent, body_templates)
+    body_orbit_km = as_float(template.get("semiMajorAxis_km"), 0.0)
+    parent_orbit_km = as_float(parent_template.get("semiMajorAxis_AU"), 0.0) * ASTRONOMICAL_UNIT_KM
+    parent_mean_radius_km = space_body_mean_radius_km(parent_template)
+    grandparent_mean_radius_km = space_body_mean_radius_km(grandparent_template)
+    if (
+        str(template.get("objectType") or "") in {"PlanetaryMoon", "AsteroidalMoon"}
+        and as_float(template.get("inclination_Deg"), 0.0) + as_float(parent_template.get("tilt_Deg"), 0.0) < 5.0
+        and body_orbit_km > 0.0
+        and parent_orbit_km > 0.0
+        and grandparent_mean_radius_km > 0.0
+        and parent_orbit_km * parent_mean_radius_km / grandparent_mean_radius_km > body_orbit_km
+    ):
+        visibility *= 1.0 - math.atan(parent_mean_radius_km / body_orbit_km) / math.pi
+    return visibility
+
+
+def lagrange_solar_visibility(
+    indexed: IndexedState,
+    lagrange: dict[str, Any],
+    orbit_template: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]],
+) -> float:
+    if not str(lagrange.get("templateName") or "").endswith("L2"):
+        return 1.0
+    secondary = state_value_by_id(indexed, ref_id(lagrange.get("secondaryObject")))
+    secondary_template = space_body_template(secondary, body_templates)
+    primary = state_value_by_id(indexed, ref_id((secondary or {}).get("barycenter")))
+    primary_template = space_body_template(primary, body_templates)
+    if str(primary_template.get("objectType") or "") != "Star":
+        return 1.0
+
+    secondary_orbit_km = as_float(secondary_template.get("semiMajorAxis_AU"), 0.0) * ASTRONOMICAL_UNIT_KM
+    secondary_radius_km = space_body_mean_radius_km(secondary_template)
+    primary_radius_km = space_body_mean_radius_km(primary_template)
+    secondary_mass_kg = as_float(secondary_template.get("mass_kg"), 0.0)
+    primary_mass_kg = as_float(primary_template.get("mass_kg"), 0.0)
+    if min(secondary_orbit_km, secondary_radius_km, primary_radius_km, secondary_mass_kg, primary_mass_kg) <= 0.0:
+        return 1.0
+
+    shadow_length_km = secondary_orbit_km * secondary_radius_km / primary_radius_km
+    hill_ratio = (secondary_mass_kg / (3.0 * primary_mass_kg)) ** (1.0 / 3.0)
+    eccentricity = as_float(secondary_template.get("eccentricity"), 0.0)
+    minimum_l2_km = secondary_orbit_km * (1.0 - eccentricity) * hill_ratio
+    if minimum_l2_km > shadow_length_km:
+        return 1.0
+    maximum_l2_km = secondary_orbit_km * (1.0 + eccentricity) * hill_ratio
+    orbit_km = orbit_template_semi_major_axis_km(orbit_template, {})
+    full_shadow_radius_km = minimum_l2_km * secondary_radius_km / shadow_length_km
+    if orbit_km > full_shadow_radius_km:
+        return 1.0
+    return minimum_l2_km / maximum_l2_km if maximum_l2_km >= shadow_length_km else 0.05
+
+
+def hab_natural_solar_multiplier(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]],
+    orbit_templates: dict[str, dict[str, Any]],
+) -> float | None:
+    barycenter = hab_barycenter_state(indexed, hab)
+    distance_au = natural_space_object_sun_distance_au(indexed, barycenter, body_templates)
+    if hab.get("habType") == "Base" or hab.get("habSite"):
+        body = state_value_by_id(indexed, ref_id(hab.get("barycenter")))
+        template = space_body_template(body, body_templates)
+        if str(template.get("objectType") or "") == "Star":
+            return 1.0
+        if distance_au is None or distance_au <= 0.0 or not body:
+            return None
+        site = state_value_by_id(indexed, ref_id(hab.get("habSite")))
+        return space_body_surface_solar_visibility(indexed, body, site, body_templates) / (distance_au * distance_au)
+
+    if distance_au is None or distance_au <= 0.0:
+        return None
+    orbit_state = state_value_by_id(indexed, ref_id(hab.get("orbitState"))) or {}
+    orbit_template = orbit_templates.get(str(orbit_state.get("templateName") or ""), {})
+    if barycenter.get("secondaryObject"):
+        visibility = lagrange_solar_visibility(indexed, barycenter, orbit_template, body_templates)
+    else:
+        visibility = space_body_orbit_solar_visibility(indexed, barycenter, orbit_template, body_templates)
+    return visibility / (distance_au * distance_au)
+
+
+def hab_solar_mirror_bonus(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    faction_id: int | None,
+    tier: int,
+) -> int:
+    if faction_id is None or not (hab.get("habType") == "Base" or hab.get("habSite")):
+        return 0
+    body = state_value_by_id(indexed, ref_id(hab.get("barycenter"))) or {}
+    rows = body.get("solarMirrorBonus") if isinstance(body.get("solarMirrorBonus"), list) else []
+    for row in rows:
+        if isinstance(row, dict) and ref_id(row.get("Key")) == faction_id:
+            return int(as_float(row.get("Value"), 0.0)) * tier
+    return 0
+
+
+def hab_module_power(
+    template: dict[str, Any],
+    *,
+    indexed: IndexedState | None = None,
+    hab: dict[str, Any] | None = None,
+    body_templates: dict[str, dict[str, Any]] | None = None,
+    orbit_templates: dict[str, dict[str, Any]] | None = None,
+) -> int:
+    template_power = int(as_float(template.get("power"), 0.0))
+    rules = hab_template_special_rules(template)
+    if indexed is not None and hab is not None and body_templates:
+        if "Solar_Power_Variable_Output" in rules:
+            multiplier = hab_natural_solar_multiplier(indexed, hab, body_templates, orbit_templates or {})
+            if multiplier is None:
+                return template_power
+            output = int(round(multiplier * as_float(template.get("power"), 0.0)))
+            output += hab_solar_mirror_bonus(
+                indexed,
+                hab,
+                ref_id(hab.get("faction")),
+                int(as_float(template.get("tier"), 0.0)),
+            )
+            return min(output, int(MAX_SOLAR_POWER_MULTIPLIER * as_float(template.get("power"), 0.0)))
+        if "Cost_Scales_With_Gravity" in rules:
+            faction = state_value_by_id(indexed, ref_id(hab.get("faction"))) or {}
+            relative_energy = space_body_relative_energy_for_mining(
+                indexed,
+                hab_construction_surface_body(indexed, hab),
+                faction,
+                body_templates,
+            )
+            return int(template_power / 2.0 + round(template_power / 2.0 * relative_energy))
+    return template_power
+
+
+def hab_power_summary(
+    records: list[dict[str, Any]],
+    *,
+    indexed: IndexedState | None = None,
+    hab: dict[str, Any] | None = None,
+    body_templates: dict[str, dict[str, Any]] | None = None,
+    orbit_templates: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, int]:
+    generated = 0
+    consumed = 0
+    for record in records:
+        if not hab_module_active_record(record):
+            continue
+        power = hab_module_power(
+            record.get("template", {}),
+            indexed=indexed,
+            hab=hab,
+            body_templates=body_templates,
+            orbit_templates=orbit_templates,
+        )
+        if power > 0:
+            generated += power
+        elif power < 0:
+            consumed += -power
+    return {"consumed": consumed, "generated": generated, "net": generated - consumed}
 
 
 def hab_tech_bonuses(records: list[dict[str, Any]]) -> dict[str, float]:
@@ -893,6 +1232,8 @@ def calculate_hab_ui(
         raise SystemExit(f"Hab not found: {hab_name}")
     hab_id, hab = found
     hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
+    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
     trait_templates = load_trait_templates(templates_dir)
     effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
     faction_ref = resolve_ref(indexed, hab.get("faction"))
@@ -934,7 +1275,13 @@ def calculate_hab_ui(
         },
         "status": {
             "crew": hab_crew(records),
-            "power": hab_power_summary(records),
+            "power": hab_power_summary(
+                records,
+                indexed=indexed,
+                hab=hab,
+                body_templates=body_templates,
+                orbit_templates=orbit_templates,
+            ),
             "missionControlCost": max(int(-monthly["MissionControl"]["net"]), 0),
             "controlPointCapacity": hab_control_point_capacity(hab, records),
             "anyCoreCompleted": bool(hab.get("anyCoreCompleted")),
@@ -971,7 +1318,14 @@ def calculate_hab_ui(
                     "powered": record.get("powered"),
                     "active": hab_module_active_record(record),
                     "crew": record.get("template", {}).get("crew"),
-                    "power": record.get("template", {}).get("power"),
+                    "power": hab_module_power(
+                        record.get("template", {}),
+                        indexed=indexed,
+                        hab=hab,
+                        body_templates=body_templates,
+                        orbit_templates=orbit_templates,
+                    ),
+                    "templatePower": record.get("template", {}).get("power"),
                 }
                 for record in records
                 if hab_module_okay(record)
@@ -1065,13 +1419,26 @@ def command_hab_slots(save_path: Path, templates_dir: Path | None, args: argpars
     print_json(clean_numbers(result, 6), compact=args.compact)
 
 
-def hab_projected_power_summary(records: list[dict[str, Any]]) -> dict[str, int]:
+def hab_projected_power_summary(
+    records: list[dict[str, Any]],
+    *,
+    indexed: IndexedState | None = None,
+    hab: dict[str, Any] | None = None,
+    body_templates: dict[str, dict[str, Any]] | None = None,
+    orbit_templates: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, int]:
     generated = 0
     consumed = 0
     for record in records:
         if hab_module_empty(record) or record.get("destroyed") or record.get("decommissioning"):
             continue
-        power = int(as_float(record.get("template", {}).get("power"), 0.0))
+        power = hab_module_power(
+            record.get("template", {}),
+            indexed=indexed,
+            hab=hab,
+            body_templates=body_templates,
+            orbit_templates=orbit_templates,
+        )
         if power > 0:
             generated += power
         elif power < 0:
@@ -1260,6 +1627,316 @@ def module_build_cost_map(template: dict[str, Any]) -> dict[str, float]:
     }
 
 
+def resource_market_purchase_values(indexed: IndexedState) -> dict[str, float]:
+    global_state = first_value(indexed, "TIGlobalValuesState") or {}
+    values = global_state.get("resourceMarketValues") if isinstance(global_state.get("resourceMarketValues"), dict) else {}
+    return {resource: as_float(values.get(resource), 0.0) for resource in WORLD_MARKET_RESOURCES}
+
+
+def faction_is_active_human(indexed: IndexedState, faction: dict[str, Any]) -> bool:
+    if faction.get("isAlien") or str(faction.get("templateName") or "") == "AlienCouncil":
+        return False
+    if faction.get("player"):
+        return True
+    metadata = first_value(indexed, "TIMetadataState") or {}
+    player_faction_name = str(metadata.get("playerFactionName") or "")
+    return player_faction_name in raw_name_values(faction)
+
+
+def space_body_semi_major_axis_km(template: dict[str, Any]) -> float:
+    semi_major_axis_km = as_float(template.get("semiMajorAxis_km"), 0.0)
+    if semi_major_axis_km > 0.0:
+        return semi_major_axis_km
+    return as_float(template.get("semiMajorAxis_AU"), 0.0) * ASTRONOMICAL_UNIT_KM
+
+
+def space_body_local_escape_velocity_mps(template: dict[str, Any], radius_km: float) -> float:
+    mass_kg = as_float(template.get("mass_kg"), 0.0)
+    if mass_kg <= 0.0 or radius_km <= 0.0:
+        return 0.0
+    return math.sqrt(2.0 * GRAVITATIONAL_CONSTANT * mass_kg / (radius_km * 1000.0))
+
+
+def space_body_drag_velocity_penalty_kps(template: dict[str, Any]) -> float:
+    return {
+        "Massive": 30.0,
+        "Thick": 15.0,
+        "Standard": 0.5,
+        "Thin": 0.05,
+    }.get(str(template.get("atmosphere") or ""), 0.0)
+
+
+def space_body_relative_energy_for_mining(
+    indexed: IndexedState,
+    body: dict[str, Any] | None,
+    faction: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]],
+) -> float:
+    if not body:
+        return 0.0
+    template = space_body_template(body, body_templates)
+    mean_radius_km = space_body_mean_radius_km(template)
+    escape_mps = space_body_local_escape_velocity_mps(template, mean_radius_km)
+    escape_mps += space_body_drag_velocity_penalty_kps(template) * 1000.0
+
+    parent = state_value_by_id(indexed, ref_id(body.get("barycenter")))
+    parent_template = space_body_template(parent, body_templates)
+    body_orbit_km = space_body_semi_major_axis_km(template)
+    if str(template.get("objectType") or "") in {"PlanetaryMoon", "AsteroidalMoon"}:
+        if str(parent_template.get("dataName") or "") == "Earth" and faction_is_active_human(indexed, faction):
+            parent_escape_mps = space_body_local_escape_velocity_mps(parent_template, body_orbit_km) / 2.0
+            escape_velocity_kps = math.sqrt(escape_mps * escape_mps + parent_escape_mps * parent_escape_mps) / 1000.0
+        else:
+            parent_escape_mps = space_body_local_escape_velocity_mps(parent_template, body_orbit_km)
+            grandparent = state_value_by_id(indexed, ref_id((parent or {}).get("barycenter")))
+            grandparent_template = space_body_template(grandparent, body_templates)
+            parent_orbit_km = space_body_semi_major_axis_km(parent_template)
+            grandparent_escape_mps = space_body_local_escape_velocity_mps(grandparent_template, parent_orbit_km) / 2.0
+            escape_velocity_kps = math.sqrt(
+                escape_mps * escape_mps
+                + parent_escape_mps * parent_escape_mps
+                + grandparent_escape_mps * grandparent_escape_mps
+            ) / 1000.0
+    else:
+        parent_escape_mps = space_body_local_escape_velocity_mps(parent_template, body_orbit_km) / 2.0
+        escape_velocity_kps = math.sqrt(escape_mps * escape_mps + parent_escape_mps * parent_escape_mps) / 1000.0
+
+    transfer_energy = 0.0
+    if faction_is_active_human(indexed, faction) and str(parent_template.get("dataName") or "") != "Earth":
+        transfer_energy = (natural_space_object_sun_distance_au(indexed, body, body_templates) or 0.0) * 10.0
+    return (escape_velocity_kps * escape_velocity_kps / 2.0 + transfer_energy) * 0.005
+
+
+def hab_construction_surface_body(indexed: IndexedState, hab: dict[str, Any]) -> dict[str, Any]:
+    barycenter = hab_barycenter_state(indexed, hab)
+    if barycenter.get("secondaryObject"):
+        return state_value_by_id(indexed, ref_id(barycenter.get("secondaryObject"))) or {}
+    return barycenter
+
+
+def hab_irradiated_multiplier(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]],
+    orbit_templates: dict[str, dict[str, Any]],
+) -> float:
+    if hab.get("habType") == "Base" or hab.get("habSite"):
+        return max(as_float(space_body_template(hab_construction_surface_body(indexed, hab), body_templates).get("irradiatedMultiplier"), 1.0), 1.0)
+    orbit = state_value_by_id(indexed, ref_id(hab.get("orbitState"))) or {}
+    orbit_template = orbit_templates.get(str(orbit.get("templateName") or ""), {})
+    return max(as_float(orbit_template.get("irradiatedMultiplier"), 1.0), 1.0)
+
+
+def hab_module_mass_tons(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    faction: dict[str, Any],
+    template: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]],
+    *,
+    irradiated_multiplier: float = 1.0,
+) -> float:
+    mass = as_float(template.get("baseMass_tons"), 0.0)
+    rules = hab_template_special_rules(template)
+    body = hab_construction_surface_body(indexed, hab)
+    if "Cost_Scales_With_Gravity" in rules and body:
+        relative_energy = space_body_relative_energy_for_mining(indexed, body, faction, body_templates)
+        mass = mass * 0.5 + mass * 0.5 * relative_energy
+    if irradiated_multiplier > 1.0:
+        mass *= irradiated_multiplier
+    if "SolarMirror" in rules:
+        distance_au = natural_space_object_sun_distance_au(indexed, hab_barycenter_state(indexed, hab), body_templates) or 0.0
+        mass *= distance_au * distance_au
+    return mass
+
+
+def faction_has_helium3_access(indexed: IndexedState, faction: dict[str, Any]) -> bool:
+    return any(
+        str(module.get("templateName") or "") == "Helium-3Mine"
+        for module in active_modules_in_sectors(indexed, faction_sector_states(indexed, faction))
+    )
+
+
+def hab_module_build_materials(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    faction: dict[str, Any],
+    template: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]],
+    orbit_templates: dict[str, dict[str, Any]],
+    *,
+    is_upgrade: bool = False,
+) -> dict[str, float]:
+    weights = module_build_cost_map(template)
+    irradiated_multiplier = hab_irradiated_multiplier(indexed, hab, body_templates, orbit_templates)
+    nominal_mass = hab_module_mass_tons(indexed, hab, faction, template, body_templates)
+    actual_mass = hab_module_mass_tons(
+        indexed,
+        hab,
+        faction,
+        template,
+        body_templates,
+        irradiated_multiplier=irradiated_multiplier,
+    )
+    multiplier = 2.0 / 3.0 if is_upgrade else 1.0
+    scale = DEFAULT_GLOBAL_CONFIG["spaceResourceToTons"] * multiplier
+    uses_helium3 = "UsesHelium3" in hab_template_special_rules(template) and faction_has_helium3_access(indexed, faction)
+    result = {
+        resource: amount * nominal_mass * scale
+        for resource, amount in weights.items()
+        if resource in WORLD_MARKET_RESOURCES and amount > 0.0 and not (uses_helium3 and resource == "Fissiles")
+    }
+    if uses_helium3 and weights.get("Fissiles", 0.0) > 0.0:
+        result["Water"] = result.get("Water", 0.0) + weights["Fissiles"] * nominal_mass * scale
+    radiation_metals = max(actual_mass - nominal_mass, 0.0) * scale
+    if radiation_metals > 0.0:
+        result["Metals"] = result.get("Metals", 0.0) + radiation_metals
+    return result
+
+
+def resource_cost_market_equivalent(cost: dict[str, float], market_values: dict[str, float]) -> float:
+    return sum(amount * market_values.get(resource, 0.0) for resource, amount in cost.items())
+
+
+def monthly_delta_market_equivalent(
+    monthly_delta: dict[str, dict[str, float]],
+    market_values: dict[str, float],
+) -> float:
+    total = as_float(monthly_delta.get("Money", {}).get("net"), 0.0)
+    return total + sum(
+        as_float(monthly_delta.get(resource, {}).get("net"), 0.0) * market_values.get(resource, 0.0)
+        for resource in WORLD_MARKET_RESOURCES
+    )
+
+
+def module_affordable_with_materials(materials: dict[str, float], faction: dict[str, Any]) -> bool:
+    return all(faction_stockpile(faction, resource) >= amount for resource, amount in materials.items())
+
+
+def completion_datetime(value: Any) -> datetime | None:
+    if isinstance(value, dict):
+        return ti_datetime(value)
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.rstrip("Z"))
+    except ValueError:
+        return None
+
+
+def hab_core_completion_minimum_days(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    records: list[dict[str, Any]],
+    template: dict[str, Any],
+) -> float:
+    core = hab_core_module_record(records)
+    if not core or core.get("completed"):
+        return 0.0
+    core_template = core.get("template") if isinstance(core.get("template"), dict) else {}
+    prior_core_template = core.get("priorTemplate") if isinstance(core.get("priorTemplate"), dict) else {}
+    current_tier = as_float(hab.get("tier"), 0.0)
+    if current_tier <= 0.0:
+        current_tier = as_float(prior_core_template.get("tier"), 0.0) or as_float(core_template.get("tier"), 0.0)
+    if current_tier > as_float(template.get("tier"), 0.0):
+        return 0.0
+    state = core.get("state") if isinstance(core.get("state"), dict) else {}
+    completion = completion_datetime(state.get("completionDate"))
+    current = current_save_datetime(indexed)
+    if completion is None or current is None:
+        return 0.0
+    return max((completion - current).total_seconds() / 86400.0, 0.0)
+
+
+def hab_module_construction_analysis(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    records: list[dict[str, Any]],
+    faction: dict[str, Any],
+    template: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]],
+    orbit_templates: dict[str, dict[str, Any]],
+    *,
+    is_upgrade: bool = False,
+) -> dict[str, Any]:
+    irradiated_multiplier = hab_irradiated_multiplier(indexed, hab, body_templates, orbit_templates)
+    nominal_mass = hab_module_mass_tons(indexed, hab, faction, template, body_templates)
+    actual_mass = hab_module_mass_tons(
+        indexed,
+        hab,
+        faction,
+        template,
+        body_templates,
+        irradiated_multiplier=irradiated_multiplier,
+    )
+    upgrade_discount = 2.0 / 3.0 if is_upgrade else 1.0
+    construction_modifier = hab_module_construction_time_modifier(records)
+    base_days = as_float(template.get("buildTime_Days"), 0.0)
+    local_construction_days = base_days * upgrade_discount * construction_modifier
+    core_completion_minimum_days = hab_core_completion_minimum_days(indexed, hab, records, template)
+    materials = hab_module_build_materials(
+        indexed,
+        hab,
+        faction,
+        template,
+        body_templates,
+        orbit_templates,
+        is_upgrade=is_upgrade,
+    )
+    market_values = resource_market_purchase_values(indexed)
+    return clean_numbers(
+        {
+            "isUpgrade": is_upgrade,
+            "baseBuildTime_Days": base_days,
+            "upgradeDiscount": upgrade_discount,
+            "habConstructionTimeModifier": construction_modifier,
+            "localConstructionTime_Days": local_construction_days,
+            "coreCompletionMinimum_Days": core_completion_minimum_days,
+            "constructionTime_Days": max(local_construction_days, core_completion_minimum_days),
+            "materials": materials,
+            "affordableByCurrentStockpile": module_affordable_with_materials(materials, faction),
+            "marketEquivalentMoney": resource_cost_market_equivalent(materials, market_values),
+            "mass": {
+                "beforeRadiation_tons": nominal_mass,
+                "afterRadiation_tons": actual_mass,
+                "radiationAdded_tons": max(actual_mass - nominal_mass, 0.0),
+            },
+            "penalties": {
+                "irradiatedMultiplier": irradiated_multiplier,
+                "gravityMassMultiplier": (nominal_mass / as_float(template.get("baseMass_tons"), 1.0)) if as_float(template.get("baseMass_tons"), 0.0) > 0.0 else 1.0,
+            },
+        },
+        6,
+    )
+
+
+def module_break_even_analysis(
+    construction: dict[str, Any],
+    monthly_delta: dict[str, dict[str, float]],
+    market_values: dict[str, float],
+) -> dict[str, Any]:
+    cost = construction.get("materials") if isinstance(construction.get("materials"), dict) else {}
+    cost_value = as_float(construction.get("marketEquivalentMoney"), 0.0)
+    monthly_value = monthly_delta_market_equivalent(monthly_delta, market_values)
+    payback_months = cost_value / monthly_value if cost_value > 0.0 and monthly_value > 0.0 else None
+    construction_months = as_float(construction.get("constructionTime_Days"), 0.0) / (DAYS_PER_YEAR / 12.0)
+    return clean_numbers(
+        {
+            "constructionMarketEquivalentMoney": cost_value,
+            "monthlyNetMarketEquivalentMoney": monthly_value,
+            "paybackAfterCompletion_months": payback_months,
+            "breakEvenFromStart_months": construction_months + payback_months if payback_months is not None else None,
+            "resourceRecoveryAfterCompletion_months": {
+                resource: amount / as_float(monthly_delta.get(resource, {}).get("net"), 0.0)
+                for resource, amount in cost.items()
+                if amount > 0.0 and as_float(monthly_delta.get(resource, {}).get("net"), 0.0) > 0.0
+            },
+            "valuationScope": "Money plus purchasable space resources at current market purchase prices; MC, research, projects, influence, operations, and strategic unlocks are excluded",
+        },
+        6,
+    )
+
+
 def faction_stockpile(faction: dict[str, Any], resource: str) -> float:
     resources = faction.get("resources") if isinstance(faction.get("resources"), dict) else {}
     return as_float(resources.get(resource), 0.0)
@@ -1292,8 +1969,12 @@ def resource_scarcity_weights(topbar: dict[str, Any]) -> dict[str, float]:
     return weights
 
 
-def hypothetical_completed_module_record(template: dict[str, Any]) -> dict[str, Any]:
+def hypothetical_completed_module_record(
+    template: dict[str, Any],
+    prior_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
+        **(prior_record or {}),
         "templateName": str(template.get("dataName") or ""),
         "template": template,
         "completed": True,
@@ -1313,10 +1994,17 @@ def candidate_module_monthly_delta(
     effect_templates: dict[str, dict[str, Any]],
     mining_rate: float,
     councilor_by_id: dict[int, dict[str, Any]],
+    prior_record: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, float]]:
     science_adviser_multiplier = 1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Science")
     administration_adviser_multiplier = 1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Administration")
-    after_records = records + [hypothetical_completed_module_record(template)]
+    if prior_record is None:
+        after_records = records + [hypothetical_completed_module_record(template)]
+    else:
+        after_records = [
+            hypothetical_completed_module_record(template, record) if record is prior_record else record
+            for record in records
+        ]
     before_administration_modifier = hab_administration_modifier(records)
     after_administration_modifier = hab_administration_modifier(after_records)
 
@@ -1417,6 +2105,9 @@ def module_candidate_row(
     mining_rate: float,
     scarcity_weights: dict[str, float],
     councilor_by_id: dict[int, dict[str, Any]],
+    body_templates: dict[str, dict[str, Any]],
+    orbit_templates: dict[str, dict[str, Any]],
+    prior_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     monthly_delta = candidate_module_monthly_delta(
         indexed,
@@ -1428,9 +2119,39 @@ def module_candidate_row(
         effect_templates,
         mining_rate,
         councilor_by_id,
+        prior_record,
     )
-    power = int(as_float(template.get("power"), 0.0))
+    template_power = int(as_float(template.get("power"), 0.0))
+    power = hab_module_power(
+        template,
+        indexed=indexed,
+        hab=hab,
+        body_templates=body_templates,
+        orbit_templates=orbit_templates,
+    )
+    prior_template = prior_record.get("template", {}) if isinstance(prior_record, dict) else {}
+    prior_power = hab_module_power(
+        prior_template,
+        indexed=indexed,
+        hab=hab,
+        body_templates=body_templates,
+        orbit_templates=orbit_templates,
+    ) if prior_template else 0
+    power_change = power - prior_power
+    construction = hab_module_construction_analysis(
+        indexed,
+        hab,
+        records,
+        faction,
+        template,
+        body_templates,
+        orbit_templates,
+        is_upgrade=prior_record is not None,
+    )
+    break_even = module_break_even_analysis(construction, monthly_delta, resource_market_purchase_values(indexed))
     mission_control = int(as_float(template.get("missionControl"), 0.0))
+    prior_mission_control = int(as_float(prior_template.get("missionControl"), 0.0))
+    mission_control_change = mission_control - prior_mission_control
     research_score = module_research_score(monthly_delta)
     project_score = module_project_score(monthly_delta)
     category_bonus_score = module_category_bonus_score(template)
@@ -1440,16 +2161,23 @@ def module_candidate_row(
         "display": template_display(str(template.get("dataName")), template),
         "tier": int(as_float(template.get("tier"), 0.0)),
         "habType": template.get("habType") or "Any",
+        "isUpgrade": prior_record is not None,
+        "priorTemplate": prior_record.get("templateName") if isinstance(prior_record, dict) else None,
         "power": power,
-        "projectedPowerAfterOne": projected_power.get("net", 0) + power,
-        "missionControl": mission_control,
+        "templatePower": template_power,
+        "powerChange": power_change,
+        "projectedPowerAfterOne": projected_power.get("net", 0) + power_change,
+        "missionControl": mission_control_change,
+        "resultingMissionControl": mission_control,
         "onePerHab": bool(template.get("onePerHab")),
-        "fitsCurrentProjectedPower": projected_power.get("net", 0) + power >= 0,
-        "fitsCurrentMissionControl": mission_control >= 0 or mission_control_available + mission_control >= 0,
+        "fitsCurrentProjectedPower": projected_power.get("net", 0) + power_change >= 0,
+        "fitsCurrentMissionControl": mission_control_change >= 0 or mission_control_available + mission_control_change >= 0,
         "crew": int(as_float(template.get("crew"), 0.0)),
-        "buildTime_Days": as_float(template.get("buildTime_Days"), 0.0),
+        "buildTime_Days": construction.get("constructionTime_Days"),
         "buildCostTemplateWeights": module_build_cost_map(template),
         "affordableByTemplateWeights": module_affordable_with_template_weights(template, faction),
+        "construction": construction,
+        "breakEven": break_even,
         "monthlyDelta": monthly_delta,
         "techBonuses": tech_bonus_map_for_template(template),
         "specialRules": hab_template_special_rules(template),
@@ -1493,6 +2221,7 @@ def hab_module_candidate_rows(
 ) -> list[dict[str, Any]]:
     hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
     body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
+    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
     effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
     trait_templates = load_trait_templates(templates_dir)
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
@@ -1518,6 +2247,8 @@ def hab_module_candidate_rows(
             mining_rate,
             scarcity_weights,
             councilor_by_id,
+            body_templates,
+            orbit_templates,
         )
         has_score = any(abs(as_float(value, 0.0)) > 0.0 for value in row.get("scores", {}).values())
         if not has_score and row["power"] <= 0 and row["missionControl"] <= 0:
@@ -1526,11 +2257,83 @@ def hab_module_candidate_rows(
     return rows
 
 
+def hab_module_upgrade_rows(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    hab: dict[str, Any],
+    records: list[dict[str, Any]],
+    faction_id: int,
+    faction: dict[str, Any],
+    projected_power: dict[str, int],
+    mission_control_available: float,
+    topbar: dict[str, Any],
+) -> list[dict[str, Any]]:
+    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
+    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
+    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    trait_templates = load_trait_templates(templates_dir)
+    _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
+    effect_contexts = faction_effect_contexts(indexed, faction_id)
+    mining_rate = faction_mining_rate(indexed, faction)
+    scarcity_weights = resource_scarcity_weights(topbar)
+    templates_by_prior: dict[str, list[dict[str, Any]]] = {}
+    for template in hab_module_templates.values():
+        prior_name = template.get("upgradesFromName")
+        if prior_name:
+            templates_by_prior.setdefault(str(prior_name), []).append(template)
+
+    rows: list[dict[str, Any]] = []
+    current_tier = int(as_float(hab.get("tier"), 0.0))
+    target_tier = min(max(current_tier + 1, 1), 3)
+    for record in records:
+        if not hab_module_active_record(record):
+            continue
+        for template in templates_by_prior.get(str(record.get("templateName") or ""), []):
+            module_counts = hab_module_counts(records)
+            prior_name = str(record.get("templateName") or "")
+            module_counts[prior_name] = max(module_counts.get(prior_name, 0) - 1, 0)
+            reasons = module_unmet_requirements(
+                indexed,
+                template,
+                hab,
+                faction,
+                target_tier,
+                module_counts,
+                body_templates,
+            )
+            reasons = [reason for reason in reasons if reason != "core module"]
+            if reasons:
+                continue
+            row = module_candidate_row(
+                indexed,
+                hab,
+                records,
+                faction,
+                template,
+                projected_power,
+                mission_control_available,
+                effect_contexts,
+                effect_templates,
+                mining_rate,
+                scarcity_weights,
+                councilor_by_id,
+                body_templates,
+                orbit_templates,
+                prior_record=record,
+            )
+            row["sectorNum"] = record.get("sectorNum")
+            row["slot"] = record.get("slot")
+            row["isCoreUpgrade"] = bool(template.get("coreModule"))
+            rows.append(clean_numbers(row, 6))
+    return rows
+
+
 def sorted_candidates(candidates: list[dict[str, Any]], focus: str, top: int) -> list[dict[str, Any]]:
     return sorted(
         candidates,
         key=lambda row: (
-            not bool(row.get("affordableByTemplateWeights")),
+            not candidate_affordable(row),
             -as_float((row.get("scores") or {}).get(focus), 0.0),
             not bool(row.get("fitsCurrentProjectedPower")),
             -int(as_float(row.get("tier"), 0.0)),
@@ -1597,10 +2400,14 @@ def annotate_candidate_opportunity_costs(candidates: list[dict[str, Any]]) -> li
 
 def power_candidates(candidates: list[dict[str, Any]], top: int) -> list[dict[str, Any]]:
     return sorted(
-        [candidate for candidate in candidates if as_float(candidate.get("power"), 0.0) > 0.0],
+        [
+            candidate
+            for candidate in candidates
+            if as_float(candidate.get("powerChange") if candidate.get("isUpgrade") else candidate.get("power"), 0.0) > 0.0
+        ],
         key=lambda row: (
-            not bool(row.get("affordableByTemplateWeights")),
-            -as_float(row.get("power"), 0.0),
+            not candidate_affordable(row),
+            -as_float(row.get("powerChange") if row.get("isUpgrade") else row.get("power"), 0.0),
             -int(as_float(row.get("tier"), 0.0)),
             str(row.get("display") or row.get("template")),
         ),
@@ -1608,7 +2415,26 @@ def power_candidates(candidates: list[dict[str, Any]], top: int) -> list[dict[st
 
 
 def candidate_affordable(row: dict[str, Any]) -> bool:
+    construction = row.get("construction") if isinstance(row.get("construction"), dict) else {}
+    if "affordableByCurrentStockpile" in construction:
+        return bool(construction.get("affordableByCurrentStockpile"))
     return bool(row.get("affordableByTemplateWeights", True))
+
+
+def payback_candidates(candidates: list[dict[str, Any]], top: int) -> list[dict[str, Any]]:
+    return sorted(
+        [
+            candidate
+            for candidate in candidates
+            if (candidate.get("breakEven") or {}).get("breakEvenFromStart_months") is not None
+        ],
+        key=lambda row: (
+            not candidate_affordable(row),
+            as_float((row.get("breakEven") or {}).get("breakEvenFromStart_months"), float("inf")),
+            -as_float((row.get("breakEven") or {}).get("monthlyNetMarketEquivalentMoney"), 0.0),
+            str(row.get("display") or row.get("template")),
+        ),
+    )[:top]
 
 
 def monthly_delta_times(delta: dict[str, dict[str, float]], count: int) -> dict[str, dict[str, float]]:
@@ -1649,8 +2475,10 @@ def suggested_fill_entry(
         "powerEach": candidate.get("power"),
         "powerTotal": int(as_float(candidate.get("power"), 0.0)) * count,
         "missionControlEach": candidate.get("missionControl"),
-        "missionControlTotal": int(as_float(candidate.get("missionControl"), 0.0)) * count,
-        "monthlyDeltaTotal": monthly_delta_times(candidate.get("monthlyDelta") or {}, count),
+            "missionControlTotal": int(as_float(candidate.get("missionControl"), 0.0)) * count,
+            "constructionEach": candidate.get("construction"),
+            "breakEvenEach": candidate.get("breakEven"),
+            "monthlyDeltaTotal": monthly_delta_times(candidate.get("monthlyDelta") or {}, count),
         "scoresEach": candidate.get("scores"),
         "opportunityCost": {
             "focus": focus,
@@ -1825,13 +2653,21 @@ def hab_plan_row(
     topbar: dict[str, Any],
 ) -> dict[str, Any]:
     hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
+    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
     records = hab_module_records(indexed, hab, hab_module_templates)
     slots = hab_slot_summary(records)
     upgrade = hab_upgrade_info(records)
     current_tier = int(as_float(hab.get("tier"), 0.0)) or None
     target_tier = int(as_float(upgrade.get("targetTier"), 0.0)) or current_tier or 1
     planned_slots = hab_planned_empty_slots(slots, upgrade, current_tier)
-    projected_power = hab_projected_power_summary(records)
+    projected_power = hab_projected_power_summary(
+        records,
+        indexed=indexed,
+        hab=hab,
+        body_templates=body_templates,
+        orbit_templates=orbit_templates,
+    )
     topbar_mc = topbar.get("resources", {}).get("MissionControl", {}) if isinstance(topbar.get("resources"), dict) else {}
     mc_available = as_float(topbar_mc.get("available"), 0.0)
     candidates = hab_module_candidate_rows(
@@ -1846,7 +2682,19 @@ def hab_plan_row(
         mc_available,
         topbar,
     )
+    upgrade_candidates = hab_module_upgrade_rows(
+        indexed,
+        templates_dir,
+        hab,
+        records,
+        faction_id,
+        faction,
+        projected_power,
+        mc_available,
+        topbar,
+    )
     annotate_candidate_opportunity_costs(candidates)
+    annotate_candidate_opportunity_costs(upgrade_candidates)
     return {
         "id": hab_id,
         "display": hab.get("displayName"),
@@ -1860,7 +2708,13 @@ def hab_plan_row(
             "planning": planned_slots,
         },
         "power": {
-            "active": hab_power_summary(records),
+            "active": hab_power_summary(
+                records,
+                indexed=indexed,
+                hab=hab,
+                body_templates=body_templates,
+                orbit_templates=orbit_templates,
+            ),
             "projectedAfterCurrentQueue": projected_power,
         },
         "moduleCounts": hab_module_counts(records),
@@ -1872,6 +2726,9 @@ def hab_plan_row(
                 "display": record.get("display"),
                 "priorTemplate": record.get("priorTemplateName"),
                 "completionDate": (record.get("state") or {}).get("completionDate"),
+                "buildCost": (record.get("state") or {}).get("buildCost"),
+                "baseBuildDuration_days": (record.get("state") or {}).get("baseBuildDuration_days"),
+                "appliedBuildConstructionBonus": (record.get("state") or {}).get("appliedBuildConstructionBonus"),
             }
             for record in records
             if hab_module_okay(record) and not record.get("completed")
@@ -1884,6 +2741,14 @@ def hab_plan_row(
             "topCategoryBonus": sorted_candidates(candidates, "category-bonus", top),
             "topResources": sorted_candidates(candidates, "resources", top),
             "topPower": power_candidates(candidates, top),
+            "topPayback": payback_candidates(candidates, top),
+        },
+        "upgradeSummary": {
+            "count": len(upgrade_candidates),
+            "tierUpgradeCandidate": next((row for row in upgrade_candidates if row.get("isCoreUpgrade")), None),
+            "topPayback": payback_candidates(upgrade_candidates, top),
+            "topResources": sorted_candidates(upgrade_candidates, "resources", top),
+            "topPower": power_candidates(upgrade_candidates, top),
         },
         "suggestedFill": suggested_hab_fill(
             candidates,
@@ -1971,7 +2836,9 @@ def calculate_hab_plan(
                 "plannedEmpty includes currently usable empty slots plus locked empty placeholders only when the core is upgrading to a higher tier.",
                 "Candidates are filtered by known project unlocks, target tier, hab type, one-per-hab rules, and simple location-only special rules.",
                 "Scores are separated by output type: research is Research/month, projects is Projects/month, category-bonus is raw tech bonus sum, resources is scarcity-weighted net resource flow.",
-                "Template build materials are relative template weights, not exact final construction costs at location.",
+                "construction.materials applies module mass, gravity scaling, solar-mirror distance scaling, irradiated-location extra metals, helium-3 fissiles substitution, and the two-thirds upgrade discount.",
+                "construction.constructionTime_Days includes active hab construction-speed modifiers and the in-progress core completion minimum when applicable.",
+                "breakEven values use current market purchase prices for Money and purchasable space resources; MC, research, projects, influence, operations, strategic unlocks, boost substitution, and Earth transfer time are excluded.",
             ],
         },
         6,
@@ -2304,6 +3171,7 @@ def prospective_module_unlocks_for_project(
         return []
 
     body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
+    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
     effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
     trait_templates = load_trait_templates(templates_dir)
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
@@ -2350,7 +3218,13 @@ def prospective_module_unlocks_for_project(
             current_slots += hab_current_slots
             if hab_planned_slots <= 0:
                 continue
-            projected_power = hab_projected_power_summary(records)
+            projected_power = hab_projected_power_summary(
+                records,
+                indexed=indexed,
+                hab=hab,
+                body_templates=body_templates,
+                orbit_templates=orbit_templates,
+            )
             row = module_candidate_row(
                 indexed,
                 hab,
@@ -2364,6 +3238,8 @@ def prospective_module_unlocks_for_project(
                 mining_rate,
                 scarcity_weights,
                 councilor_by_id,
+                body_templates,
+                orbit_templates,
             )
             row["hab"] = {"id": hab_id, "display": hab.get("displayName"), "plannedEmptySlots": hab_planned_slots}
             row["location"] = hab_location_summary(indexed, templates_dir, hab)
@@ -2373,7 +3249,7 @@ def prospective_module_unlocks_for_project(
 
         rows.sort(
             key=lambda row: (
-                not bool(row.get("affordableByTemplateWeights")),
+                not candidate_affordable(row),
                 not bool(row.get("fitsCurrentProjectedPower")),
                 -as_float((row.get("scores") or {}).get("balanced"), 0.0),
                 -as_float((row.get("scores") or {}).get("research"), 0.0),
@@ -4405,6 +5281,1130 @@ def faction_ship_states(indexed: IndexedState, faction: dict[str, Any]) -> list[
 def faction_ship_designs(faction: dict[str, Any]) -> dict[str, dict[str, Any]]:
     designs = faction.get("shipDesigns") if isinstance(faction.get("shipDesigns"), list) else []
     return {str(item.get("dataName")): item for item in designs if isinstance(item, dict) and item.get("dataName")}
+
+
+def ship_plan_part_unlocked(
+    template: dict[str, Any],
+    faction: dict[str, Any],
+    include_obsolete: bool = False,
+) -> bool:
+    name = str(template.get("dataName") or "")
+    if not name or template.get("disable"):
+        return False
+    obsolete = faction.get("obsoletedShipParts") if isinstance(faction.get("obsoletedShipParts"), list) else []
+    if not include_obsolete and name in obsolete:
+        return False
+    required_project = template.get("requiredProjectName")
+    if not required_project:
+        return True
+    finished = faction.get("finishedProjectNames") if isinstance(faction.get("finishedProjectNames"), list) else []
+    return str(required_project) in finished
+
+
+def ship_plan_materials(template: dict[str, Any], key: str = "weightedBuildMaterials") -> dict[str, float]:
+    values = template.get(key)
+    if not isinstance(values, dict):
+        return {}
+    return {
+        str(resource): as_float(amount, 0.0)
+        for resource, amount in values.items()
+        if as_float(amount, 0.0) != 0.0
+    }
+
+
+def ship_plan_hull_row(template: dict[str, Any]) -> dict[str, Any]:
+    return clean_numbers(
+        {
+            "template": template.get("dataName"),
+            "display": template.get("friendlyName") or template.get("displayName") or template.get("dataName"),
+            "constructionTier": template.get("consTier"),
+            "massTons": template.get("mass_tons"),
+            "structuralIntegrity": template.get("structuralIntegrity"),
+            "crew": template.get("crew"),
+            "missionControl": template.get("missionControl"),
+            "monthlyMoney": template.get("monthlyIncome_Money"),
+            "baseConstructionDays": template.get("baseConstructionTime_days"),
+            "slots": {
+                "noseHardpoints": template.get("noseHardpoints"),
+                "hullHardpoints": template.get("hullHardpoints"),
+                "utility": template.get("internalModules"),
+            },
+            "requiredProject": template.get("requiredProjectName"),
+            "buildMaterials": ship_plan_materials(template),
+        }
+    )
+
+
+def ship_plan_drive_row(template: dict[str, Any]) -> dict[str, Any]:
+    thrust = as_float(template.get("thrust_N"), 0.0)
+    exhaust_velocity = as_float(template.get("EV_kps"), 0.0)
+    return clean_numbers(
+        {
+            "template": template.get("dataName"),
+            "display": template.get("friendlyName") or template.get("dataName"),
+            "classification": template.get("driveClassification"),
+            "thrusters": template.get("thrusters"),
+            "thrustN": thrust,
+            "exhaustVelocityKps": exhaust_velocity,
+            "powerRequirementGW": ship_plan_drive_power_requirement_gw(template),
+            "requiredPowerPlantClass": template.get("requiredPowerPlant"),
+            "cooling": template.get("cooling"),
+            "powerGeneration": template.get("powerGen"),
+            "flatMassTons": template.get("flatMass_tons"),
+            "propellant": template.get("propellant"),
+            "perTankPropellantMaterials": ship_plan_materials(template, "perTankPropellantMaterials"),
+            "requiredProject": template.get("requiredProjectName"),
+            "proxyScores": {
+                "thrust": thrust,
+                "exhaustVelocity": exhaust_velocity,
+                "balanced": math.sqrt(max(thrust, 0.0)) * exhaust_velocity,
+            },
+        }
+    )
+
+
+def ship_plan_drive_thrust_power_gw(template: dict[str, Any]) -> float:
+    return as_float(template.get("thrust_N"), 0.0) * as_float(template.get("EV_kps"), 0.0) * 0.5 / 1_000_000.0
+
+
+def ship_plan_drive_power_requirement_gw(template: dict[str, Any]) -> float:
+    if str(template.get("driveClassification") or "") in SHIP_PLAN_SELF_POWERED_DRIVE_CLASSES:
+        return 0.0
+    efficiency = as_float(template.get("efficiency"), 0.0)
+    return ship_plan_drive_thrust_power_gw(template) / efficiency if efficiency > 0.0 else 0.0
+
+
+def ship_plan_power_plant_row(template: dict[str, Any]) -> dict[str, Any]:
+    return clean_numbers(
+        {
+            "template": template.get("dataName"),
+            "display": template.get("friendlyName") or template.get("dataName"),
+            "powerPlantClass": template.get("powerPlantClass"),
+            "maxOutputGW": template.get("maxOutput_GW"),
+            "specificMassTonsPerGW": template.get("specificPower_tGW"),
+            "efficiency": template.get("efficiency"),
+            "crew": template.get("crew"),
+            "requiredProject": template.get("requiredProjectName"),
+            "buildMaterials": ship_plan_materials(template),
+        }
+    )
+
+
+def ship_plan_power_plant_class_compatible(required_class: str, plant_class: str) -> bool:
+    if required_class in {"", "Any_General"} or required_class == plant_class:
+        return True
+    if required_class == "Any_Magnetic_Confinement_Fusion":
+        return plant_class in {
+            "Any_Magnetic_Confinement_Fusion",
+            "Toroid_Magnetic_Confinement_Fusion",
+            "Mirrored_Magnetic_Confinement_Fusion",
+            "Hybrid_Confinement_Fusion",
+        }
+    return plant_class == "Molten_Salt_Core_Fission" and required_class in {
+        "Solid_Core_Fission",
+        "Liquid_Core_Fission",
+    }
+
+
+def ship_plan_compatible_power_plants(
+    drive: dict[str, Any],
+    power_plants: Iterable[dict[str, Any]],
+    top: int = 3,
+) -> list[dict[str, Any]]:
+    required_class = str(drive.get("requiredPowerPlantClass") or "")
+    required_output = as_float(drive.get("powerRequirementGW"), 0.0)
+    compatible = [
+        plant
+        for plant in power_plants
+        if (
+            ship_plan_power_plant_class_compatible(
+                required_class,
+                str(plant.get("powerPlantClass") or ""),
+            )
+        )
+        and as_float(plant.get("maxOutputGW"), 0.0) >= required_output
+    ]
+    return sorted(
+        compatible,
+        key=lambda plant: (
+            as_float(plant.get("specificMassTonsPerGW"), 1_000_000_000.0),
+            -as_float(plant.get("maxOutputGW"), 0.0),
+            str(plant.get("display") or plant.get("template")),
+        ),
+    )[: max(0, top)]
+
+
+def ship_plan_drive_goal_views(
+    drives: Iterable[dict[str, Any]],
+    power_plants: Iterable[dict[str, Any]],
+    top: int,
+) -> dict[str, list[dict[str, Any]]]:
+    drive_rows = list(drives)
+    plant_rows = list(power_plants)
+    result: dict[str, list[dict[str, Any]]] = {}
+    for axis in ("thrust", "exhaustVelocity", "balanced"):
+        rows = sorted(
+            drive_rows,
+            key=lambda row: (
+                -as_float((row.get("proxyScores") or {}).get(axis), 0.0),
+                str(row.get("display") or row.get("template")),
+            ),
+        )[: max(0, top)]
+        result[axis] = [
+            {
+                **row,
+                "compatiblePowerPlants": ship_plan_compatible_power_plants(row, plant_rows),
+            }
+            for row in rows
+            if as_float((row.get("proxyScores") or {}).get(axis), 0.0) > 0.0
+        ]
+    return result
+
+
+def ship_plan_weapon_row(template: dict[str, Any], kind: str) -> dict[str, Any] | None:
+    mount = str(template.get("mount") or "")
+    mount_summary = SHIP_PLAN_MOUNT_SLOTS.get(mount)
+    if mount_summary is None:
+        return None
+    salvo_shots = max(1.0, as_float(template.get("salvo_shots"), 1.0))
+    damage = max(
+        as_float(template.get("flatDamage_MJ"), 0.0),
+        as_float(template.get("expectedDamage_MJ"), 0.0),
+        as_float(template.get("shotPower_MJ"), 0.0),
+    )
+    cooldown = as_float(template.get("cooldown_s"), 0.0)
+    return clean_numbers(
+        {
+            "template": template.get("dataName"),
+            "display": template.get("friendlyName") or template.get("displayName") or template.get("dataName"),
+            "kind": kind,
+            "mount": mount,
+            "mountLocation": mount_summary[0],
+            "mountSlots": mount_summary[1],
+            "attackMode": bool(template.get("attackMode")),
+            "defenseMode": bool(template.get("defenseMode")),
+            "dedicatedPointDefense": bool(template.get("defenseMode")) and not bool(template.get("attackMode")),
+            "massTons": template.get("baseWeaponMass_tons"),
+            "crew": template.get("crew"),
+            "targetingRangeKm": template.get("targetingRange_km"),
+            "cooldownSeconds": cooldown,
+            "salvoShots": salvo_shots,
+            "damagePerShotMJProxy": damage,
+            "damagePerCooldownMJPerSecondProxy": damage * salvo_shots / cooldown if cooldown > 0.0 else 0.0,
+            "magazine": template.get("magazine"),
+            "projectileAccelerationG": template.get("acceleration_g"),
+            "projectileDeltaVKps": template.get("deltaV_kps"),
+            "muzzleVelocityKps": template.get("muzzleVelocity_kps"),
+            "requiredProject": template.get("requiredProjectName"),
+            "buildMaterials": ship_plan_materials(template),
+        }
+    )
+
+
+def ship_plan_weapon_goal_views(weapons: Iterable[dict[str, Any]], top: int) -> dict[str, list[dict[str, Any]]]:
+    weapon_rows = list(weapons)
+    views = {
+        "dedicatedPointDefense": [
+            row
+            for row in sorted(
+                weapon_rows,
+                key=lambda row: (
+                    not bool(row.get("dedicatedPointDefense")),
+                    -as_float(row.get("targetingRangeKm"), 0.0),
+                    as_float(row.get("massTons"), 0.0),
+                    str(row.get("display") or row.get("template")),
+                ),
+            )
+            if row.get("dedicatedPointDefense")
+        ][: max(0, top)],
+        "damageRateProxy": sorted(
+            [row for row in weapon_rows if row.get("attackMode")],
+            key=lambda row: (
+                -as_float(row.get("damagePerCooldownMJPerSecondProxy"), 0.0),
+                str(row.get("display") or row.get("template")),
+            ),
+        )[: max(0, top)],
+        "range": sorted(
+            weapon_rows,
+            key=lambda row: (
+                -as_float(row.get("targetingRangeKm"), 0.0),
+                str(row.get("display") or row.get("template")),
+            ),
+        )[: max(0, top)],
+        "missileManeuver": sorted(
+            [row for row in weapon_rows if row.get("kind") == "missile"],
+            key=lambda row: (
+                -as_float(row.get("projectileAccelerationG"), 0.0),
+                -as_float(row.get("projectileDeltaVKps"), 0.0),
+                str(row.get("display") or row.get("template")),
+            ),
+        )[: max(0, top)],
+    }
+    return views
+
+
+def ship_plan_utility_role_tags(template: dict[str, Any]) -> list[str]:
+    rules = [str(rule) for rule in template.get("specialModuleRules") if rule] if isinstance(template.get("specialModuleRules"), list) else []
+    text = " ".join([str(template.get("dataName") or ""), *rules]).casefold()
+    tags = {"balanced"}
+    if any(token in text for token in ("magazine", "targeting", "ecm", "repair", "spiker", "laserengine")):
+        tags.update({"combat", "intercept"})
+    if any(token in text for token in ("thrust", "hydron", "refuel", "aerobraking", "scoop", "isru")):
+        tags.update({"intercept", "transfer"})
+    if "found" in text:
+        tags.add("colony")
+    if "assault" in text:
+        tags.add("assault")
+    if any(token in text for token in ("science", "prospector")):
+        tags.add("science")
+    return sorted(tags)
+
+
+def ship_plan_utility_row(template: dict[str, Any]) -> dict[str, Any]:
+    return clean_numbers(
+        {
+            "template": template.get("dataName"),
+            "display": template.get("friendlyName") or template.get("dataName"),
+            "massTons": template.get("mass_tons"),
+            "crew": template.get("crew"),
+            "powerRequirementMW": template.get("powerRequirement_MW"),
+            "minimumConstructionTier": template.get("minConsTier"),
+            "rules": template.get("specialModuleRules") or [],
+            "specialValue": template.get("specialModuleValue"),
+            "roleTags": ship_plan_utility_role_tags(template),
+            "requiredProject": template.get("requiredProjectName"),
+            "buildMaterials": ship_plan_materials(template),
+        }
+    )
+
+
+def ship_plan_generic_row(template: dict[str, Any], fields: Iterable[tuple[str, str]]) -> dict[str, Any]:
+    row = {
+        "template": template.get("dataName"),
+        "display": template.get("friendlyName") or template.get("displayName") or template.get("dataName"),
+        "requiredProject": template.get("requiredProjectName"),
+        "buildMaterials": ship_plan_materials(template),
+    }
+    for output_name, template_name in fields:
+        row[output_name] = template.get(template_name)
+    return clean_numbers(row)
+
+
+def ship_plan_tagged_templates(
+    templates_dir: Path | None,
+    template_files: Iterable[tuple[str, str]],
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for kind, filename in template_files:
+        for name, template in load_named_templates(templates_dir, filename).items():
+            result[name] = {**template, "_shipPlanKind": kind}
+    return result
+
+
+def ship_plan_add_scaled_materials(
+    destination: dict[str, float],
+    materials: dict[str, Any] | None,
+    multiplier: float,
+) -> None:
+    if not isinstance(materials, dict):
+        return
+    for resource, amount in materials.items():
+        value = as_float(amount, 0.0) * multiplier
+        if value:
+            destination[str(resource)] = destination.get(str(resource), 0.0) + value
+
+
+def ship_plan_clean_resources(resources: dict[str, float]) -> dict[str, float]:
+    return {
+        resource: value
+        for resource, value in sorted(resources.items())
+        if abs(value) > 1e-9
+    }
+
+
+def ship_plan_utility_rule_value(
+    template: dict[str, Any],
+    rule: str,
+    default: float,
+) -> float:
+    rules = template.get("specialModuleRules")
+    if not isinstance(rules, list) or not rules or rules[0] != rule:
+        return default
+    return as_float(template.get("specialModuleValue"), default)
+
+
+def ship_plan_weapon_mass_tons(template: dict[str, Any], magazine_multiplier: float) -> float:
+    mass = as_float(template.get("baseWeaponMass_tons"), 0.0)
+    if template.get("_shipPlanKind") in {"gun", "magnetic", "missile", "plasma"}:
+        mass += (
+            (1.0 + magazine_multiplier)
+            * as_float(template.get("magazine"), 0.0)
+            * as_float(template.get("ammoMass_kg"), 0.0)
+            / 1000.0
+        )
+    return mass
+
+
+def ship_plan_weapon_cost(
+    template: dict[str, Any],
+    magazine_multiplier: float,
+) -> dict[str, float]:
+    result: dict[str, float] = {}
+    scale = DEFAULT_GLOBAL_CONFIG["spaceResourceToTons"]
+    kind = template.get("_shipPlanKind")
+    base_mass = as_float(template.get("baseWeaponMass_tons"), 0.0)
+    magazine_mass = (
+        (1.0 + magazine_multiplier)
+        * as_float(template.get("magazine"), 0.0)
+        * as_float(template.get("ammoMass_kg"), 0.0)
+        / 1000.0
+    )
+    if kind == "plasma":
+        ship_plan_add_scaled_materials(result, template.get("weightedBuildMaterials"), (base_mass + magazine_mass) * scale)
+    else:
+        ship_plan_add_scaled_materials(result, template.get("weightedBuildMaterials"), base_mass * scale)
+        if kind in {"gun", "magnetic", "missile"}:
+            ship_plan_add_scaled_materials(result, template.get("ammoMaterials"), magazine_mass * scale)
+    return result
+
+
+def ship_plan_weapon_energy_gj(template: dict[str, Any], bonus_power_gj: float = 0.0) -> float:
+    kind = template.get("_shipPlanKind")
+    efficiency = as_float(template.get("efficiency"), 1.0)
+    if efficiency <= 0.0:
+        return 0.0
+    if kind == "magnetic":
+        return (
+            0.5
+            * as_float(template.get("ammoMass_kg"), 0.0)
+            * (as_float(template.get("muzzleVelocity_kps"), 0.0) * 1000.0) ** 2
+            / efficiency
+            * 1e-9
+        )
+    if kind == "plasma":
+        return (
+            as_float(template.get("chargingEnergy_GJ"), 0.0)
+            + 0.5
+            * as_float(template.get("warheadMass_kg"), 0.0)
+            * (as_float(template.get("muzzleVelocity_kps"), 0.0) * 1000.0) ** 2
+            * 1e-9
+        ) / efficiency
+    if kind in {"laser", "particle"}:
+        return (as_float(template.get("shotPower_MJ"), 0.0) + bonus_power_gj) / efficiency / 1000.0
+    return 0.0
+
+
+def ship_plan_armor_mass_tons(
+    template: dict[str, Any],
+    armor_points: float,
+    hull_length_m: float,
+    hull_width_m: float,
+    lateral_armor_depth_m: float,
+    *,
+    lateral: bool,
+    cinematic_scale: bool,
+) -> float:
+    density = as_float(template.get("density_kgm3"), 0.0)
+    heat_of_vaporization = as_float(template.get("heatofVaporization_MJkg"), 0.0)
+    if density <= 0.0 or heat_of_vaporization <= 0.0 or armor_points <= 0.0:
+        return 0.0
+    plate_thickness_m = (20.0 / heat_of_vaporization) / density / 0.005
+    outer_radius_m = (hull_width_m + 2.0 * lateral_armor_depth_m) / 2.0
+    outer_area_m2 = math.pi * outer_radius_m**2
+    if lateral:
+        original_volume_m3 = math.pi * (hull_width_m / 2.0) ** 2 * hull_length_m
+        armor_volume_m3 = outer_area_m2 * hull_length_m - original_volume_m3
+        armor_volume_m3 *= 0.75 if cinematic_scale else 0.5
+    else:
+        armor_volume_m3 = plate_thickness_m * armor_points * outer_area_m2
+        if not cinematic_scale:
+            armor_volume_m3 *= 3.0
+    return max(0.0, armor_volume_m3 * density / 1000.0)
+
+
+def ship_plan_drive_open_cycle(
+    drive: dict[str, Any],
+    drive_templates: dict[str, dict[str, Any]],
+) -> bool:
+    cooling = str(drive.get("cooling") or "")
+    if cooling == "Open":
+        return True
+    if cooling != "Calc":
+        return False
+    classification = str(drive.get("driveClassification") or "")
+    if classification in {"Fission_Pulse", "Fusion_Pulse"}:
+        return True
+    name = str(drive.get("dataName") or "")
+    single_name = f"{name[:-1]}1" if name and name[-1:].isdigit() else name
+    single = drive_templates.get(single_name, drive)
+    exhaust_velocity = as_float(single.get("EV_kps"), 0.0) * 1000.0
+    return exhaust_velocity > 0.0 and as_float(single.get("thrust_N"), 0.0) / exhaust_velocity >= 3.0
+
+
+def ship_plan_shipyard_times(
+    indexed: IndexedState,
+    faction_id: int,
+    hull: dict[str, Any],
+    effect_templates: dict[str, dict[str, Any]],
+    shipyard_templates: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    effect_contexts = faction_effect_contexts(indexed, faction_id)
+    speed = scenario_float(indexed, "shipConstructionSpeedPlayer", 1.0)
+    settings_modifier = 1.0 / speed if speed > 0.0 else 1.0
+    base_days = as_float(hull.get("baseConstructionTime_days"), 0.0)
+    hull_tier = int(as_float(hull.get("consTier"), 0.0))
+
+    def with_effects(days: float) -> float:
+        return apply_effect_modifiers(effect_contexts, effect_templates, "ShipConstructionTime", days)
+
+    by_tier: dict[str, Any] = {}
+    for tier, fallback in SHIP_PLAN_SHIPYARD_TIERS.items():
+        shipyard = shipyard_templates.get(str(fallback["template"]), fallback)
+        tier_delta = tier - hull_tier
+        if tier_delta > 0:
+            yard_modifier = as_float(shipyard.get("constructionTimeModifier"), 1.0) ** tier_delta
+        elif tier_delta < 0:
+            yard_modifier = DEFAULT_GLOBAL_CONFIG["smallShipyardPenaltyPowerPerTier"] ** (-tier_delta)
+        else:
+            yard_modifier = 1.0
+        by_tier[str(tier)] = {
+            "shipyard": fallback["template"],
+            "days": with_effects(base_days * yard_modifier * settings_modifier),
+        }
+    return {
+        "withoutShipyardDays": with_effects(base_days * settings_modifier),
+        "byShipyardTier": by_tier,
+        "settingsModifier": settings_modifier,
+        "effectNames": effect_contexts.get("ShipConstructionTime", []),
+    }
+
+
+def ship_plan_simulation_catalogs(templates_dir: Path | None) -> dict[str, dict[str, dict[str, Any]]]:
+    return {
+        "hulls": load_named_templates(templates_dir, "TIShipHullTemplate.json"),
+        "drives": load_named_templates(templates_dir, "TIDriveTemplate.json"),
+        "powerPlants": load_named_templates(templates_dir, "TIPowerPlantTemplate.json"),
+        "radiators": load_named_templates(templates_dir, "TIRadiatorTemplate.json"),
+        "armors": load_named_templates(templates_dir, "TIShipArmorTemplate.json"),
+        "utilities": ship_plan_tagged_templates(templates_dir, SHIP_PLAN_UTILITY_TEMPLATE_FILES),
+        "weapons": ship_plan_tagged_templates(templates_dir, SHIP_PLAN_WEAPON_TEMPLATE_FILES),
+        "effects": load_named_templates(templates_dir, "TIEffectTemplate.json"),
+        "shipyards": load_named_templates(templates_dir, "TIHabModuleTemplate.json"),
+    }
+
+
+def simulate_ship_design(
+    indexed: IndexedState,
+    faction_id: int,
+    faction: dict[str, Any],
+    design: dict[str, Any],
+    catalogs: dict[str, dict[str, dict[str, Any]]],
+) -> dict[str, Any]:
+    hull = catalogs["hulls"].get(str(design.get("hullName") or ""))
+    drive = catalogs["drives"].get(str(design.get("driveName") or ""))
+    power_plant = catalogs["powerPlants"].get(str(design.get("powerPlantName") or ""))
+    radiator = catalogs["radiators"].get(str(design.get("radiatorName") or ""))
+    utility_entries = design.get("moduleTemplateEntries") if isinstance(design.get("moduleTemplateEntries"), list) else []
+    weapon_entries = [
+        *(design.get("hullWeaponTemplateEntries") if isinstance(design.get("hullWeaponTemplateEntries"), list) else []),
+        *(design.get("noseWeaponTemplateEntries") if isinstance(design.get("noseWeaponTemplateEntries"), list) else []),
+    ]
+    utilities = [
+        catalogs["utilities"].get(str(entry.get("moduleName") or ""))
+        for entry in utility_entries
+        if isinstance(entry, dict)
+    ]
+    weapons = [
+        catalogs["weapons"].get(str(entry.get("moduleName") or ""))
+        for entry in weapon_entries
+        if isinstance(entry, dict)
+    ]
+    armor_facings = {
+        facing: design.get(f"{facing}Armor") if isinstance(design.get(f"{facing}Armor"), dict) else {}
+        for facing in ("nose", "lateral", "tail")
+    }
+    armor_templates = {
+        facing: catalogs["armors"].get(str(entry.get("materialName") or ""))
+        for facing, entry in armor_facings.items()
+    }
+    missing_templates = [
+        name
+        for name, template in (
+            (design.get("hullName"), hull),
+            (design.get("driveName"), drive),
+            (design.get("powerPlantName"), power_plant),
+            (design.get("radiatorName"), radiator),
+            *(
+                (entry.get("moduleName"), template)
+                for entry, template in zip(utility_entries, utilities)
+                if isinstance(entry, dict)
+            ),
+            *(
+                (entry.get("moduleName"), template)
+                for entry, template in zip(weapon_entries, weapons)
+                if isinstance(entry, dict)
+            ),
+            *(
+                (entry.get("materialName"), armor_templates[facing])
+                for facing, entry in armor_facings.items()
+                if as_float(entry.get("armorValue"), 0.0) > 0.0
+            ),
+        )
+        if name and template is None
+    ]
+    if not all((hull, drive, power_plant, radiator)) or missing_templates:
+        return {
+            "complete": False,
+            "missingTemplates": sorted({str(name) for name in missing_templates}),
+        }
+
+    utilities = [template for template in utilities if template]
+    weapons = [template for template in weapons if template]
+    crew = int(
+        as_float(hull.get("crew"), 0.0)
+        + as_float(drive.get("crew"), 0.0)
+        + as_float(power_plant.get("crew"), 0.0)
+        + as_float(radiator.get("crew"), 0.0)
+        + sum(as_float(template.get("crew"), 0.0) for template in utilities)
+        + sum(as_float(template.get("crew"), 0.0) for template in weapons)
+    )
+    magazine_multiplier = sum(
+        as_float(template.get("specialModuleValue"), 0.0)
+        for template in utilities
+        if "Magazine" in (template.get("specialModuleRules") or [])
+    )
+    thrust_multiplier = math.prod(
+        value
+        for template in utilities
+        for value in [ship_plan_utility_rule_value(template, "ThrustMultiplier", 1.0)]
+        if value != 0.0
+    )
+    exhaust_velocity_multiplier = math.prod(
+        value
+        for template in utilities
+        for value in [ship_plan_utility_rule_value(template, "EVMultiplier", 1.0)]
+        if value != 0.0
+    )
+    laser_bonus_power_mj = sum(ship_plan_utility_rule_value(template, "LaserPowerBonus", 0.0) for template in utilities)
+    particle_bonus_power_mj = sum(
+        ship_plan_utility_rule_value(template, "ParticleBeamPowerBonus", 0.0)
+        for template in utilities
+    )
+    weapon_energy_gj = []
+    for template in weapons:
+        bonus_power_mj = 0.0
+        if template.get("_shipPlanKind") == "laser":
+            bonus_power_mj = laser_bonus_power_mj * (1.0 if template.get("attackMode") else 0.5)
+        elif template.get("_shipPlanKind") == "particle":
+            bonus_power_mj = particle_bonus_power_mj * (1.0 if template.get("attackMode") else 0.5)
+        weapon_energy_gj.append(ship_plan_weapon_energy_gj(template, bonus_power_mj / 1000.0))
+
+    required_systems_power_gw = (
+        crew * 5e-6
+        + as_float(hull.get("consTier"), 0.0) * 0.005
+        + sum(as_float(template.get("powerRequirement_MW"), 0.0) / 1000.0 for template in utilities)
+    ) * 1.1
+    required_weapons_power_generation_gw = sum(
+        energy
+        / (
+            as_float(template.get("intraSalvoCooldown_s"), 0.0)
+            if as_float(template.get("salvo_shots"), 1.0) != 1.0
+            else as_float(template.get("cooldown_s"), 0.0)
+        )
+        for template, energy in zip(weapons, weapon_energy_gj)
+        if energy > 0.0
+        and (
+            (
+                as_float(template.get("intraSalvoCooldown_s"), 0.0)
+                if as_float(template.get("salvo_shots"), 1.0) != 1.0
+                else as_float(template.get("cooldown_s"), 0.0)
+            )
+            > 0.0
+        )
+    )
+    thrust_power_gw = ship_plan_drive_thrust_power_gw(drive)
+    drive_power_requirement_gw = ship_plan_drive_power_requirement_gw(drive)
+    power_plant_efficiency = as_float(power_plant.get("efficiency"), 1.0)
+    ship_power_requirement_gw = drive_power_requirement_gw + (
+        required_systems_power_gw + required_weapons_power_generation_gw
+    ) / power_plant_efficiency
+    open_cycle_cooling = ship_plan_drive_open_cycle(drive, catalogs["drives"])
+    waste_heat_gw = (
+        required_systems_power_gw
+        + required_weapons_power_generation_gw
+        + (0.0 if open_cycle_cooling else drive_power_requirement_gw)
+    ) * (1.0 - power_plant_efficiency)
+
+    drive_mass_tons = as_float(drive.get("flatMass_tons"), 0.0) + thrust_power_gw * as_float(
+        drive.get("specificPower_kgMW"), 0.0
+    )
+    power_plant_mass_tons = max(1.0, as_float(power_plant.get("specificPower_tGW"), 0.0) * ship_power_requirement_gw)
+    radiator_mass_tons = (
+        waste_heat_gw * 1_000_000.0 / as_float(radiator.get("specificPower_2s_KWkg"), 1.0) / 1000.0
+    )
+    hull_length_m = as_float(hull.get("length_m"), 0.0)
+    hull_width_m = as_float(hull.get("width_m"), 0.0)
+    lateral_armor = armor_templates["lateral"]
+    lateral_armor_value = as_float(armor_facings["lateral"].get("armorValue"), 0.0)
+    lateral_depth_m = 0.0
+    if lateral_armor and lateral_armor_value > 0.0:
+        lateral_depth_m = (
+            (20.0 / as_float(lateral_armor.get("heatofVaporization_MJkg"), 1.0))
+            / as_float(lateral_armor.get("density_kgm3"), 1.0)
+            / 0.005
+            * lateral_armor_value
+        )
+    cinematic_scale = bool(scenario_customizations(indexed).get("cinematicCombatRealismScale"))
+    armor_masses = {
+        facing: ship_plan_armor_mass_tons(
+            armor_templates[facing] or {},
+            as_float(armor_facings[facing].get("armorValue"), 0.0),
+            hull_length_m,
+            hull_width_m,
+            lateral_depth_m,
+            lateral=facing == "lateral",
+            cinematic_scale=cinematic_scale,
+        )
+        for facing in ("nose", "lateral", "tail")
+    }
+    utility_mass_tons = sum(as_float(template.get("mass_tons"), 0.0) for template in utilities)
+    weapon_mass_tons = sum(ship_plan_weapon_mass_tons(template, magazine_multiplier) for template in weapons)
+    crew_mass_tons = crew * 4.0
+    dry_mass_tons = (
+        as_float(hull.get("mass_tons"), 0.0)
+        + drive_mass_tons
+        + power_plant_mass_tons
+        + radiator_mass_tons
+        + utility_mass_tons
+        + weapon_mass_tons
+        + sum(armor_masses.values())
+        + crew_mass_tons
+    )
+    propellant_mass_tons = as_float(design.get("propellantTanks"), 0.0) * 100.0
+    wet_mass_tons = dry_mass_tons + propellant_mass_tons
+    modified_thrust_n = as_float(drive.get("thrust_N"), 0.0) * thrust_multiplier
+    modified_exhaust_velocity_kps = as_float(drive.get("EV_kps"), 0.0) * exhaust_velocity_multiplier
+    effect_contexts = faction_effect_contexts(indexed, faction_id)
+    max_cruise_acceleration_g = apply_effect_modifiers(
+        effect_contexts,
+        catalogs["effects"],
+        "Ship_MaxSurvivableCruiseAcceleration_Bonus",
+        DEFAULT_GLOBAL_CONFIG["baselineMaxHumanCruiseAcceleration_g"],
+    )
+    max_combat_acceleration_g = apply_effect_modifiers(
+        effect_contexts,
+        catalogs["effects"],
+        "Ship_MaxSurvivableCombatAcceleration_Bonus",
+        DEFAULT_GLOBAL_CONFIG["baselineMaxHumanCombatAcceleration_g"],
+    )
+    cruise_acceleration_mps2 = min(modified_thrust_n / (wet_mass_tons * 1000.0), max_cruise_acceleration_g * STANDARD_GRAVITY_MPS2)
+    combat_acceleration_mps2 = min(
+        modified_thrust_n * as_float(drive.get("thrustCap"), 0.0) / (wet_mass_tons * 1000.0),
+        max_combat_acceleration_g * STANDARD_GRAVITY_MPS2,
+    )
+    delta_v_kps = modified_exhaust_velocity_kps * math.log(wet_mass_tons / dry_mass_tons) if dry_mass_tons > 0.0 else 0.0
+    maneuver_thrust_n = 2_500_000.0 + sum(
+        ship_plan_utility_rule_value(template, "RotationalThrust", 0.0)
+        for template in utilities
+    )
+    moment_of_inertia = (1.0 / 12.0) * wet_mass_tons * 1000.0 * hull_length_m**2
+    angular_acceleration_degps2 = (
+        maneuver_thrust_n * 2.0 * hull_length_m / 2.0 / moment_of_inertia * 180.0 / math.pi
+        if moment_of_inertia > 0.0
+        else 0.0
+    )
+
+    scale = DEFAULT_GLOBAL_CONFIG["spaceResourceToTons"]
+    resource_breakdown: dict[str, dict[str, float]] = {}
+
+    def add_cost(name: str, materials: dict[str, Any] | None, mass_tons: float) -> None:
+        values = resource_breakdown.setdefault(name, {})
+        ship_plan_add_scaled_materials(values, materials, mass_tons * scale)
+
+    add_cost("hull", hull.get("weightedBuildMaterials"), as_float(hull.get("mass_tons"), 0.0))
+    add_cost("drive", drive.get("weightedBuildMaterials"), drive_mass_tons)
+    add_cost("powerPlant", power_plant.get("weightedBuildMaterials"), power_plant_mass_tons)
+    add_cost("radiator", radiator.get("weightedBuildMaterials"), radiator_mass_tons)
+    for template in weapons:
+        for resource, value in ship_plan_weapon_cost(template, magazine_multiplier).items():
+            resource_breakdown.setdefault("weapons", {})[resource] = resource_breakdown.setdefault("weapons", {}).get(resource, 0.0) + value
+    for template in utilities:
+        add_cost("utilities", template.get("weightedBuildMaterials"), as_float(template.get("mass_tons"), 0.0))
+    for facing, mass_tons in armor_masses.items():
+        add_cost("armor", (armor_templates[facing] or {}).get("weightedBuildMaterials"), mass_tons)
+    add_cost(
+        "crew",
+        {
+            "water": DEFAULT_GLOBAL_CONFIG["crewBaselineWater_tons"],
+            "volatiles": DEFAULT_GLOBAL_CONFIG["crewBaselineVolatiles_tons"],
+        },
+        crew,
+    )
+    add_cost("propellant", drive.get("perTankPropellantMaterials"), propellant_mass_tons)
+    resources: dict[str, float] = {}
+    for values in resource_breakdown.values():
+        for resource, value in values.items():
+            resources[resource] = resources.get(resource, 0.0) + value
+
+    warnings = []
+    required_class = str(drive.get("requiredPowerPlant") or "")
+    plant_class = str(power_plant.get("powerPlantClass") or "")
+    if not ship_plan_power_plant_class_compatible(required_class, plant_class):
+        warnings.append(f"Drive requires {required_class}; selected power plant is {plant_class}.")
+    if as_float(power_plant.get("maxOutput_GW"), 0.0) < ship_power_requirement_gw:
+        warnings.append("Selected power plant maximum output is below the simulated ship power requirement.")
+    if hull.get("alien"):
+        warnings.append("Alien acceleration caps are not reconstructed; human survivability caps were used.")
+
+    return clean_numbers(
+        {
+            "complete": True,
+            "crew": crew,
+            "massTons": {
+                "wet": wet_mass_tons,
+                "dry": dry_mass_tons,
+                "propellant": propellant_mass_tons,
+                "hull": as_float(hull.get("mass_tons"), 0.0),
+                "drive": drive_mass_tons,
+                "powerPlant": power_plant_mass_tons,
+                "radiator": radiator_mass_tons,
+                "weapons": weapon_mass_tons,
+                "utilities": utility_mass_tons,
+                "armor": {"total": sum(armor_masses.values()), **armor_masses},
+                "crew": crew_mass_tons,
+            },
+            "propulsion": {
+                "cruiseAccelerationMilliG": cruise_acceleration_mps2 / STANDARD_GRAVITY_MPS2 * 1000.0,
+                "combatAccelerationMilliG": combat_acceleration_mps2 / STANDARD_GRAVITY_MPS2 * 1000.0,
+                "cruiseDeltaVKps": delta_v_kps,
+                "angularAccelerationDegreesPerSecondSquared": angular_acceleration_degps2,
+                "modifiedThrustN": modified_thrust_n,
+                "modifiedExhaustVelocityKps": modified_exhaust_velocity_kps,
+                "openCycleCooling": open_cycle_cooling,
+            },
+            "power": {
+                "driveRequirementGW": drive_power_requirement_gw,
+                "systemsRequirementGW": required_systems_power_gw,
+                "weaponsGenerationRequirementGW": required_weapons_power_generation_gw,
+                "weaponsStorageRequirementGJ": sum(weapon_energy_gj),
+                "shipProductionRequirementGW": ship_power_requirement_gw,
+                "wasteHeatGW": waste_heat_gw,
+            },
+            "storage": {
+                "heatSinkCapacityGJ": sum(as_float(template.get("heatCapacity_GJ"), 0.0) for template in utilities),
+                "batteryCapacityGJ": sum(as_float(template.get("energyCapacity_GJ"), 0.0) for template in utilities),
+                "magazineMultiplier": magazine_multiplier,
+            },
+            "construction": {
+                "resources": ship_plan_clean_resources(resources),
+                "resourceBreakdown": {
+                    category: ship_plan_clean_resources(values)
+                    for category, values in resource_breakdown.items()
+                    if ship_plan_clean_resources(values)
+                },
+                "time": ship_plan_shipyard_times(indexed, faction_id, hull, catalogs["effects"], catalogs["shipyards"]),
+            },
+            "upkeep": {
+                "missionControl": hull.get("missionControl"),
+                "monthlyMoney": hull.get("monthlyIncome_Money"),
+            },
+            "warnings": warnings,
+            "combatPerformanceRatingIncluded": False,
+        },
+        6,
+    )
+
+
+def ship_plan_existing_designs(
+    indexed: IndexedState,
+    faction_id: int,
+    faction: dict[str, Any],
+    catalogs: dict[str, dict[str, dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    active_counts: dict[str, int] = {}
+    for ship in faction_ship_states(indexed, faction):
+        name = str(ship.get("templateName") or "")
+        active_counts[name] = active_counts.get(name, 0) + 1
+    built_counts = faction.get("shipsBuiltInClass") if isinstance(faction.get("shipsBuiltInClass"), dict) else {}
+    result = []
+    for design in faction.get("shipDesigns") if isinstance(faction.get("shipDesigns"), list) else []:
+        if not isinstance(design, dict):
+            continue
+        name = str(design.get("dataName") or "")
+        result.append(
+            clean_numbers(
+                {
+                    "template": name,
+                    "display": design.get("_displayName") or design.get("friendlyName") or name,
+                    "role": design.get("role"),
+                    "hull": design.get("hullName"),
+                    "drive": design.get("driveName"),
+                    "powerPlant": design.get("powerPlantName"),
+                    "radiator": design.get("radiatorName"),
+                    "propellantTanks": design.get("propellantTanks"),
+                    "armor": {
+                        "nose": design.get("noseArmor"),
+                        "lateral": design.get("lateralArmor"),
+                        "tail": design.get("tailArmor"),
+                    },
+                    "utilities": design.get("moduleTemplateEntries") or [],
+                    "hullWeapons": design.get("hullWeaponTemplateEntries") or [],
+                    "noseWeapons": design.get("noseWeaponTemplateEntries") or [],
+                    "simulation": simulate_ship_design(indexed, faction_id, faction, design, catalogs),
+                    "activeShips": active_counts.get(name, 0),
+                    "shipsBuilt": int(as_float(built_counts.get(name), 0.0)),
+                }
+            )
+        )
+    return sorted(result, key=lambda row: str(row.get("display") or row.get("template")))
+
+
+def ship_plan_select_design(existing_designs: list[dict[str, Any]], fragment: str) -> dict[str, Any]:
+    needle = fragment.casefold()
+    exact = [
+        row
+        for row in existing_designs
+        if needle in {str(row.get("template") or "").casefold(), str(row.get("display") or "").casefold()}
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    matches = [
+        row
+        for row in existing_designs
+        if needle in str(row.get("template") or "").casefold() or needle in str(row.get("display") or "").casefold()
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise SystemExit(f"No ship design matched: {fragment}")
+    raise SystemExit(f"Multiple ship designs matched {fragment!r}: {', '.join(str(row.get('display')) for row in matches)}")
+
+
+def calculate_ship_plan(
+    indexed: IndexedState,
+    templates_dir: Path | None,
+    faction_name: str | None = None,
+    role: str = "balanced",
+    top: int = 8,
+    include_obsolete: bool = False,
+    include_all_components: bool = False,
+    design_name: str | None = None,
+) -> dict[str, Any]:
+    faction_id, faction = find_faction_state(indexed, faction_name)
+    simulation_catalogs = ship_plan_simulation_catalogs(templates_dir)
+    hull_templates = simulation_catalogs["hulls"]
+    drive_templates = simulation_catalogs["drives"]
+    plant_templates = simulation_catalogs["powerPlants"]
+    radiator_templates = simulation_catalogs["radiators"]
+    battery_templates = load_named_templates(templates_dir, "TIBatteryTemplate.json")
+    heat_sink_templates = load_named_templates(templates_dir, "TIHeatSinkTemplate.json")
+    armor_templates = simulation_catalogs["armors"]
+    utility_templates = load_named_templates(templates_dir, "TIUtilityModuleTemplate.json")
+    weapon_templates = [
+        (kind, template)
+        for kind, filename in SHIP_PLAN_WEAPON_TEMPLATE_FILES
+        for template in load_named_templates(templates_dir, filename).values()
+    ]
+
+    available = lambda template: ship_plan_part_unlocked(template, faction, include_obsolete=include_obsolete)
+    hulls = [
+        ship_plan_hull_row(template)
+        for template in hull_templates.values()
+        if available(template) and not template.get("alien") and not template.get("noShipyardBuild")
+    ]
+    drives = [ship_plan_drive_row(template) for template in drive_templates.values() if available(template)]
+    power_plants = [ship_plan_power_plant_row(template) for template in plant_templates.values() if available(template)]
+    radiators = [
+        ship_plan_generic_row(
+            template,
+            (
+                ("specificPowerKWPerKg", "specificPower_2s_KWkg"),
+                ("specificMassKgPerM2", "specificMass_2s_kgm2"),
+                ("vulnerability", "vulnerability"),
+                ("radiatorType", "radiatorType"),
+            ),
+        )
+        for template in radiator_templates.values()
+        if available(template)
+    ]
+    batteries = [
+        ship_plan_generic_row(
+            template,
+            (("capacityGJ", "energyCapacity_GJ"), ("rechargeGJPerSecond", "rechargeRate_GJs"), ("massTons", "mass_tons")),
+        )
+        for template in battery_templates.values()
+        if available(template)
+    ]
+    heat_sinks = [
+        ship_plan_generic_row(template, (("capacityGJ", "heatCapacity_GJ"), ("massTons", "mass_tons")))
+        for template in heat_sink_templates.values()
+        if available(template)
+    ]
+    armors = [
+        ship_plan_generic_row(
+            template,
+            (
+                ("densityKgPerM3", "density_kgm3"),
+                ("xRayHalfValueCm", "xRayHalfValue_cm"),
+                ("baryonicHalfValueCm", "baryonicHalfValue_cm"),
+                ("heatOfVaporizationMJPerKg", "heatofVaporization_MJkg"),
+                ("specialties", "specialties"),
+            ),
+        )
+        for template in armor_templates.values()
+        if available(template)
+    ]
+    utilities = [
+        ship_plan_utility_row(template)
+        for template in utility_templates.values()
+        if available(template) and template.get("dataName") != "Empty"
+    ]
+    weapons = [
+        row
+        for kind, template in weapon_templates
+        if available(template)
+        for row in [ship_plan_weapon_row(template, kind)]
+        if row is not None
+    ]
+
+    drive_views = ship_plan_drive_goal_views(drives, power_plants, top)
+    weapon_views = ship_plan_weapon_goal_views(weapons, top)
+    selected_drives = {
+        str(row.get("template")): row
+        for rows in drive_views.values()
+        for row in rows
+    }
+    selected_weapons = {
+        str(row.get("template")): row
+        for rows in weapon_views.values()
+        for row in rows
+    }
+    role_utilities = [
+        row
+        for row in sorted(utilities, key=lambda row: str(row.get("display") or row.get("template")))
+        if role == "balanced" or role in (row.get("roleTags") or [])
+    ][: max(0, top)]
+    required_category_warnings = [
+        f"No non-obsolete unlocked {name} found; rerun with --include-obsolete if a hidden legacy part is still needed."
+        for name, rows in (
+            ("power plants", power_plants),
+            ("radiators", radiators),
+            ("batteries", batteries),
+            ("armors", armors),
+        )
+        if not rows and not include_obsolete
+    ]
+    existing_designs = ship_plan_existing_designs(indexed, faction_id, faction, simulation_catalogs)
+
+    report = {
+        "faction": faction_brief(faction_id, faction),
+        "date": (first_value(indexed, "TITimeState") or {}).get("currentDateTime"),
+        "questionSupported": "What ship design should I build, and what non-combat physical and construction values do my saved designs have?",
+        "requestedRole": role,
+        "templateAvailability": {
+            "templatesDir": str(templates_dir) if templates_dir else None,
+            "warning": None if hull_templates and drive_templates else "Local Terra Invicta ship templates are required.",
+        },
+        "currentState": {
+            "resources": faction.get("resources") or {},
+            "resourceIncomeDeficiencies": faction.get("resourceIncomeDeficiencies") or [],
+            "obsoleteShipPartCount": len(faction.get("obsoletedShipParts") or []),
+            "includeObsoleteParts": include_obsolete,
+            "requiredCategoryWarnings": required_category_warnings,
+            "existingDesigns": existing_designs,
+        },
+        "unlockedCounts": {
+            "hulls": len(hulls),
+            "drives": len(drives),
+            "powerPlants": len(power_plants),
+            "radiators": len(radiators),
+            "batteries": len(batteries),
+            "heatSinks": len(heat_sinks),
+            "armors": len(armors),
+            "utilities": len(utilities),
+            "weapons": len(weapons),
+        },
+        "componentCatalog": {
+            "hulls": sorted(hulls, key=lambda row: (as_float(row.get("constructionTier"), 0.0), str(row.get("display")))),
+            "powerPlants": sorted(power_plants, key=lambda row: (as_float(row.get("specificMassTonsPerGW"), 0.0), str(row.get("display")))),
+            "radiators": sorted(radiators, key=lambda row: (-as_float(row.get("specificPowerKWPerKg"), 0.0), str(row.get("display")))),
+            "batteries": sorted(batteries, key=lambda row: (-as_float(row.get("capacityGJ"), 0.0), str(row.get("display")))),
+            "heatSinks": sorted(heat_sinks, key=lambda row: (-as_float(row.get("capacityGJ"), 0.0), str(row.get("display")))),
+            "armors": sorted(armors, key=lambda row: (as_float(row.get("densityKgPerM3"), 0.0), str(row.get("display")))),
+            "driveGoalViews": drive_views,
+            "driveShortlist": sorted(selected_drives.values(), key=lambda row: str(row.get("display") or row.get("template"))),
+            "weaponGoalViews": weapon_views,
+            "weaponShortlist": sorted(selected_weapons.values(), key=lambda row: str(row.get("display") or row.get("template"))),
+            "roleUtilityShortlist": role_utilities,
+        },
+        "llmDecision": {
+            "recommendedUse": [
+                "Choose a hull that fits the role and required weapon or utility slots.",
+                "Choose a drive from the relevant proxy view, then use compatiblePowerPlants to keep the pairing legal.",
+                "Choose radiator, armor, battery, heat sink, utilities, weapons, propellant tanks, and armor values while checking resource constraints.",
+                "Treat proxy rankings as shortlist evidence and make the final design recommendation explicitly.",
+            ],
+            "recommendedDriveView": {
+                "balanced": "balanced",
+                "combat": "balanced",
+                "intercept": "thrust",
+                "transfer": "exhaustVelocity",
+                "colony": "exhaustVelocity",
+                "assault": "exhaustVelocity",
+                "science": "exhaustVelocity",
+            }.get(role),
+            "roleHints": {
+                "balanced": "Review all proxy views and state the intended operating area.",
+                "combat": "Prioritize weapon coverage, point defense, combat utilities, armor, and heat handling.",
+                "intercept": "Prioritize thrust and projectile-defense coverage for local-response ships.",
+                "transfer": "Prioritize exhaust velocity and refueling or thrust utility options.",
+                "colony": "Prioritize exhaust velocity, propellant, and Found* utility modules.",
+                "assault": "Prioritize Marine Assault utility modules and enough transfer performance to reach the target.",
+                "science": "Prioritize Mobile Space Science Lab or Prospector utility modules and economical transfer performance.",
+            }.get(role),
+            "finalRecommendationAutomated": False,
+        },
+        "limitations": [
+            "Drive rankings are transparent thrust, exhaust-velocity, and sqrt(thrust) * exhaust-velocity proxies; they are not mission transfer simulations.",
+            "Saved-design simulations reconstruct non-combat builder values from local templates: mass, propulsion, power, heat, storage, armor, construction resources and time, MC, and monthly money upkeep.",
+            "Combat performance ratings are intentionally excluded. Weapon damage-rate fields remain shortlist comparison proxies only.",
+            "Weapon damage-rate fields are comparison proxies over template damage, salvo size, and cooldown; they are not hit-probability or armor-penetration simulations.",
+            "Unlock filtering uses finishedProjectNames, disable flags, and obsoletedShipParts from the save. Hidden game rules are not re-simulated.",
+            "Construction resources do not apply AI difficulty scaling or helium-3 access substitution. Human saved designs are the validated target.",
+        ],
+    }
+    if design_name:
+        report["selectedDesign"] = ship_plan_select_design(existing_designs, design_name)
+    if include_all_components:
+        report["allUnlockedComponents"] = {
+            "drives": sorted(drives, key=lambda row: str(row.get("display") or row.get("template"))),
+            "utilities": sorted(utilities, key=lambda row: str(row.get("display") or row.get("template"))),
+            "weapons": sorted(weapons, key=lambda row: str(row.get("display") or row.get("template"))),
+        }
+    return clean_numbers(report, 6)
+
+
+def command_ship_plan(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    result = calculate_ship_plan(
+        indexed,
+        templates_dir,
+        faction_name=args.faction,
+        role=args.role,
+        top=args.top,
+        include_obsolete=args.include_obsolete,
+        include_all_components=args.all_components,
+        design_name=args.design,
+    )
+    if args.design:
+        result = {
+            "faction": result["faction"],
+            "date": result["date"],
+            "selectedDesign": result["selectedDesign"],
+            "limitations": result["limitations"],
+        }
+    print_json(result, compact=args.compact)
 
 
 def faction_yearly_income_from_ships(
