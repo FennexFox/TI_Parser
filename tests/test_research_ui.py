@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -73,6 +74,43 @@ def build_research_fixture(*, docked=False):
 
 
 class ResearchUiTests(unittest.TestCase):
+    def test_topbar_records_before_distribution_research_in_shared_cache(self):
+        indexed = ti.build_index({"gamestates": {}})
+        faction = {"ID": ref(7), "templateName": "ResistCouncil", "resources": {"Research": 4.0}}
+        templates = ti.ResearchTemplates({}, {}, {}, {}, {}, {}, {})
+        cache = {}
+        research = {
+            "daily": {"total": 15.0, "beforeDistribution": 12.5, "distributionBonus": 2.5, "bySource": {}},
+            "monthly": {"total": 456.0},
+            "annual": {"total": 5475.0},
+        }
+
+        with (
+            patch.object(ti, "TOPBAR_RESOURCES", ("Research",)),
+            patch.object(ti, "find_faction_state", return_value=(7, faction)),
+            patch.object(ti, "faction_effect_contexts", return_value={}),
+            patch.object(ti, "councilor_summary_maps", return_value=([], {})),
+            patch.object(ti, "faction_max_mission_control_components", return_value={"total": 0.0}),
+            patch.object(ti, "faction_control_point_maintenance", return_value={}),
+            patch.object(ti, "calculate_research_breakdown", return_value=research),
+        ):
+            result = ti.calculate_topbar(indexed, None, research_templates=templates, base_daily_cache=cache)
+
+        self.assertEqual(cache, {7: 12.5})
+        self.assertEqual(result["resources"]["Research"]["daily"], 15.0)
+
+    def test_base_daily_cache_reuses_breakdown_for_same_faction(self):
+        indexed, faction = build_research_fixture()
+        cache = {}
+
+        with patch.object(ti, "calculate_research_breakdown", return_value={"daily": {"beforeDistribution": 12.5}}) as breakdown:
+            first = ti.faction_base_research_daily(indexed, None, faction, cache=cache)
+            second = ti.faction_base_research_daily(indexed, None, faction, cache=cache)
+
+        self.assertEqual(first, 12.5)
+        self.assertEqual(second, 12.5)
+        breakdown.assert_called_once()
+
     def test_active_project_slots_exclude_paused_stored_slots(self):
         indexed, faction = build_research_fixture()
 

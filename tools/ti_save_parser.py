@@ -9,22 +9,62 @@ prints only the requested slice.
 from __future__ import annotations
 
 import argparse
-import gzip
-import hashlib
 import json
 import math
-import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from itertools import combinations
 from pathlib import Path
-from typing import Any, Iterable
+from types import MappingProxyType
+from typing import Any
+
+from ti_parser_core import (
+    DEFAULT_CACHE_DIR,
+    SAVE_GLOB,
+    IndexedState,
+    apply_effect_modifiers,
+    as_float,
+    build_index,
+    cache_key,
+    campaign_code,
+    candidate_save_dirs,
+    candidate_templates_dirs,
+    clean_number,
+    clean_numbers,
+    effect_modifier_delta,
+    faction_effect_contexts,
+    file_fingerprint,
+    find_faction_state,
+    find_latest_save,
+    first_value,
+    json_default,
+    load_named_templates,
+    load_save,
+    load_trait_templates,
+    match_raw_state,
+    print_json,
+    raw_name_values,
+    raw_state_id,
+    ref_id,
+    ref_summary,
+    region_nation_summary,
+    resolve_ref,
+    resolve_save_path,
+    resolve_templates_dir,
+    save_fingerprint,
+    short_type,
+    snapshot_fingerprint,
+    state_value_by_id,
+    type_entries,
+)
+import ti_parser_snapshot as snapshot_layer
+import ti_parser_income as income_layer
+import ti_parser_hab as hab_layer
+import ti_parser_org as org_layer
+from ti_parser_snapshot import SnapshotConfig
 
 
 SCHEMA_VERSION = 4
-DEFAULT_CACHE_DIR = ".ti_cache"
-SAVE_GLOB = "*.gz"
 DEFAULT_MAX_COUNCILOR_ATTRIBUTE = 25
 DAYS_PER_YEAR = 365.2422
 DEFAULT_GLOBAL_CONFIG = {
@@ -184,6 +224,18 @@ FACTION_IDEOLOGY_BY_TEMPLATE = {
     "EscapeCouncil": "Escape",
     "AlienCouncil": "Alien",
 }
+INCOME_CONFIG = income_layer.IncomeConfig(
+    days_per_year=DAYS_PER_YEAR,
+    financial_sector_funding_bonus=DEFAULT_GLOBAL_CONFIG["financialSectorFundingBonus"],
+    knowledge_sector_research_bonus=DEFAULT_GLOBAL_CONFIG["knowledgeSectorResearchBonus"],
+    min_population_for_first_army_millions=MIN_POPULATION_FOR_FIRST_ARMY_MILLIONS,
+    min_population_for_additional_armies_per_millions=MIN_POPULATION_FOR_ADDITIONAL_ARMIES_PER_MILLIONS,
+    min_control_points_for_navy=MIN_CONTROL_POINTS_FOR_NAVY,
+    min_control_points_for_navy_exception=MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION,
+    pcgdp_for_navy_exception=PCGDP_FOR_NAVY_EXCEPTION,
+    faction_ideology_by_template=MappingProxyType(FACTION_IDEOLOGY_BY_TEMPLATE),
+    councilor_income_fields=MappingProxyType(COUNCILOR_INCOME_FIELDS),
+)
 HAB_LEO_PRIORITY_RULES = {
     "LEOBonusEconomy": "Economy",
     "LEOBonusWelfare": "Welfare",
@@ -196,6 +248,17 @@ HAB_LEO_PRIORITY_RULES = {
     "LEOBonusEnvironment": "Environment",
     "LEOBonusGovernment": "Government",
 }
+HAB_CONFIG = hab_layer.HabConfig(
+    days_per_year=DAYS_PER_YEAR,
+    default_global_config=MappingProxyType(DEFAULT_GLOBAL_CONFIG),
+    hab_income_fields=MappingProxyType(HAB_INCOME_FIELDS),
+    hab_support_fields=MappingProxyType(HAB_SUPPORT_FIELDS),
+    hab_site_production_fields=MappingProxyType(HAB_SITE_PRODUCTION_FIELDS),
+    basic_space_resources=BASIC_SPACE_RESOURCES,
+    mining_bonus_contexts=MappingProxyType(MINING_BONUS_CONTEXTS),
+    hab_admin_adviser_resources=frozenset(HAB_ADMIN_ADVISER_RESOURCES),
+    hab_leo_priority_rules=MappingProxyType(HAB_LEO_PRIORITY_RULES),
+)
 FACTION_RESOURCES = (
     "Money",
     "Influence",
@@ -248,662 +311,72 @@ NATION_CONDITION_FIELDS = {
     "TINationCondition_fUnrest": "unrest",
 }
 
-
-@dataclass(frozen=True)
-class IndexedState:
-    data: dict[str, Any]
-    gamestates: dict[str, list[dict[str, Any]]]
-    id_index: dict[int, tuple[str, str, dict[str, Any]]]
-
-
-def json_default(value: Any) -> Any:
-    if isinstance(value, Path):
-        return str(value)
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
-
-
-def print_json(value: Any, *, compact: bool = False) -> None:
-    if compact:
-        print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=json_default))
-    else:
-        print(json.dumps(value, ensure_ascii=False, indent=2, default=json_default))
-
-
-def ref_id(value: Any) -> int | None:
-    if isinstance(value, dict):
-        raw = value.get("value")
-        if isinstance(raw, int):
-            return raw
-    return None
-
-
-def short_type(full_type: str) -> str:
-    return full_type.rsplit(".", 1)[-1]
-
-
-def campaign_code(template_name: str | None) -> str | None:
-    if not template_name:
-        return None
-    if "_" in template_name and template_name[:4].isdigit():
-        return template_name.split("_", 1)[1]
-    return template_name
-
-
-def clean_number(value: Any, digits: int = 3) -> Any:
-    if isinstance(value, float):
-        if math.isnan(value) or math.isinf(value):
-            return None
-        return round(value, digits)
-    return value
-
-
-def clean_numbers(value: Any, digits: int = 3) -> Any:
-    if isinstance(value, dict):
-        return {str(k): clean_numbers(v, digits) for k, v in value.items()}
-    if isinstance(value, list):
-        return [clean_numbers(v, digits) for v in value]
-    return clean_number(value, digits)
-
-
-def save_fingerprint(save_path: Path) -> dict[str, Any]:
-    stat = save_path.stat()
-    return {
-        "path": str(save_path),
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
-    }
-
-
-def cache_key(fingerprint: dict[str, Any]) -> str:
-    raw = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
-
-
-def candidate_save_dirs() -> Iterable[Path]:
-    home = Path.home()
-    yield home / "Documents" / "My Games" / "TerraInvicta" / "Saves"
-    yield home / "OneDrive" / "Documents" / "My Games" / "TerraInvicta" / "Saves"
-    yield home / "OneDrive" / "문서" / "My Games" / "TerraInvicta" / "Saves"
-
-
-def candidate_templates_dirs() -> Iterable[Path]:
-    steam_roots = (
-        Path("C:/Program Files (x86)/Steam/steamapps/common"),
-        Path("C:/Program Files/Steam/steamapps/common"),
-        Path("D:/SteamLibrary/steamapps/common"),
-        Path("E:/SteamLibrary/steamapps/common"),
-    )
-    for root in steam_roots:
-        yield root / "Terra Invicta" / "TerraInvicta_Data" / "StreamingAssets" / "Templates"
-
-
-def find_latest_save() -> Path:
-    candidates: list[Path] = []
-    for directory in candidate_save_dirs():
-        if directory.is_dir():
-            candidates.extend(path for path in directory.glob(SAVE_GLOB) if path.is_file())
-    if not candidates:
-        raise FileNotFoundError("No Terra Invicta .gz saves found. Pass --save <path>.")
-    return max(candidates, key=lambda path: path.stat().st_mtime_ns)
-
-
-def resolve_save_path(save_arg: str | None) -> Path:
-    if save_arg:
-        path = Path(save_arg).expanduser()
-        if not path.is_file():
-            raise FileNotFoundError(f"Save file not found: {path}")
-        return path
-    return find_latest_save()
-
-
-def resolve_templates_dir(templates_arg: str | None) -> Path | None:
-    if templates_arg:
-        path = Path(templates_arg).expanduser()
-        if not path.is_dir():
-            raise FileNotFoundError(f"Templates directory not found: {path}")
-        return path
-    for path in candidate_templates_dirs():
-        if (path / "TITraitTemplate.json").is_file():
-            return path
-    return None
-
-
-def load_save(save_path: Path) -> dict[str, Any]:
-    with gzip.open(save_path, "rt", encoding="utf-8-sig") as handle:
-        data = json.load(handle)
-    if not isinstance(data, dict) or "gamestates" not in data:
-        raise ValueError(f"Not a recognized Terra Invicta save: {save_path}")
-    return data
-
-
-def file_fingerprint(path: Path | None) -> dict[str, Any] | None:
-    if path is None or not path.is_file():
-        return None
-    stat = path.stat()
-    return {"path": str(path), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
-
-
-def snapshot_fingerprint(save_path: Path, templates_dir: Path | None) -> dict[str, Any]:
-    return {
-        "save": save_fingerprint(save_path),
-        "traitTemplate": file_fingerprint(templates_dir / "TITraitTemplate.json" if templates_dir else None),
-    }
-
-
-def load_trait_templates(templates_dir: Path | None) -> dict[str, dict[str, Any]]:
-    if templates_dir is None:
-        return {}
-    trait_path = templates_dir / "TITraitTemplate.json"
-    if not trait_path.is_file():
-        return {}
-    with trait_path.open("r", encoding="utf-8-sig") as handle:
-        raw = json.load(handle)
-    if not isinstance(raw, list):
-        return {}
-    return {item["dataName"]: item for item in raw if isinstance(item, dict) and item.get("dataName")}
-
-
-def load_named_templates(templates_dir: Path | None, filename: str) -> dict[str, dict[str, Any]]:
-    if templates_dir is None:
-        return {}
-    path = templates_dir / filename
-    if not path.is_file():
-        return {}
-    with path.open("r", encoding="utf-8-sig") as handle:
-        raw = json.load(handle)
-    if not isinstance(raw, list):
-        return {}
-    return {item["dataName"]: item for item in raw if isinstance(item, dict) and item.get("dataName")}
-
-
-def as_float(value: Any, default: float = 0.0) -> float:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return default
-    return default
-
-
-def raw_state_id(entry: dict[str, Any]) -> int | None:
-    value = entry.get("Value") or {}
-    return ref_id(entry.get("Key")) or ref_id(value.get("ID"))
-
-
-def raw_name_values(state: dict[str, Any]) -> list[str]:
-    values = []
-    for value in (state.get("templateName"), campaign_code(state.get("templateName")), state.get("displayName")):
-        if value:
-            values.append(str(value))
-    return values
-
-
-def match_raw_state(indexed: IndexedState, wanted_type: str, name: str) -> tuple[int | None, dict[str, Any]] | None:
-    needle = name.casefold()
-    partial: list[tuple[int | None, dict[str, Any]]] = []
-    for entry in type_entries(indexed, wanted_type):
-        state = entry.get("Value") or {}
-        if not isinstance(state, dict):
-            continue
-        names = raw_name_values(state)
-        state_id = raw_state_id(entry)
-        if any(value.casefold() == needle for value in names):
-            return state_id, state
-        if any(needle in value.casefold() for value in names):
-            partial.append((state_id, state))
-    return partial[0] if partial else None
-
-
-def state_value_by_id(indexed: IndexedState, state_id: int | None) -> dict[str, Any] | None:
-    if state_id is None:
-        return None
-    found = indexed.id_index.get(state_id)
-    return found[2] if found else None
-
-
-def find_faction_state(indexed: IndexedState, name: str | None = None) -> tuple[int, dict[str, Any]]:
-    if name:
-        found = match_raw_state(indexed, "TIFactionState", name)
-        if found and found[0] is not None:
-            return found[0], found[1]
-        raise SystemExit(f"Faction not found: {name}")
-
-    metadata = first_value(indexed, "TIMetadataState") or {}
-    player_faction_name = metadata.get("playerFactionName")
-    if player_faction_name:
-        found = match_raw_state(indexed, "TIFactionState", str(player_faction_name))
-        if found and found[0] is not None:
-            return found[0], found[1]
-
-    resist_candidate: tuple[int, dict[str, Any]] | None = None
-    for entry in type_entries(indexed, "TIFactionState"):
-        faction = entry.get("Value") or {}
-        state_id = raw_state_id(entry)
-        if state_id is None:
-            continue
-        player = resolve_ref(indexed, faction.get("player"))
-        if player and player[2].get("templateName") == "ResistPlayer":
-            return state_id, faction
-        if faction.get("templateName") == "ResistCouncil":
-            resist_candidate = (state_id, faction)
-    if resist_candidate:
-        return resist_candidate
-
-    for entry in type_entries(indexed, "TIFactionState"):
-        faction = entry.get("Value") or {}
-        state_id = raw_state_id(entry)
-        if state_id is not None:
-            return state_id, faction
-    raise SystemExit("No faction states found.")
-
-
-def faction_effect_contexts(indexed: IndexedState, faction_id: int) -> dict[str, list[str]]:
-    for entry in type_entries(indexed, "TIEffectsState"):
-        effects_state = entry.get("Value") or {}
-        pairs = effects_state.get("factionEffectsNames") if isinstance(effects_state.get("factionEffectsNames"), list) else []
-        for pair in pairs:
-            if not isinstance(pair, dict) or ref_id(pair.get("Key")) != faction_id:
-                continue
-            value = pair.get("Value")
-            if isinstance(value, dict):
-                return {
-                    str(context): [str(item) for item in names if item]
-                    for context, names in value.items()
-                    if isinstance(names, list)
-                }
-    return {}
-
-
-def apply_effect_modifiers(
-    effect_contexts: dict[str, list[str]],
-    effect_templates: dict[str, dict[str, Any]],
-    context: str,
-    base_value: float,
-) -> float:
-    result = float(base_value)
-    for effect_name in effect_contexts.get(context, []):
-        effect = effect_templates.get(effect_name)
-        if not effect:
-            continue
-        operation = effect.get("operation")
-        value = as_float(effect.get("value"), 0.0)
-        if operation == "Additive":
-            result += value
-        elif operation == "Multiplicative":
-            result *= value
-        elif operation == "SetToFixedValue":
-            result = value
-        elif operation == "IncreaseToValue":
-            result = max(result, value)
-        elif operation == "DecreaseToValue":
-            result = min(result, value)
-    return result
-
-
-def effect_modifier_delta(
-    effect_contexts: dict[str, list[str]],
-    effect_templates: dict[str, dict[str, Any]],
-    context: str,
-    base_value: float,
-) -> float:
-    return apply_effect_modifiers(effect_contexts, effect_templates, context, base_value) - base_value
-
-
-def build_index(data: dict[str, Any]) -> IndexedState:
-    gamestates = data.get("gamestates", {})
-    if not isinstance(gamestates, dict):
-        raise ValueError("Save gamestates field is not an object")
-
-    id_index: dict[int, tuple[str, str, dict[str, Any]]] = {}
-    for full_type, entries in gamestates.items():
-        if not isinstance(entries, list):
-            continue
-        type_name = short_type(full_type)
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            value = entry.get("Value")
-            if not isinstance(value, dict):
-                continue
-            state_id = ref_id(entry.get("Key")) or ref_id(value.get("ID"))
-            if state_id is not None:
-                id_index[state_id] = (full_type, type_name, value)
-    return IndexedState(data=data, gamestates=gamestates, id_index=id_index)
-
-
-def resolve_ref(indexed: IndexedState, value: Any) -> tuple[str, str, dict[str, Any]] | None:
-    state_id = ref_id(value)
-    if state_id is None:
-        return None
-    return indexed.id_index.get(state_id)
-
-
-def ref_summary(indexed: IndexedState, value: Any) -> dict[str, Any] | None:
-    state_id = ref_id(value)
-    if state_id is None:
-        return None
-    found = indexed.id_index.get(state_id)
-    if not found:
-        return {"id": state_id}
-    _, type_name, state = found
-    return {
-        "id": state_id,
-        "type": type_name,
-        "template": state.get("templateName"),
-        "code": campaign_code(state.get("templateName")),
-        "display": state.get("displayName"),
-    }
-
-
-def region_nation_summary(indexed: IndexedState, value: Any) -> dict[str, Any] | None:
-    found = resolve_ref(indexed, value)
-    if not found:
-        return None
-    region = found[2]
-    return ref_summary(indexed, region.get("nation"))
-
-
-def type_entries(indexed: IndexedState, wanted_type: str) -> list[dict[str, Any]]:
-    for full_type, entries in indexed.gamestates.items():
-        if full_type == wanted_type or short_type(full_type) == wanted_type:
-            return entries
-    return []
-
-
-def first_value(indexed: IndexedState, wanted_type: str) -> dict[str, Any] | None:
-    entries = type_entries(indexed, wanted_type)
-    if entries:
-        value = entries[0].get("Value")
-        if isinstance(value, dict):
-            return value
-    return None
-
+SNAPSHOT_CONFIG = SnapshotConfig(
+    schema_version=SCHEMA_VERSION,
+    default_max_councilor_attribute=DEFAULT_MAX_COUNCILOR_ATTRIBUTE,
+    councilor_attributes=COUNCILOR_ATTRIBUTES,
+    faction_resources=FACTION_RESOURCES,
+    org_attribute_fields=tuple(ORG_ATTRIBUTE_FIELDS.items()),
+)
 
 def time_summary(indexed: IndexedState) -> dict[str, Any]:
-    time_state = first_value(indexed, "TITimeState") or {}
-    current = time_state.get("currentDateTime") or {}
-    return {
-        "daysInCampaign": time_state.get("daysInCampaign"),
-        "currentQuarterSinceStart": time_state.get("currentQuarterSinceStart"),
-        "currentDateTime": current,
-        "template": time_state.get("templateName"),
-    }
+    return snapshot_layer.time_summary(indexed)
 
 
 def metadata_summary(indexed: IndexedState) -> dict[str, Any]:
-    metadata = first_value(indexed, "TIMetadataState") or {}
-    keys = (
-        "playerFactionName",
-        "gameTimeString",
-        "difficulty",
-        "playedWithMods",
-        "customDifficulty",
-        "researchSpeedMultiplier",
-        "controlPointMaintenanceFreebieBonus",
-        "missionControlBonus",
-        "alienProgressionSpeed",
-        "miningProductivityMultiplier",
-        "nationalIPMultiplier",
-        "averageMonthlyEvents",
-    )
-    return {key: metadata.get(key) for key in keys if key in metadata}
+    return snapshot_layer.metadata_summary(indexed)
 
 
 def global_summary(indexed: IndexedState) -> dict[str, Any]:
-    global_state = first_value(indexed, "TIGlobalValuesState") or {}
-    keys = (
-        "difficulty",
-        "campaignStartVersion",
-        "latestSaveVersion",
-        "realWorldCampaignStart",
-        "controlPointMaintenanceFreebies",
-        "moddingActive",
-        "moddingUsedAnytime",
-        "earthAtmosphericCO2_ppm",
-        "earthAtmosphericCH4_ppm",
-        "earthAtmosphericN2O_ppm",
-        "globalSeaLevelAnomaly_cm",
-        "looseNukes",
-        "nuclearStrikes",
-        "bestGlobalHumanMiltech",
-        "maxGlobalExpectedHabSiteProduction_day",
-    )
-    return clean_numbers({key: global_state.get(key) for key in keys if key in global_state})
+    return snapshot_layer.global_summary(indexed)
 
 
 def faction_key_from_ref(indexed: IndexedState, value: Any) -> str | None:
-    found = resolve_ref(indexed, value)
-    if not found:
-        return None
-    state = found[2]
-    return state.get("templateName") or state.get("displayName")
+    return snapshot_layer.faction_key_from_ref(indexed, value)
 
 
 def faction_display_from_ref(indexed: IndexedState, value: Any) -> str | None:
-    found = resolve_ref(indexed, value)
-    if not found:
-        return None
-    state = found[2]
-    return state.get("displayName") or state.get("templateName")
+    return snapshot_layer.faction_display_from_ref(indexed, value)
 
 
 def control_point_summary(indexed: IndexedState, cp_value: dict[str, Any]) -> dict[str, Any]:
-    faction = ref_summary(indexed, cp_value.get("faction"))
-    return {
-        "id": ref_id(cp_value.get("ID")),
-        "position": cp_value.get("positionInNation"),
-        "type": cp_value.get("controlPointType"),
-        "faction": faction.get("template") if faction else None,
-        "factionDisplay": faction.get("display") if faction else None,
-        "defended": cp_value.get("defended"),
-        "benefitsDisabled": cp_value.get("benefitsDisabled"),
-        "priorities": clean_numbers(cp_value.get("controlPointPriorities") or {}),
-    }
+    return snapshot_layer.control_point_summary(indexed, cp_value)
 
 
 def summarize_regions(indexed: IndexedState, region_refs: list[Any]) -> dict[str, Any]:
-    population = 0.0
-    boost = 0.0
-    mission_control = 0
-    region_count = 0
-    named_regions: list[str] = []
-    for region_ref in region_refs:
-        found = resolve_ref(indexed, region_ref)
-        if not found:
-            continue
-        region = found[2]
-        region_count += 1
-        named_regions.append(region.get("displayName") or region.get("templateName") or str(ref_id(region_ref)))
-        population += float(region.get("populationInMillions") or region.get("population_Millions") or 0.0)
-        boost += float(region.get("boostPerYear_dekatons") or region.get("boostPerYear_tons") or 0.0)
-        mission_control += int(region.get("missionControl") or 0)
-    return {
-        "count": region_count,
-        "population_Millions": round(population, 3),
-        "boostPerYear_dekatons": round(boost, 3),
-        "missionControl": mission_control,
-        "names": named_regions,
-    }
+    return snapshot_layer.summarize_regions(indexed, region_refs)
 
 
 def summarize_nation(indexed: IndexedState, entry: dict[str, Any]) -> dict[str, Any]:
-    nation = entry.get("Value") or {}
-    state_id = ref_id(entry.get("Key")) or ref_id(nation.get("ID"))
-    region_refs = nation.get("regions") if isinstance(nation.get("regions"), list) else []
-    region_summary = summarize_regions(indexed, region_refs)
-    population = region_summary["population_Millions"]
-    gdp = nation.get("GDP")
-    per_capita = None
-    if isinstance(gdp, (int, float)) and population:
-        per_capita = gdp / (population * 1_000_000.0)
-
-    cp_summaries: list[dict[str, Any]] = []
-    cp_refs = nation.get("controlPoints") if isinstance(nation.get("controlPoints"), list) else []
-    for cp_ref in cp_refs:
-        found = resolve_ref(indexed, cp_ref)
-        if found:
-            cp_summaries.append(control_point_summary(indexed, found[2]))
-
-    owner_counts: dict[str, int] = {}
-    owner_display: dict[str, str] = {}
-    executive_owner = None
-    max_position = max((cp.get("position") for cp in cp_summaries if isinstance(cp.get("position"), int)), default=None)
-    for cp in cp_summaries:
-        owner = cp.get("faction")
-        if not owner:
-            continue
-        owner_counts[owner] = owner_counts.get(owner, 0) + 1
-        owner_display[owner] = cp.get("factionDisplay") or owner
-        if cp.get("position") == max_position:
-            executive_owner = owner
-
-    return clean_numbers(
-        {
-            "id": state_id,
-            "template": nation.get("templateName"),
-            "code": campaign_code(nation.get("templateName")),
-            "display": nation.get("displayName"),
-            "GDP": gdp,
-            "perCapitaGDP": per_capita,
-            "population_Millions": population,
-            "regions": region_summary["count"],
-            "regionNames": region_summary["names"],
-            "unrest": nation.get("unrest"),
-            "cohesion": nation.get("cohesion"),
-            "democracy": nation.get("democracy"),
-            "education": nation.get("education"),
-            "inequality": nation.get("inequality"),
-            "militaryTechLevel": nation.get("militaryTechLevel"),
-            "numNuclearWeapons": nation.get("numNuclearWeapons"),
-            "baseInvestmentPoints_month": nation.get("baseInvestmentPoints_month"),
-            "boostPerYear_dekatons": region_summary["boostPerYear_dekatons"],
-            "missionControl": region_summary["missionControl"],
-            "numControlPoints": nation.get("numControlPoints"),
-            "numControlPoints_unclamped": nation.get("numControlPoints_unclamped"),
-            "executiveOwner": executive_owner,
-            "ownerCounts": owner_counts,
-            "ownerDisplay": owner_display,
-            "controlPoints": cp_summaries,
-            "allies": [ref_summary(indexed, item) for item in nation.get("allies", [])],
-            "rivals": [ref_summary(indexed, item) for item in nation.get("rivals", [])],
-            "wars": [ref_summary(indexed, item) for item in nation.get("wars", [])],
-        }
-    )
+    return snapshot_layer.summarize_nation(indexed, entry)
 
 
 def average(values: Any) -> float | None:
-    if not isinstance(values, list) or not values:
-        return None
-    numeric = [float(value) for value in values if isinstance(value, (int, float))]
-    if not numeric:
-        return None
-    return sum(numeric) / len(numeric)
+    return snapshot_layer.average(values)
 
 
 def parse_modifier_number(value: Any) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None
+    return snapshot_layer.parse_modifier_number(value)
 
 
 def int_like(value: float) -> int:
-    return int(value)
+    return snapshot_layer.int_like(value)
 
 
 def trait_mod_has_condition(mod: dict[str, Any]) -> bool:
-    condition = mod.get("condition")
-    return isinstance(condition, dict) and bool(condition)
+    return snapshot_layer.trait_mod_has_condition(mod)
 
 
 def stat_mod_entry(trait_name: str, trait: dict[str, Any], mod: dict[str, Any], base_attributes: dict[str, int]) -> dict[str, Any] | None:
-    attribute = mod.get("stat")
-    if attribute not in COUNCILOR_ATTRIBUTES:
-        return None
-    operation = mod.get("operation")
-    raw_value = mod.get("strValue")
-    value = parse_modifier_number(raw_value)
-    base_value = base_attributes.get(attribute, 0)
-    contribution = None
-    supported = True
-    note = None
-
-    if operation == "Additive" and value is not None:
-        contribution = int_like(value)
-    elif operation == "SetToFixedValue" and value is not None:
-        contribution = int_like(value) - base_value
-    elif operation == "Multiplicative" and value is not None:
-        contribution = int_like(base_value * value - base_value)
-    elif operation == "SetToAnotherAttribute" and isinstance(raw_value, str):
-        contribution = base_attributes.get(raw_value, 0) - base_value
-    elif operation in {"IncreaseToValue", "DecreaseToValue"}:
-        contribution = 0
-        note = "operation is displayed by traits but is not applied by TICouncilorState.ApplyTraitStatValue"
-    else:
-        supported = False
-        note = "operation requires contextual game state and is not evaluated in base finalAttributes"
-
-    return {
-        "trait": trait_name,
-        "traitDisplay": trait.get("friendlyName") or trait_name,
-        "attribute": attribute,
-        "operation": operation,
-        "value": raw_value,
-        "contribution": contribution,
-        "conditional": trait_mod_has_condition(mod),
-        "conditionType": (mod.get("condition") or {}).get("$type") if isinstance(mod.get("condition"), dict) else None,
-        "condition": mod.get("condition"),
-        "supported": supported,
-        "note": note,
-    }
+    return snapshot_layer.stat_mod_entry(trait_name, trait, mod, base_attributes, SNAPSHOT_CONFIG)
 
 
 def sum_attr_mods(mods: list[dict[str, Any]]) -> dict[str, int]:
-    totals = {attribute: 0 for attribute in COUNCILOR_ATTRIBUTES}
-    for mod in mods:
-        contribution = mod.get("contribution")
-        attribute = mod.get("attribute")
-        if attribute in totals and isinstance(contribution, int):
-            totals[attribute] += contribution
-    return totals
+    return snapshot_layer.sum_attr_mods(mods, SNAPSHOT_CONFIG)
 
 
 def org_attribute_mods(indexed: IndexedState, councilor: dict[str, Any]) -> tuple[dict[str, int], list[dict[str, Any]]]:
-    totals = {attribute: 0 for attribute in COUNCILOR_ATTRIBUTES}
-    details: list[dict[str, Any]] = []
-    org_refs = councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []
-    for org_ref in org_refs:
-        found = resolve_ref(indexed, org_ref)
-        if not found:
-            continue
-        org = found[2]
-        applying = bool(org.get("applyingBonuses"))
-        mods = {}
-        if applying:
-            for attribute, field in ORG_ATTRIBUTE_FIELDS.items():
-                value = org.get(field)
-                if isinstance(value, int) and value != 0:
-                    totals[attribute] += value
-                    mods[attribute] = value
-        details.append(
-            {
-                "id": ref_id(org.get("ID")),
-                "template": org.get("templateName"),
-                "display": org.get("displayName"),
-                "tier": org.get("tier"),
-                "applyingBonuses": applying,
-                "attributeMods": mods,
-            }
-        )
-    return totals, details
+    return snapshot_layer.org_attribute_mods(indexed, councilor, SNAPSHOT_CONFIG)
 
 
 def trait_attribute_mods(
@@ -911,35 +384,11 @@ def trait_attribute_mods(
     trait_templates: dict[str, dict[str, Any]],
     base_attributes: dict[str, int],
 ) -> tuple[dict[str, int], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-    unconditional: list[dict[str, Any]] = []
-    conditional: list[dict[str, Any]] = []
-    warnings: list[str] = []
-    trait_names = councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []
-    for trait_name in trait_names:
-        trait = trait_templates.get(trait_name)
-        if not trait:
-            warnings.append(f"missing trait template: {trait_name}")
-            continue
-        stat_mods = trait.get("statMods") if isinstance(trait.get("statMods"), list) else []
-        for mod in stat_mods:
-            if not isinstance(mod, dict) or not mod.get("stat"):
-                continue
-            entry = stat_mod_entry(trait_name, trait, mod, base_attributes)
-            if entry is None:
-                continue
-            if entry["conditional"]:
-                conditional.append(entry)
-            else:
-                unconditional.append(entry)
-                if not entry["supported"]:
-                    warnings.append(
-                        f"unsupported unconditional trait mod: {trait_name} {entry['attribute']} {entry['operation']}"
-                    )
-    return sum_attr_mods(unconditional), unconditional, conditional, warnings
+    return snapshot_layer.trait_attribute_mods(councilor, trait_templates, base_attributes, SNAPSHOT_CONFIG)
 
 
 def clamp_attribute(value: int, max_value: int = DEFAULT_MAX_COUNCILOR_ATTRIBUTE) -> int:
-    return max(0, min(value, max_value))
+    return snapshot_layer.clamp_attribute(value, max_value)
 
 
 def councilor_attribute_breakdown(
@@ -947,220 +396,23 @@ def councilor_attribute_breakdown(
     councilor: dict[str, Any],
     trait_templates: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    raw_attributes = councilor.get("attributes") if isinstance(councilor.get("attributes"), dict) else {}
-    base_attributes = {
-        attribute: int(raw_attributes.get(attribute, 0))
-        for attribute in COUNCILOR_ATTRIBUTES
-    }
-    trait_totals, trait_details, conditional_details, warnings = trait_attribute_mods(
-        councilor,
-        trait_templates,
-        base_attributes,
-    )
-    org_totals, org_details = org_attribute_mods(indexed, councilor)
-
-    final_attributes: dict[str, int] = {}
-    unclamped_attributes: dict[str, int] = {}
-    clamped_max_attributes: dict[str, int] = {}
-    for attribute in COUNCILOR_ATTRIBUTES:
-        unclamped = base_attributes[attribute] + trait_totals.get(attribute, 0) + org_totals.get(attribute, 0)
-        negative_mods = min(0, trait_totals.get(attribute, 0)) + min(0, org_totals.get(attribute, 0))
-        clamped_max = DEFAULT_MAX_COUNCILOR_ATTRIBUTE + negative_mods
-        unclamped_attributes[attribute] = unclamped
-        clamped_max_attributes[attribute] = clamped_max
-        final_attributes[attribute] = clamp_attribute(unclamped, clamped_max)
-
-    conditional_potential = {attribute: final_attributes[attribute] for attribute in COUNCILOR_ATTRIBUTES}
-    for mod in conditional_details:
-        attribute = mod.get("attribute")
-        contribution = mod.get("contribution")
-        if attribute in conditional_potential and isinstance(contribution, int):
-            conditional_potential[attribute] = clamp_attribute(
-                conditional_potential[attribute] + contribution,
-                clamped_max_attributes[attribute],
-            )
-
-    return {
-        "baseAttributes": base_attributes,
-        "traitAttributeMods": trait_totals,
-        "orgAttributeMods": org_totals,
-        "finalAttributes": final_attributes,
-        "unclampedAttributes": unclamped_attributes,
-        "clampedMaxAttributes": clamped_max_attributes,
-        "conditionalPotentialAttributes": conditional_potential,
-        "traitModDetails": trait_details,
-        "conditionalTraitMods": conditional_details,
-        "orgDetails": org_details,
-        "calculationWarnings": warnings,
-    }
+    return snapshot_layer.councilor_attribute_breakdown(indexed, councilor, trait_templates, SNAPSHOT_CONFIG)
 
 
 def summarize_faction(indexed: IndexedState, entry: dict[str, Any], nation_by_id: dict[int, dict[str, Any]]) -> dict[str, Any]:
-    faction = entry.get("Value") or {}
-    state_id = ref_id(entry.get("Key")) or ref_id(faction.get("ID"))
-    cp_refs = faction.get("controlPoints") if isinstance(faction.get("controlPoints"), list) else []
-    nation_counts: dict[int, int] = {}
-    for cp_ref in cp_refs:
-        found = resolve_ref(indexed, cp_ref)
-        if not found:
-            continue
-        cp_state = found[2]
-        nation_ref = cp_state.get("nation")
-        nation_id = ref_id(nation_ref)
-        if nation_id is not None:
-            nation_counts[nation_id] = nation_counts.get(nation_id, 0) + 1
-
-    controlled_nations = []
-    for nation_id, cp_count in nation_counts.items():
-        nation = nation_by_id.get(nation_id)
-        if not nation:
-            continue
-        controlled_nations.append(
-            {
-                "id": nation_id,
-                "template": nation.get("template"),
-                "code": nation.get("code"),
-                "display": nation.get("display"),
-                "ownedControlPoints": cp_count,
-                "totalControlPoints": nation.get("numControlPoints"),
-                "executiveOwner": nation.get("executiveOwner"),
-                "GDP": nation.get("GDP"),
-                "population_Millions": nation.get("population_Millions"),
-                "unrest": nation.get("unrest"),
-                "cohesion": nation.get("cohesion"),
-            }
-        )
-    controlled_nations.sort(key=lambda item: (-item["ownedControlPoints"], str(item.get("display"))))
-
-    resources = faction.get("resources") if isinstance(faction.get("resources"), dict) else {}
-    base_incomes = faction.get("baseIncomes_year") if isinstance(faction.get("baseIncomes_year"), dict) else {}
-    return clean_numbers(
-        {
-            "id": state_id,
-            "template": faction.get("templateName"),
-            "display": faction.get("displayName"),
-            "player": ref_summary(indexed, faction.get("player")),
-            "resources": {key: resources.get(key) for key in FACTION_RESOURCES if key in resources},
-            "baseIncomes_year": {key: base_incomes.get(key) for key in FACTION_RESOURCES if key in base_incomes},
-            "missionControlUsage": faction.get("missionControlUsage"),
-            "resourceIncomeDeficiencies": faction.get("resourceIncomeDeficiencies"),
-            "councilors": len(faction.get("councilors") or []),
-            "controlPoints": len(cp_refs),
-            "controlledNations": controlled_nations,
-            "habSectors": len(faction.get("habSectors") or []),
-            "fleets": len(faction.get("fleets") or []),
-            "shipDesigns": len(faction.get("shipDesigns") or []),
-            "finishedProjects": len(faction.get("finishedProjectNames") or []),
-            "availableProjects": len(faction.get("availableProjectNames") or []),
-            "assessedAlienHateOfMe": faction.get("assessedAlienHateOfMe"),
-            "lastDateOfFixedAlienHate": faction.get("lastDateOfFixedAlienHate"),
-            "cpOverageRecent": (faction.get("history_CPCapOverageByDay") or [None])[0],
-            "cpOverageAverage32d": average(faction.get("history_CPCapOverageByDay")),
-            "mcShortageRecent": (faction.get("history_MCCapOverageByDay") or [None])[0],
-            "mcShortageAverage32d": average(faction.get("history_MCCapOverageByDay")),
-        }
-    )
+    return snapshot_layer.summarize_faction(indexed, entry, nation_by_id, SNAPSHOT_CONFIG)
 
 
 def summarize_councilors(indexed: IndexedState, trait_templates: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    result = []
-    for entry in type_entries(indexed, "TICouncilorState"):
-        councilor = entry.get("Value") or {}
-        faction = ref_summary(indexed, councilor.get("faction"))
-        home_region = ref_summary(indexed, councilor.get("homeRegion"))
-        location = ref_summary(indexed, councilor.get("location"))
-        attributes = councilor_attribute_breakdown(indexed, councilor, trait_templates)
-        result.append(
-            clean_numbers(
-                {
-                    "id": ref_id(entry.get("Key")) or ref_id(councilor.get("ID")),
-                    "template": councilor.get("templateName"),
-                    "display": councilor.get("displayName"),
-                    "faction": faction.get("template") if faction else None,
-                    "factionDisplay": faction.get("display") if faction else None,
-                    "location": location,
-                    "locationNation": region_nation_summary(indexed, councilor.get("location")),
-                    "homeRegion": home_region,
-                    "homeNation": region_nation_summary(indexed, councilor.get("homeRegion")),
-                    "active": councilor.get("active"),
-                    "detained": councilor.get("detained"),
-                    "turned": councilor.get("turned"),
-                    "personalName": councilor.get("personalName"),
-                    "familyName": councilor.get("familyName"),
-                    "typeTemplateName": councilor.get("typeTemplateName"),
-                    "traits": councilor.get("traitTemplateNames") or [],
-                    "orgCount": len(councilor.get("orgs") or []),
-                    "baseAttributes": attributes["baseAttributes"],
-                    "traitAttributeMods": attributes["traitAttributeMods"],
-                    "orgAttributeMods": attributes["orgAttributeMods"],
-                    "finalAttributes": attributes["finalAttributes"],
-                    "unclampedAttributes": attributes["unclampedAttributes"],
-                    "clampedMaxAttributes": attributes["clampedMaxAttributes"],
-                    "conditionalPotentialAttributes": attributes["conditionalPotentialAttributes"],
-                    "traitModDetails": attributes["traitModDetails"],
-                    "conditionalTraitMods": attributes["conditionalTraitMods"],
-                    "orgDetails": attributes["orgDetails"],
-                    "calculationWarnings": attributes["calculationWarnings"],
-                }
-            )
-        )
-    return result
+    return snapshot_layer.summarize_councilors(indexed, trait_templates, SNAPSHOT_CONFIG)
 
 
 def summarize_fleets(indexed: IndexedState) -> list[dict[str, Any]]:
-    result = []
-    for entry in type_entries(indexed, "TISpaceFleetState"):
-        fleet = entry.get("Value") or {}
-        faction = ref_summary(indexed, fleet.get("faction"))
-        ships = fleet.get("ships") if isinstance(fleet.get("ships"), list) else []
-        result.append(
-            clean_numbers(
-                {
-                    "id": ref_id(entry.get("Key")) or ref_id(fleet.get("ID")),
-                    "template": fleet.get("templateName"),
-                    "display": fleet.get("displayName"),
-                    "faction": faction.get("template") if faction else None,
-                    "factionDisplay": faction.get("display") if faction else None,
-                    "location": ref_summary(indexed, fleet.get("location") or fleet.get("orbit")),
-                    "ships": len(ships),
-                    "spaceCombatValue": fleet.get("spaceCombatValue") or fleet.get("_spaceCombatValue"),
-                    "inTransfer": fleet.get("inTransfer"),
-                    "arrivalDate": fleet.get("arrivalDate"),
-                }
-            )
-        )
-    return result
+    return snapshot_layer.summarize_fleets(indexed)
 
 
 def build_snapshot(save_path: Path, data: dict[str, Any], templates_dir: Path | None) -> dict[str, Any]:
-    indexed = build_index(data)
-    trait_templates = load_trait_templates(templates_dir)
-    type_counts = {
-        short_type(full_type): len(entries) if isinstance(entries, list) else 1
-        for full_type, entries in indexed.gamestates.items()
-    }
-
-    nations = [summarize_nation(indexed, entry) for entry in type_entries(indexed, "TINationState")]
-    nation_by_id = {nation["id"]: nation for nation in nations if nation.get("id") is not None}
-    factions = [summarize_faction(indexed, entry, nation_by_id) for entry in type_entries(indexed, "TIFactionState")]
-    councilors = summarize_councilors(indexed, trait_templates)
-    fleets = summarize_fleets(indexed)
-
-    return {
-        "schemaVersion": SCHEMA_VERSION,
-        "cacheFingerprint": snapshot_fingerprint(save_path, templates_dir),
-        "source": save_fingerprint(save_path),
-        "templateSource": file_fingerprint(templates_dir / "TITraitTemplate.json" if templates_dir else None),
-        "currentID": (data.get("currentID") or {}).get("value"),
-        "time": time_summary(indexed),
-        "metadata": metadata_summary(indexed),
-        "global": global_summary(indexed),
-        "typeCounts": dict(sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))),
-        "factions": factions,
-        "nations": nations,
-        "councilors": councilors,
-        "fleets": fleets,
-    }
+    return snapshot_layer.build_snapshot(save_path, data, templates_dir, SNAPSHOT_CONFIG)
 
 
 def load_or_build_snapshot(
@@ -1169,807 +421,7 @@ def load_or_build_snapshot(
     templates_dir: Path | None,
     refresh: bool = False,
 ) -> tuple[dict[str, Any], Path, bool]:
-    fingerprint = snapshot_fingerprint(save_path, templates_dir)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    path = cache_dir / f"{cache_key(fingerprint)}.snapshot.json"
-    if not refresh and path.is_file():
-        with path.open("r", encoding="utf-8") as handle:
-            cached = json.load(handle)
-        if cached.get("schemaVersion") == SCHEMA_VERSION and cached.get("cacheFingerprint") == fingerprint:
-            return cached, path, True
-
-    data = load_save(save_path)
-    snapshot = build_snapshot(save_path, data, templates_dir)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(snapshot, handle, ensure_ascii=False, separators=(",", ":"))
-    return snapshot, path, False
-
-
-def match_named(items: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
-    needle = name.casefold()
-    exact_fields = ("template", "code", "display")
-    for item in items:
-        for field in exact_fields:
-            value = item.get(field)
-            if isinstance(value, str) and value.casefold() == needle:
-                return item
-    for item in items:
-        for field in exact_fields:
-            value = item.get(field)
-            if isinstance(value, str) and needle in value.casefold():
-                return item
-    return None
-
-
-def parse_bool(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().casefold()
-        if normalized in {"true", "1", "yes"}:
-            return True
-        if normalized in {"false", "0", "no"}:
-            return False
-    return None
-
-
-def compare_condition(sign: str | None, actual: Any, expected: Any) -> bool | None:
-    if actual is None or expected is None:
-        return None
-    sign = sign or "EqualTo"
-    if sign == "EqualTo":
-        return actual == expected
-    if sign == "NotEqualTo":
-        return actual != expected
-    if isinstance(actual, bool) or isinstance(expected, bool):
-        return None
-    if sign == "GreaterThan":
-        return actual > expected
-    if sign == "GreaterThanOrEqualTo":
-        return actual >= expected
-    if sign == "LessThan":
-        return actual < expected
-    if sign == "LessThanOrEqualTo":
-        return actual <= expected
-    return None
-
-
-def find_faction_for_councilor(snapshot: dict[str, Any], councilor: dict[str, Any]) -> dict[str, Any] | None:
-    faction_name = councilor.get("faction") or councilor.get("factionDisplay")
-    if not isinstance(faction_name, str):
-        return None
-    return match_named(snapshot.get("factions", []), faction_name)
-
-
-def condition_eval_unknown(reason: str) -> dict[str, Any]:
-    return {
-        "conditionResult": None,
-        "conditionActual": None,
-        "conditionExpected": None,
-        "conditionField": None,
-        "conditionEvalNote": reason,
-    }
-
-
-def condition_nation_summary(nation: dict[str, Any] | None) -> dict[str, Any] | None:
-    if nation is None:
-        return None
-    keys = ("id", "template", "code", "display", "unrest", "cohesion", "democracy", "education", "inequality")
-    return {key: nation.get(key) for key in keys if key in nation}
-
-
-def evaluate_condition(
-    mod: dict[str, Any],
-    councilor: dict[str, Any],
-    snapshot: dict[str, Any],
-    context_nation: dict[str, Any] | None,
-) -> dict[str, Any]:
-    condition = mod.get("condition") if isinstance(mod.get("condition"), dict) else {}
-    condition_type = mod.get("conditionType") or condition.get("$type")
-    sign = condition.get("sign")
-
-    if condition_type in NATION_CONDITION_FIELDS:
-        if context_nation is None:
-            return condition_eval_unknown("nation-scoped condition needs --target-nation or --current-location-context")
-        field = NATION_CONDITION_FIELDS[condition_type]
-        actual = context_nation.get(field)
-        expected = parse_modifier_number(condition.get("strValue"))
-        return {
-            "conditionResult": compare_condition(sign, actual, expected),
-            "conditionActual": actual,
-            "conditionExpected": expected,
-            "conditionField": field,
-            "conditionEvalNote": None,
-        }
-
-    if condition_type == "TICouncilorCondition_bInHomeNation":
-        if context_nation is None:
-            return condition_eval_unknown("home-nation condition needs --target-nation or --current-location-context")
-        home_nation = councilor.get("homeNation") if isinstance(councilor.get("homeNation"), dict) else None
-        actual = None
-        if home_nation and home_nation.get("id") is not None and context_nation.get("id") is not None:
-            actual = home_nation.get("id") == context_nation.get("id")
-        expected = parse_bool(condition.get("strValue"))
-        return {
-            "conditionResult": compare_condition(sign, actual, expected),
-            "conditionActual": actual,
-            "conditionExpected": expected,
-            "conditionField": "inHomeNation",
-            "conditionEvalNote": None if actual is not None else "home nation or context nation is unavailable",
-        }
-
-    if condition_type == "TIFactionCondition_efResourceValue":
-        faction = find_faction_for_councilor(snapshot, councilor)
-        resource = condition.get("strIdx")
-        actual = None
-        if faction and isinstance(faction.get("resources"), dict) and isinstance(resource, str):
-            actual = faction["resources"].get(resource)
-        expected = parse_modifier_number(condition.get("strValue"))
-        return {
-            "conditionResult": compare_condition(sign, actual, expected),
-            "conditionActual": actual,
-            "conditionExpected": expected,
-            "conditionField": f"resources.{resource}",
-            "conditionEvalNote": None if actual is not None else "faction resource is unavailable",
-        }
-
-    if condition_type == "TIGlobalCondition_bNuclearWeaponsUsed":
-        actual = (snapshot.get("global", {}).get("nuclearStrikes") or 0) > 0
-        expected = parse_bool(condition.get("strValue"))
-        return {
-            "conditionResult": compare_condition(sign, actual, expected),
-            "conditionActual": actual,
-            "conditionExpected": expected,
-            "conditionField": "global.nuclearStrikes>0",
-            "conditionEvalNote": None,
-        }
-
-    return condition_eval_unknown(f"unsupported condition type: {condition_type}")
-
-
-def apply_conditional_attribute_mods(
-    final_attributes: dict[str, int],
-    clamped_max_attributes: dict[str, int],
-    active_mods: list[dict[str, Any]],
-) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
-    totals = sum_attr_mods(active_mods)
-    contextual_attributes: dict[str, int] = {}
-    contextual_max_attributes: dict[str, int] = {}
-    for attribute in COUNCILOR_ATTRIBUTES:
-        negative_mods = sum(
-            mod["contribution"]
-            for mod in active_mods
-            if mod.get("attribute") == attribute and isinstance(mod.get("contribution"), int) and mod["contribution"] < 0
-        )
-        max_value = clamped_max_attributes.get(attribute, DEFAULT_MAX_COUNCILOR_ATTRIBUTE) + negative_mods
-        contextual_max_attributes[attribute] = max_value
-        contextual_attributes[attribute] = clamp_attribute(final_attributes.get(attribute, 0) + totals[attribute], max_value)
-    return contextual_attributes, totals, contextual_max_attributes
-
-
-def evaluate_councilor_conditionals(
-    councilor: dict[str, Any],
-    snapshot: dict[str, Any],
-    context_nation: dict[str, Any] | None,
-    context_label: str,
-) -> dict[str, Any]:
-    evaluated_mods = []
-    warnings = []
-    active_mods = []
-    for mod in councilor.get("conditionalTraitMods") or []:
-        if not isinstance(mod, dict):
-            continue
-        evaluated = dict(mod)
-        evaluated.update(evaluate_condition(evaluated, councilor, snapshot, context_nation))
-        evaluated_mods.append(evaluated)
-        if evaluated.get("conditionResult") is True and evaluated.get("supported") and isinstance(evaluated.get("contribution"), int):
-            active_mods.append(evaluated)
-        elif evaluated.get("conditionResult") is None:
-            warnings.append(
-                f"{evaluated.get('trait')} {evaluated.get('attribute')}: {evaluated.get('conditionEvalNote')}"
-            )
-
-    contextual_attributes, totals, contextual_max_attributes = apply_conditional_attribute_mods(
-        councilor.get("finalAttributes") or {},
-        councilor.get("clampedMaxAttributes") or {},
-        active_mods,
-    )
-    return {
-        "conditionContext": {
-            "mode": context_label,
-            "nation": condition_nation_summary(context_nation),
-        },
-        "contextualAttributeMods": totals,
-        "contextualMaxAttributes": contextual_max_attributes,
-        "contextualAttributes": contextual_attributes,
-        "evaluatedConditionalTraitMods": evaluated_mods,
-        "conditionEvaluationWarnings": warnings,
-    }
-
-
-def councilor_summary_maps(
-    indexed: IndexedState,
-    trait_templates: dict[str, dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
-    summaries = summarize_councilors(indexed, trait_templates)
-    by_id = {
-        summary["id"]: summary
-        for summary in summaries
-        if isinstance(summary.get("id"), int)
-    }
-    return summaries, by_id
-
-
-def faction_councilor_ids(faction: dict[str, Any]) -> list[int]:
-    refs = faction.get("councilors") if isinstance(faction.get("councilors"), list) else []
-    return [state_id for state_id in (ref_id(item) for item in refs) if state_id is not None]
-
-
-def org_attribute_values(org: dict[str, Any]) -> dict[str, int]:
-    return {
-        attribute: int(as_float(org.get(field), 0.0))
-        for attribute, field in ORG_ATTRIBUTE_FIELDS.items()
-    }
-
-
-def org_acquisition_cost(org: dict[str, Any]) -> dict[str, float]:
-    return {
-        resource: as_float(org.get(field), 0.0)
-        for resource, field in ORG_PLAN_COST_FIELDS.items()
-        if as_float(org.get(field), 0.0) != 0.0
-    }
-
-
-def org_plan_cost_affordable(resources: dict[str, Any], cost: dict[str, Any]) -> bool:
-    return all(as_float(resources.get(resource), 0.0) >= as_float(amount, 0.0) for resource, amount in cost.items())
-
-
-def org_plan_normalize_focus(focus: str) -> str | None:
-    if focus == "balanced":
-        return None
-    for attribute in ORG_PLAN_SCORE_ATTRIBUTES:
-        if attribute.casefold() == focus.casefold():
-            return attribute
-    raise ValueError(f"Unsupported org-plan focus: {focus}")
-
-
-def org_plan_objective_score(attributes: dict[str, Any], focus: str = "balanced") -> float:
-    attribute = org_plan_normalize_focus(focus)
-    if attribute:
-        return as_float(attributes.get(attribute), 0.0)
-    return sum(as_float(attributes.get(key), 0.0) for key in ORG_PLAN_SCORE_ATTRIBUTES)
-
-
-def org_plan_final_attributes(profile: dict[str, Any], orgs: Iterable[dict[str, Any]]) -> dict[str, int]:
-    base_attributes = profile.get("baseAttributes") if isinstance(profile.get("baseAttributes"), dict) else {}
-    trait_totals = profile.get("traitAttributeMods") if isinstance(profile.get("traitAttributeMods"), dict) else {}
-    org_totals = {attribute: 0 for attribute in COUNCILOR_ATTRIBUTES}
-    for org in orgs:
-        for attribute, value in org_attribute_values(org).items():
-            org_totals[attribute] += value
-
-    final_attributes: dict[str, int] = {}
-    for attribute in COUNCILOR_ATTRIBUTES:
-        trait_value = int(as_float(trait_totals.get(attribute), 0.0))
-        org_value = int(as_float(org_totals.get(attribute), 0.0))
-        unclamped = int(as_float(base_attributes.get(attribute), 0.0)) + trait_value + org_value
-        clamped_max = DEFAULT_MAX_COUNCILOR_ATTRIBUTE + min(0, trait_value) + min(0, org_value)
-        final_attributes[attribute] = clamp_attribute(unclamped, clamped_max)
-    return final_attributes
-
-
-def org_plan_roster_summary(
-    profile: dict[str, Any],
-    org_by_id: dict[int, dict[str, Any]],
-    org_ids: Iterable[int],
-) -> dict[str, Any]:
-    ids = tuple(org_ids)
-    orgs = [org_by_id[org_id] for org_id in ids if org_id in org_by_id]
-    attributes = org_plan_final_attributes(profile, orgs)
-    tier_total = sum(int(as_float(org.get("tier"), 0.0)) for org in orgs)
-    administration = int(as_float(attributes.get("Administration"), 0.0))
-    return {
-        "orgIds": list(ids),
-        "attributes": attributes,
-        "tierTotal": tier_total,
-        "administration": administration,
-        "freeCapacity": administration - tier_total,
-        "validCapacity": tier_total <= administration,
-    }
-
-
-def org_plan_attribute_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, int]:
-    return {
-        attribute: int(as_float(after.get(attribute), 0.0) - as_float(before.get(attribute), 0.0))
-        for attribute in ORG_PLAN_SCORE_ATTRIBUTES
-        if int(as_float(after.get(attribute), 0.0) - as_float(before.get(attribute), 0.0)) != 0
-    }
-
-
-def org_plan_org_row(org: dict[str, Any], source: str | None = None) -> dict[str, Any]:
-    row = {
-        "id": ref_id(org.get("ID")),
-        "template": org.get("templateName"),
-        "display": org.get("displayName"),
-        "tier": int(as_float(org.get("tier"), 0.0)),
-        "attributes": {key: value for key, value in org_attribute_values(org).items() if value != 0},
-        "cost": org_acquisition_cost(org),
-    }
-    if source:
-        row["source"] = source
-    return row
-
-
-def org_plan_region_nation_id(indexed: IndexedState | None, region_ref: Any) -> int | None:
-    if indexed is None:
-        return None
-    found = resolve_ref(indexed, region_ref)
-    if not found:
-        return None
-    return ref_id(found[2].get("nation"))
-
-
-def org_plan_owner_eligibility(
-    indexed: IndexedState | None,
-    councilor: dict[str, Any],
-    org: dict[str, Any],
-    org_templates: dict[str, dict[str, Any]] | None,
-) -> tuple[bool, list[str]]:
-    template = (org_templates or {}).get(str(org.get("templateName")), {})
-    traits = set(councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else [])
-    reasons: list[str] = []
-
-    required_traits = template.get("requiredOwnerTraits") if isinstance(template.get("requiredOwnerTraits"), list) else []
-    prohibited_traits = template.get("prohibitedOwnerTraits") if isinstance(template.get("prohibitedOwnerTraits"), list) else []
-    missing_traits = [trait for trait in required_traits if trait not in traits]
-    blocked_traits = [trait for trait in prohibited_traits if trait in traits]
-    if missing_traits:
-        reasons.append(f"missing required owner traits: {', '.join(str(value) for value in missing_traits)}")
-    if blocked_traits:
-        reasons.append(f"prohibited owner traits: {', '.join(str(value) for value in blocked_traits)}")
-
-    if template.get("requiresNationality"):
-        councilor_nation_id = org_plan_region_nation_id(indexed, councilor.get("homeRegion"))
-        org_nation_id = org_plan_region_nation_id(indexed, org.get("homeRegion"))
-        if councilor_nation_id is None or org_nation_id is None:
-            reasons.append("nationality requirement could not be resolved")
-        elif councilor_nation_id != org_nation_id:
-            reasons.append("nationality requirement does not match")
-    return not reasons, reasons
-
-
-def org_plan_major_attributes(attributes: dict[str, Any], limit: int = 2) -> list[str]:
-    mission_attributes = [attribute for attribute in ORG_PLAN_SCORE_ATTRIBUTES if attribute != "Administration"]
-    return sorted(
-        mission_attributes,
-        key=lambda attribute: (-as_float(attributes.get(attribute), 0.0), attribute),
-    )[:limit]
-
-
-def councilor_org_plan_profile(
-    indexed: IndexedState,
-    councilor_id: int,
-    councilor: dict[str, Any],
-    trait_templates: dict[str, dict[str, Any]],
-) -> dict[str, Any]:
-    breakdown = councilor_attribute_breakdown(indexed, councilor, trait_templates)
-    org_refs = councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []
-    org_ids = [
-        org_id
-        for org_id in (ref_id(value) for value in org_refs)
-        if org_id is not None
-    ]
-    return {
-        "id": councilor_id,
-        "display": councilor.get("displayName"),
-        "template": councilor.get("templateName"),
-        "councilor": councilor,
-        "baseAttributes": breakdown.get("baseAttributes") or {},
-        "traitAttributeMods": breakdown.get("traitAttributeMods") or {},
-        "currentAttributes": breakdown.get("finalAttributes") or {},
-        "assignedOrgIds": org_ids,
-    }
-
-
-def org_plan_best_assignment(
-    profile: dict[str, Any],
-    org_by_id: dict[int, dict[str, Any]],
-    assigned_org_ids: Iterable[int],
-    candidate_id: int,
-    source: str,
-    resources: dict[str, Any],
-    focus: str,
-    indexed: IndexedState | None = None,
-    org_templates: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, Any] | None:
-    candidate = org_by_id.get(candidate_id)
-    if not candidate:
-        return None
-    eligible, eligibility_reasons = org_plan_owner_eligibility(
-        indexed,
-        profile.get("councilor") if isinstance(profile.get("councilor"), dict) else {},
-        candidate,
-        org_templates,
-    )
-    if not eligible:
-        return None
-
-    current_ids = tuple(org_id for org_id in assigned_org_ids if org_id != candidate_id)
-    before = org_plan_roster_summary(profile, org_by_id, current_ids)
-    cost = org_acquisition_cost(candidate) if source == "market" else {}
-    affordable = org_plan_cost_affordable(resources, cost)
-    candidate_tier = max(0, int(as_float(candidate.get("tier"), 0.0)))
-    # A valid current roster only needs to free at most the incoming org's tier.
-    # Enumerating larger removal sets adds exponential work and cannot improve a
-    # non-negative capped stat objective.
-    max_removed = min(len(current_ids), max(candidate_tier, 1))
-    best: tuple[tuple[float, float, int, int], dict[str, Any]] | None = None
-
-    for remove_count in range(max_removed + 1):
-        for removed_ids in combinations(current_ids, remove_count):
-            removed = set(removed_ids)
-            after_ids = tuple(org_id for org_id in current_ids if org_id not in removed) + (candidate_id,)
-            after = org_plan_roster_summary(profile, org_by_id, after_ids)
-            if not after["validCapacity"]:
-                continue
-            gain = org_plan_objective_score(after["attributes"], focus) - org_plan_objective_score(before["attributes"], focus)
-            balanced_gain = org_plan_objective_score(after["attributes"]) - org_plan_objective_score(before["attributes"])
-            rank = (gain, balanced_gain, -remove_count, after["freeCapacity"])
-            action = {
-                "councilorId": profile.get("id"),
-                "councilor": profile.get("display"),
-                "source": source,
-                "candidate": org_plan_org_row(candidate, source),
-                "cost": cost,
-                "affordableNow": affordable,
-                "eligible": True,
-                "eligibilityNotes": eligibility_reasons,
-                "removedOrgs": [
-                    org_plan_org_row(org_by_id[org_id], "returnedToInventory")
-                    for org_id in removed_ids
-                    if org_id in org_by_id
-                ],
-                "attributesBefore": before["attributes"],
-                "attributesAfter": after["attributes"],
-                "attributeDelta": org_plan_attribute_delta(before["attributes"], after["attributes"]),
-                "tierTotalBefore": before["tierTotal"],
-                "tierTotalAfter": after["tierTotal"],
-                "freeCapacityBefore": before["freeCapacity"],
-                "freeCapacityAfter": after["freeCapacity"],
-                "objective": focus,
-                "objectiveScoreBefore": org_plan_objective_score(before["attributes"], focus),
-                "objectiveScoreAfter": org_plan_objective_score(after["attributes"], focus),
-                "objectiveGain": gain,
-                "balancedScoreBefore": org_plan_objective_score(before["attributes"]),
-                "balancedScoreAfter": org_plan_objective_score(after["attributes"]),
-                "balancedGain": balanced_gain,
-            }
-            if best is None or rank > best[0]:
-                best = (rank, action)
-    return clean_numbers(best[1], 6) if best else None
-
-
-def org_plan_committee_totals(
-    profiles: dict[int, dict[str, Any]],
-    org_by_id: dict[int, dict[str, Any]],
-    roster: dict[int, tuple[int, ...]],
-) -> dict[str, int]:
-    totals = {attribute: 0 for attribute in ORG_PLAN_SCORE_ATTRIBUTES}
-    for councilor_id, profile in profiles.items():
-        attributes = org_plan_roster_summary(profile, org_by_id, roster.get(councilor_id, ()))["attributes"]
-        for attribute in totals:
-            totals[attribute] += int(as_float(attributes.get(attribute), 0.0))
-    return totals
-
-
-def org_plan_committee_score(
-    profiles: dict[int, dict[str, Any]],
-    org_by_id: dict[int, dict[str, Any]],
-    roster: dict[int, tuple[int, ...]],
-    focus: str,
-) -> float:
-    return org_plan_objective_score(org_plan_committee_totals(profiles, org_by_id, roster), focus)
-
-
-def org_plan_state_key(state: dict[str, Any]) -> tuple[Any, ...]:
-    return (
-        tuple((councilor_id, tuple(sorted(org_ids))) for councilor_id, org_ids in sorted(state["roster"].items())),
-        tuple(sorted(state["market"])),
-        tuple(sorted(state["inventory"])),
-    )
-
-
-def search_org_committee_plan(
-    profiles: dict[int, dict[str, Any]] | Iterable[dict[str, Any]],
-    org_by_id: dict[int, dict[str, Any]],
-    market_ids: Iterable[int],
-    inventory_ids: Iterable[int],
-    resources: dict[str, Any],
-    focus: str = "balanced",
-    max_actions: int = 4,
-    beam_width: int = 8,
-    indexed: IndexedState | None = None,
-    org_templates: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    if not isinstance(profiles, dict):
-        profiles = {
-            int(profile["id"]): profile
-            for profile in profiles
-            if isinstance(profile.get("id"), int)
-        }
-    roster = {
-        councilor_id: tuple(profile.get("assignedOrgIds") if isinstance(profile.get("assignedOrgIds"), list) else [])
-        for councilor_id, profile in profiles.items()
-    }
-    initial = {
-        "roster": roster,
-        "market": frozenset(market_ids),
-        "inventory": frozenset(inventory_ids),
-        "resources": {resource: as_float(value, 0.0) for resource, value in resources.items()},
-        "actions": [],
-    }
-    initial["score"] = org_plan_committee_score(profiles, org_by_id, roster, focus)
-    initial["balancedScore"] = org_plan_committee_score(profiles, org_by_id, roster, "balanced")
-    initial_totals = org_plan_committee_totals(profiles, org_by_id, roster)
-    beam = [initial]
-    best = initial
-    explored_states = 1
-
-    for _ in range(max(0, max_actions)):
-        next_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
-        for state in beam:
-            pool_ids = sorted(set(state["market"]) | set(state["inventory"]))
-            for candidate_id in pool_ids:
-                source = "market" if candidate_id in state["market"] else "ownedInventory"
-                for councilor_id, profile in profiles.items():
-                    action = org_plan_best_assignment(
-                        profile,
-                        org_by_id,
-                        state["roster"].get(councilor_id, ()),
-                        candidate_id,
-                        source,
-                        state["resources"],
-                        focus,
-                        indexed=indexed,
-                        org_templates=org_templates,
-                    )
-                    capacity_gain = as_float(action.get("freeCapacityAfter"), 0.0) - as_float(action.get("freeCapacityBefore"), 0.0) if action else 0.0
-                    if (
-                        not action
-                        or not action["affordableNow"]
-                        or (
-                            as_float(action.get("objectiveGain"), 0.0) <= 0.0
-                            and capacity_gain <= 0.0
-                        )
-                    ):
-                        continue
-
-                    removed_ids = {
-                        row["id"]
-                        for row in action["removedOrgs"]
-                        if isinstance(row.get("id"), int)
-                    }
-                    current_ids = state["roster"].get(councilor_id, ())
-                    next_roster = dict(state["roster"])
-                    next_roster[councilor_id] = tuple(org_id for org_id in current_ids if org_id not in removed_ids) + (candidate_id,)
-                    next_market = set(state["market"])
-                    next_inventory = set(state["inventory"])
-                    if source == "market":
-                        next_market.discard(candidate_id)
-                    else:
-                        next_inventory.discard(candidate_id)
-                    next_inventory.update(removed_ids)
-                    next_resources = dict(state["resources"])
-                    for resource, amount in action["cost"].items():
-                        next_resources[resource] = as_float(next_resources.get(resource), 0.0) - as_float(amount, 0.0)
-                    score = org_plan_committee_score(profiles, org_by_id, next_roster, focus)
-                    balanced_score = org_plan_committee_score(profiles, org_by_id, next_roster, "balanced")
-                    next_action = dict(action)
-                    next_action["step"] = len(state["actions"]) + 1
-                    next_action["committeeObjectiveScoreAfter"] = score
-                    next_action["committeeBalancedScoreAfter"] = balanced_score
-                    next_state = {
-                        "roster": next_roster,
-                        "market": frozenset(next_market),
-                        "inventory": frozenset(next_inventory),
-                        "resources": next_resources,
-                        "actions": [*state["actions"], next_action],
-                        "score": score,
-                        "balancedScore": balanced_score,
-                    }
-                    key = org_plan_state_key(next_state)
-                    existing = next_by_key.get(key)
-                    if existing is None or (score, balanced_score) > (existing["score"], existing["balancedScore"]):
-                        next_by_key[key] = next_state
-        if not next_by_key:
-            break
-        explored_states += len(next_by_key)
-        beam = sorted(
-            next_by_key.values(),
-            key=lambda state: (-state["score"], -state["balancedScore"], len(state["actions"])),
-        )[: max(1, beam_width)]
-        if (beam[0]["score"], beam[0]["balancedScore"]) > (best["score"], best["balancedScore"]):
-            best = beam[0]
-
-    final_totals = org_plan_committee_totals(profiles, org_by_id, best["roster"])
-    final_roster = []
-    for councilor_id, profile in profiles.items():
-        summary = org_plan_roster_summary(profile, org_by_id, best["roster"].get(councilor_id, ()))
-        final_roster.append(
-            {
-                "id": councilor_id,
-                "display": profile.get("display"),
-                "majorAttributes": org_plan_major_attributes(summary["attributes"]),
-                **summary,
-            }
-        )
-    return clean_numbers(
-        {
-            "objective": focus,
-            "objectiveScoreBefore": initial["score"],
-            "objectiveScoreAfter": best["score"],
-            "objectiveGain": best["score"] - initial["score"],
-            "balancedScoreBefore": initial["balancedScore"],
-            "balancedScoreAfter": best["balancedScore"],
-            "balancedGain": best["balancedScore"] - initial["balancedScore"],
-            "committeeAttributesBefore": initial_totals,
-            "committeeAttributesAfter": final_totals,
-            "committeeAttributeDelta": org_plan_attribute_delta(initial_totals, final_totals),
-            "actions": best["actions"],
-            "marketAcquisitions": sum(1 for action in best["actions"] if action.get("source") == "market"),
-            "remainingResources": best["resources"],
-            "remainingMarketOrgIds": sorted(best["market"]),
-            "remainingOwnedInventoryOrgIds": sorted(best["inventory"]),
-            "finalRoster": final_roster,
-            "search": {
-                "maxActions": max_actions,
-                "beamWidth": beam_width,
-                "exploredStates": explored_states,
-                "boundedHeuristic": True,
-            },
-        },
-        6,
-    )
-
-
-def calculate_org_plan(
-    indexed: IndexedState,
-    templates_dir: Path | None,
-    faction_name: str | None = None,
-    focus: str = "balanced",
-    top: int = 5,
-    include_unassigned: bool = True,
-    max_actions: int = 4,
-    beam_width: int = 8,
-    include_all_candidates: bool = False,
-) -> dict[str, Any]:
-    trait_templates = load_trait_templates(templates_dir)
-    org_templates = load_named_templates(templates_dir, "TIOrgTemplate.json")
-    faction_id, faction = find_faction_state(indexed, faction_name)
-    profiles = {
-        councilor_id: councilor_org_plan_profile(indexed, councilor_id, councilor, trait_templates)
-        for councilor_id in faction_councilor_ids(faction)
-        for councilor in [state_value_by_id(indexed, councilor_id)]
-        if councilor
-    }
-    org_by_id = {
-        org_id: org
-        for entry in type_entries(indexed, "TIOrgState")
-        for org in [entry.get("Value") or {}]
-        for org_id in [ref_id(entry.get("Key")) or ref_id(org.get("ID"))]
-        if org_id is not None
-    }
-    market_refs = faction.get("availableOrgs") if isinstance(faction.get("availableOrgs"), list) else []
-    inventory_refs = faction.get("unassignedOrgs") if include_unassigned and isinstance(faction.get("unassignedOrgs"), list) else []
-    market_ids = [
-        org_id
-        for org_id in (ref_id(value) for value in market_refs)
-        if org_id is not None and org_id in org_by_id
-    ]
-    inventory_ids = [
-        org_id
-        for org_id in (ref_id(value) for value in inventory_refs)
-        if org_id is not None and org_id in org_by_id
-    ]
-    resources = faction.get("resources") if isinstance(faction.get("resources"), dict) else {}
-    source_by_id = {org_id: "market" for org_id in market_ids}
-    source_by_id.update({org_id: "ownedInventory" for org_id in inventory_ids})
-    candidate_ids = sorted(source_by_id)
-
-    councilor_rows = []
-    for councilor_id, profile in profiles.items():
-        current = org_plan_roster_summary(profile, org_by_id, profile["assignedOrgIds"])
-        goal_views: dict[str, list[dict[str, Any]]] = {}
-        all_actions: dict[str, list[dict[str, Any]]] = {}
-        for view_focus in ORG_PLAN_FOCUS_CHOICES:
-            actions = [
-                action
-                for candidate_id in candidate_ids
-                for action in [
-                    org_plan_best_assignment(
-                        profile,
-                        org_by_id,
-                        profile["assignedOrgIds"],
-                        candidate_id,
-                        source_by_id[candidate_id],
-                        resources,
-                        view_focus,
-                        indexed=indexed,
-                        org_templates=org_templates,
-                    )
-                ]
-                if action and as_float(action.get("objectiveGain"), 0.0) > 0.0
-            ]
-            actions.sort(
-                key=lambda action: (
-                    -as_float(action.get("objectiveGain"), 0.0),
-                    0 if action.get("affordableNow") else 1,
-                    str((action.get("candidate") or {}).get("display")),
-                )
-            )
-            goal_views[view_focus] = actions[: max(0, top)]
-            if include_all_candidates:
-                all_actions[view_focus] = actions
-        councilor_rows.append(
-            {
-                "id": councilor_id,
-                "display": profile.get("display"),
-                "majorAttributes": org_plan_major_attributes(current["attributes"]),
-                "current": current,
-                "goalViews": goal_views,
-                **({"allCandidateActions": all_actions} if include_all_candidates else {}),
-            }
-        )
-
-    committee_plan = search_org_committee_plan(
-        profiles,
-        org_by_id,
-        market_ids,
-        inventory_ids,
-        resources,
-        focus=focus,
-        max_actions=max_actions,
-        beam_width=beam_width,
-        indexed=indexed,
-        org_templates=org_templates,
-    )
-    return clean_numbers(
-        {
-            "faction": faction_brief(faction_id, faction),
-            "focus": focus,
-            "candidateSources": {
-                "market": {
-                    "count": len(market_ids),
-                    "orgs": [
-                        {
-                            **org_plan_org_row(org_by_id[org_id], "market"),
-                            "affordableNow": org_plan_cost_affordable(resources, org_acquisition_cost(org_by_id[org_id])),
-                        }
-                        for org_id in market_ids
-                    ],
-                },
-                "ownedInventory": {
-                    "included": include_unassigned,
-                    "count": len(inventory_ids),
-                    "orgs": [org_plan_org_row(org_by_id[org_id], "ownedInventory") for org_id in inventory_ids],
-                },
-            },
-            "councilors": councilor_rows,
-            "committeePlan": committee_plan,
-            "scoreModel": {
-                "balanced": f"Sum of capped councilor stats: {', '.join(ORG_PLAN_SCORE_ATTRIBUTES)}.",
-                "attributeFocus": "A named focus maximizes the committee total for that capped attribute.",
-                "majorAttributes": "Each councilor's two highest current non-Administration mission stats; use the matching goalViews for specialization.",
-            },
-            "limitations": [
-                "The market candidate set comes from TIFactionState.availableOrgs, which is the save's faction-visible acquisition list.",
-                "Owned unassigned orgs are included by default so the plan does not recommend spending resources before using existing inventory; pass --market-only to exclude them.",
-                "The committee plan is a bounded beam-search heuristic, not a proof of the mathematical global optimum.",
-                "The planner optimizes capped councilor stats and Administration capacity. Income, mining, tech-category bonuses, granted missions, and takeover defense remain visible on org states but are not folded into the score.",
-            ],
-        },
-        6,
-    )
+    return snapshot_layer.load_or_build_snapshot(save_path, cache_dir, templates_dir, SNAPSHOT_CONFIG, refresh=refresh)
 
 
 def command_org_plan(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
@@ -1989,8 +441,42 @@ def command_org_plan(save_path: Path, templates_dir: Path | None, args: argparse
     print_json(result, compact=args.compact)
 
 
+# Keep the public org-plan API on this module while delegating implementation
+# to the dedicated org parser module.
+match_named = org_layer.match_named
+parse_bool = org_layer.parse_bool
+compare_condition = org_layer.compare_condition
+find_faction_for_councilor = org_layer.find_faction_for_councilor
+condition_eval_unknown = org_layer.condition_eval_unknown
+condition_nation_summary = org_layer.condition_nation_summary
+evaluate_condition = org_layer.evaluate_condition
+apply_conditional_attribute_mods = org_layer.apply_conditional_attribute_mods
+evaluate_councilor_conditionals = org_layer.evaluate_councilor_conditionals
+councilor_summary_maps = org_layer.councilor_summary_maps
+faction_councilor_ids = org_layer.faction_councilor_ids
+org_attribute_values = org_layer.org_attribute_values
+org_acquisition_cost = org_layer.org_acquisition_cost
+org_plan_cost_affordable = org_layer.org_plan_cost_affordable
+org_plan_normalize_focus = org_layer.org_plan_normalize_focus
+org_plan_objective_score = org_layer.org_plan_objective_score
+org_plan_final_attributes = org_layer.org_plan_final_attributes
+org_plan_roster_summary = org_layer.org_plan_roster_summary
+org_plan_attribute_delta = org_layer.org_plan_attribute_delta
+org_plan_org_row = org_layer.org_plan_org_row
+org_plan_region_nation_id = org_layer.org_plan_region_nation_id
+org_plan_owner_eligibility = org_layer.org_plan_owner_eligibility
+org_plan_major_attributes = org_layer.org_plan_major_attributes
+councilor_org_plan_profile = org_layer.councilor_org_plan_profile
+org_plan_best_assignment = org_layer.org_plan_best_assignment
+org_plan_committee_totals = org_layer.org_plan_committee_totals
+org_plan_committee_score = org_layer.org_plan_committee_score
+org_plan_state_key = org_layer.org_plan_state_key
+search_org_committee_plan = org_layer.search_org_committee_plan
+calculate_org_plan = org_layer.calculate_org_plan
+
+
 def councilor_is_income_active(councilor: dict[str, Any]) -> bool:
-    return not councilor.get("detained") and not councilor.get("isAlien")
+    return income_layer.councilor_is_income_active(councilor)
 
 
 def councilor_monthly_income(
@@ -2000,43 +486,7 @@ def councilor_monthly_income(
     final_attributes: dict[str, Any],
     resource: str,
 ) -> float:
-    if not councilor_is_income_active(councilor):
-        return 0.0
-    fields = COUNCILOR_INCOME_FIELDS.get(resource)
-    if not fields:
-        return 0.0
-    trait_field, org_field, attribute = fields
-
-    positive = 0.0
-    negative = 0.0
-    trait_names = councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []
-    for trait_name in trait_names:
-        trait = trait_templates.get(trait_name)
-        if not trait or not trait_field:
-            continue
-        value = as_float(trait.get(trait_field), 0.0)
-        if value >= 0:
-            positive += value
-        else:
-            negative += value
-
-    org_refs = councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []
-    for org_ref in org_refs:
-        found = resolve_ref(indexed, org_ref)
-        if not found:
-            continue
-        org = found[2]
-        if not org.get("applyingBonuses"):
-            continue
-        value = as_float(org.get(org_field), 0.0) if org_field else 0.0
-        if value >= 0:
-            positive += value
-        else:
-            negative += value
-
-    if attribute and positive > 0.0:
-        positive *= 1.0 + as_float(final_attributes.get(attribute), 0.0) / 100.0
-    return positive + negative
+    return income_layer.councilor_monthly_income(indexed, councilor, trait_templates, final_attributes, resource, INCOME_CONFIG)
 
 
 def councilor_yearly_income(
@@ -2046,10 +496,7 @@ def councilor_yearly_income(
     final_attributes: dict[str, Any],
     resource: str,
 ) -> float:
-    monthly = councilor_monthly_income(indexed, councilor, trait_templates, final_attributes, resource)
-    if resource in {"Projects", "MissionControl"}:
-        return monthly
-    return monthly * 12.0
+    return income_layer.councilor_yearly_income(indexed, councilor, trait_templates, final_attributes, resource, INCOME_CONFIG)
 
 
 def councilor_resource_income(
@@ -2059,7 +506,7 @@ def councilor_resource_income(
     final_attributes: dict[str, Any],
     resource: str,
 ) -> float:
-    return councilor_monthly_income(indexed, councilor, trait_templates, final_attributes, resource)
+    return income_layer.councilor_resource_income(indexed, councilor, trait_templates, final_attributes, resource, INCOME_CONFIG)
 
 
 def councilor_research_and_mc(
@@ -2068,200 +515,78 @@ def councilor_research_and_mc(
     trait_templates: dict[str, dict[str, Any]],
     councilor_by_id: dict[int, dict[str, Any]],
 ) -> tuple[float, int, list[dict[str, Any]]]:
-    daily_research = 0.0
-    mission_control = 0
-    details: list[dict[str, Any]] = []
-    for councilor_id in faction_councilor_ids(faction):
-        councilor = state_value_by_id(indexed, councilor_id)
-        if not councilor:
-            continue
-        summary = councilor_by_id.get(councilor_id, {})
-        final_attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
-        research_month = councilor_resource_income(indexed, councilor, trait_templates, final_attributes, "Research")
-        mc_capacity = int(councilor_resource_income(indexed, councilor, trait_templates, final_attributes, "MissionControl"))
-        research_day = research_month * 12.0 / DAYS_PER_YEAR
-        daily_research += research_day
-        mission_control += mc_capacity
-        details.append(
-            {
-                "id": councilor_id,
-                "display": councilor.get("displayName"),
-                "science": final_attributes.get("Science"),
-                "researchMonth": research_month,
-                "researchDay": research_day,
-                "missionControl": mc_capacity,
-            }
-        )
-    return daily_research, mission_control, details
-
-
-def nation_control_points(indexed: IndexedState, nation: dict[str, Any]) -> list[dict[str, Any]]:
-    refs = nation.get("controlPoints") if isinstance(nation.get("controlPoints"), list) else []
-    points: list[dict[str, Any]] = []
-    for cp_ref in refs:
-        found = resolve_ref(indexed, cp_ref)
-        if found:
-            points.append(found[2])
-    return points
-
-
-def active_owned_control_points(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> list[dict[str, Any]]:
-    return [
-        cp
-        for cp in nation_control_points(indexed, nation)
-        if ref_id(cp.get("faction")) == faction_id and not cp.get("benefitsDisabled")
-    ]
-
-
-def nation_population_millions(indexed: IndexedState, nation: dict[str, Any]) -> float:
-    total = 0.0
-    refs = nation.get("regions") if isinstance(nation.get("regions"), list) else []
-    for region_ref in refs:
-        found = resolve_ref(indexed, region_ref)
-        if not found:
-            continue
-        region = found[2]
-        total += as_float(region.get("populationInMillions") or region.get("population_Millions"), 0.0)
-    return total
-
-
-def nation_non_colony_unoccupied_region_count(indexed: IndexedState, nation: dict[str, Any]) -> int:
-    count = 0
-    refs = nation.get("regions") if isinstance(nation.get("regions"), list) else []
-    for region_ref in refs:
-        found = resolve_ref(indexed, region_ref)
-        if not found:
-            continue
-        region = found[2]
-        if region.get("colonyRegion") or region.get("occupiedBy"):
-            continue
-        count += 1
-    return count
-
-
-def nation_allowed_armies(indexed: IndexedState, nation: dict[str, Any], population_millions: float) -> int:
-    if not nation.get("military") or population_millions < MIN_POPULATION_FOR_FIRST_ARMY_MILLIONS:
-        return 0
-    population_limit = 1 + int(population_millions / MIN_POPULATION_FOR_ADDITIONAL_ARMIES_PER_MILLIONS)
-    return min(nation_non_colony_unoccupied_region_count(indexed, nation), population_limit)
-
-
-def nation_can_have_navy(nation: dict[str, Any], per_capita_gdp: float) -> bool:
-    control_points = int(as_float(nation.get("numControlPoints"), 0.0))
-    if control_points >= MIN_CONTROL_POINTS_FOR_NAVY:
-        return True
-    return control_points >= MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION and per_capita_gdp >= PCGDP_FOR_NAVY_EXCEPTION
-
-
-def nation_current_mission_control(indexed: IndexedState, nation: dict[str, Any]) -> int:
-    total = 0
-    refs = nation.get("regions") if isinstance(nation.get("regions"), list) else []
-    for region_ref in refs:
-        found = resolve_ref(indexed, region_ref)
-        if found:
-            total += int(as_float(found[2].get("missionControl"), 0.0))
-    return total
-
-
-def nation_raw_boost_year(indexed: IndexedState, nation: dict[str, Any]) -> float:
-    total = 0.0
-    refs = nation.get("regions") if isinstance(nation.get("regions"), list) else []
-    for region_ref in refs:
-        found = resolve_ref(indexed, region_ref)
-        if found:
-            total += as_float(found[2].get("boostPerYear_dekatons"), 0.0)
-    return total
-
-
-def nation_current_boost_year(indexed: IndexedState, nation: dict[str, Any]) -> float:
-    total = 0.0
-    refs = nation.get("regions") if isinstance(nation.get("regions"), list) else []
-    for region_ref in refs:
-        found = resolve_ref(indexed, region_ref)
-        if not found:
-            continue
-        region = found[2]
-        if region.get("leadOccupier"):
-            continue
-        total += as_float(region.get("boostPerYear_dekatons"), 0.0)
-    return total
-
-
-def nation_federation_pooled_year(indexed: IndexedState, nation: dict[str, Any], resource: str) -> float:
-    federation_ref = nation.get("federation")
-    federation_id = ref_id(federation_ref)
-    if federation_id is None:
-        if resource == "Money":
-            return as_float(nation.get("spaceFunding_year"), 0.0)
-        if resource == "Boost":
-            return nation_current_boost_year(indexed, nation)
-        return 0.0
-
-    federation = state_value_by_id(indexed, federation_id)
-    member_refs = federation.get("members") if isinstance(federation, dict) and isinstance(federation.get("members"), list) else []
-    members = [state_value_by_id(indexed, ref_id(member_ref)) for member_ref in member_refs]
-    member_states = [member for member in members if isinstance(member, dict)]
-    denominator = sum(int(as_float(member.get("numControlPoints"), 0.0)) ** 3 for member in member_states)
-    own_points = int(as_float(nation.get("numControlPoints"), 0.0))
-    if denominator <= 0 or own_points <= 0:
-        return 0.0
-    if resource == "Money":
-        pooled = sum(as_float(member.get("spaceFunding_year"), 0.0) for member in member_states)
-    elif resource == "Boost":
-        pooled = sum(nation_current_boost_year(indexed, member) for member in member_states)
-    else:
-        pooled = 0.0
-    return pooled * (own_points ** 3) / denominator
-
-
-def faction_ideology_key(faction: dict[str, Any]) -> str | None:
-    template = faction.get("templateName")
-    if isinstance(template, str):
-        if template in FACTION_IDEOLOGY_BY_TEMPLATE:
-            return FACTION_IDEOLOGY_BY_TEMPLATE[template]
-        if template.endswith("Council"):
-            return template.removesuffix("Council")
-    return None
-
-
-def faction_public_opinion(nation: dict[str, Any], faction: dict[str, Any]) -> float:
-    public_opinion = nation.get("publicOpinion") if isinstance(nation.get("publicOpinion"), dict) else {}
-    ideology = faction_ideology_key(faction)
-    return as_float(public_opinion.get(ideology), 0.0) if ideology else 0.0
-
-
-def nation_financial_sector_owned(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> bool:
-    return any(
-        cp.get("controlPointType") == "FinancialSector"
-        and ref_id(cp.get("faction")) == faction_id
-        and not cp.get("benefitsDisabled")
-        for cp in nation_control_points(indexed, nation)
+    return income_layer.councilor_research_and_mc(
+        indexed,
+        faction,
+        trait_templates,
+        councilor_by_id,
+        faction_councilor_ids,
+        INCOME_CONFIG,
     )
 
 
+def nation_control_points(indexed: IndexedState, nation: dict[str, Any]) -> list[dict[str, Any]]:
+    return income_layer.nation_control_points(indexed, nation)
+
+
+def active_owned_control_points(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> list[dict[str, Any]]:
+    return income_layer.active_owned_control_points(indexed, nation, faction_id)
+
+
+def nation_population_millions(indexed: IndexedState, nation: dict[str, Any]) -> float:
+    return income_layer.nation_population_millions(indexed, nation)
+
+
+def nation_non_colony_unoccupied_region_count(indexed: IndexedState, nation: dict[str, Any]) -> int:
+    return income_layer.nation_non_colony_unoccupied_region_count(indexed, nation)
+
+
+def nation_allowed_armies(indexed: IndexedState, nation: dict[str, Any], population_millions: float) -> int:
+    return income_layer.nation_allowed_armies(indexed, nation, population_millions, INCOME_CONFIG)
+
+
+def nation_can_have_navy(nation: dict[str, Any], per_capita_gdp: float) -> bool:
+    return income_layer.nation_can_have_navy(nation, per_capita_gdp, INCOME_CONFIG)
+
+
+def nation_current_mission_control(indexed: IndexedState, nation: dict[str, Any]) -> int:
+    return income_layer.nation_current_mission_control(indexed, nation)
+
+
+def nation_raw_boost_year(indexed: IndexedState, nation: dict[str, Any]) -> float:
+    return income_layer.nation_raw_boost_year(indexed, nation)
+
+
+def nation_current_boost_year(indexed: IndexedState, nation: dict[str, Any]) -> float:
+    return income_layer.nation_current_boost_year(indexed, nation)
+
+
+def nation_federation_pooled_year(indexed: IndexedState, nation: dict[str, Any], resource: str) -> float:
+    return income_layer.nation_federation_pooled_year(indexed, nation, resource)
+
+
+def faction_ideology_key(faction: dict[str, Any]) -> str | None:
+    return income_layer.faction_ideology_key(faction, INCOME_CONFIG)
+
+
+def faction_public_opinion(nation: dict[str, Any], faction: dict[str, Any]) -> float:
+    return income_layer.faction_public_opinion(nation, faction, INCOME_CONFIG)
+
+
+def nation_financial_sector_owned(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> bool:
+    return income_layer.nation_financial_sector_owned(indexed, nation, faction_id)
+
+
 def nation_money_contribution_month(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> float:
-    owned_points = active_owned_control_points(indexed, nation, faction_id)
-    num_control_points = int(as_float(nation.get("numControlPoints"), len(nation_control_points(indexed, nation))))
-    if not owned_points or num_control_points <= 0:
-        return 0.0
-    monthly = nation_federation_pooled_year(indexed, nation, "Money") / 12.0
-    if nation_financial_sector_owned(indexed, nation, faction_id):
-        monthly *= DEFAULT_GLOBAL_CONFIG["financialSectorFundingBonus"]
-    return monthly / num_control_points * len(owned_points)
+    return income_layer.nation_money_contribution_month(indexed, nation, faction_id, INCOME_CONFIG)
 
 
 def nation_boost_contribution_month(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> float:
-    owned_points = active_owned_control_points(indexed, nation, faction_id)
-    num_control_points = int(as_float(nation.get("numControlPoints"), len(nation_control_points(indexed, nation))))
-    if not owned_points or num_control_points <= 0:
-        return 0.0
-    monthly = nation_federation_pooled_year(indexed, nation, "Boost") / 12.0
-    return monthly / num_control_points * len(owned_points)
+    return income_layer.nation_boost_contribution_month(indexed, nation, faction_id)
 
 
 def nation_influence_contribution_month(indexed: IndexedState, nation: dict[str, Any], faction: dict[str, Any]) -> float:
-    population = nation_population_millions(indexed, nation)
-    return population * faction_public_opinion(nation, faction) * 0.5 / 12.0
+    return income_layer.nation_influence_contribution_month(indexed, nation, faction, INCOME_CONFIG)
 
 
 def nation_adviser_science_bonus(
@@ -2269,23 +594,7 @@ def nation_adviser_science_bonus(
     councilor_by_id: dict[int, dict[str, Any]],
     extra_advisor: tuple[int, float] | None = None,
 ) -> float:
-    sciences: list[float] = []
-    existing_ids: set[int] = set()
-    refs = nation.get("advisingCouncilors") if isinstance(nation.get("advisingCouncilors"), list) else []
-    for councilor_ref in refs:
-        councilor_id = ref_id(councilor_ref)
-        if councilor_id is None:
-            continue
-        existing_ids.add(councilor_id)
-        summary = councilor_by_id.get(councilor_id)
-        if not summary:
-            continue
-        final_attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
-        sciences.append(as_float(final_attributes.get("Science"), 0.0))
-    if extra_advisor and extra_advisor[0] not in existing_ids:
-        sciences.append(extra_advisor[1])
-    sciences.sort(reverse=True)
-    return sum(science / 100.0 / (index + 1.0) for index, science in enumerate(sciences))
+    return income_layer.nation_adviser_science_bonus(nation, councilor_by_id, extra_advisor)
 
 
 def state_adviser_attribute_bonus(
@@ -2293,19 +602,7 @@ def state_adviser_attribute_bonus(
     councilor_by_id: dict[int, dict[str, Any]],
     attribute: str,
 ) -> float:
-    values: list[float] = []
-    refs = state.get("advisingCouncilors") if isinstance(state.get("advisingCouncilors"), list) else []
-    for councilor_ref in refs:
-        councilor_id = ref_id(councilor_ref)
-        if councilor_id is None:
-            continue
-        summary = councilor_by_id.get(councilor_id)
-        if not summary or not summary.get("active", True):
-            continue
-        final_attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
-        values.append(as_float(final_attributes.get(attribute), 0.0))
-    values.sort(reverse=True)
-    return sum(value / 100.0 / (index + 1.0) for index, value in enumerate(values))
+    return income_layer.state_adviser_attribute_bonus(state, councilor_by_id, attribute)
 
 
 def nation_monthly_research(
@@ -2314,44 +611,11 @@ def nation_monthly_research(
     councilor_by_id: dict[int, dict[str, Any]],
     extra_advisor: tuple[int, float] | None = None,
 ) -> float:
-    population_millions = nation_population_millions(indexed, nation)
-    gdp = as_float(nation.get("GDP"), 0.0)
-    education = as_float(nation.get("education"), 0.0)
-    democracy = as_float(nation.get("democracy"), 0.0)
-    cohesion = as_float(nation.get("cohesion"), 5.0)
-    unrest = as_float(nation.get("unrest"), 0.0)
-    num_control_points = int(as_float(nation.get("numControlPoints"), len(nation_control_points(indexed, nation))))
-
-    per_capita_gdp = gdp / (population_millions * 1_000_000.0) if population_millions > 0 else 0.0
-    if per_capita_gdp <= 0.0 or population_millions <= 0.0 or education <= 0.0:
-        population_component = 0.0
-    elif per_capita_gdp <= 30_000.0:
-        population_component = (per_capita_gdp / 15_000.0) ** 0.6
-    else:
-        population_component = 1.5157166 + 0.90942997 * (math.log(per_capita_gdp / 15_000.0) - 0.6931472)
-
-    base = (
-        population_millions
-        * population_component
-        * education
-        * min(education, 12.0)
-        * max(democracy, 1.0) ** (1.0 / 6.0)
-        * 0.0075
-    )
-    base += min(population_millions * 1_000_000.0 / 5000.0, num_control_points + education + democracy / 2.0)
-    base *= 1.25 - abs(cohesion - 5.0) / 10.0
-    base *= 1.0 - unrest * unrest * 0.01
-    base *= 1.0 + nation_adviser_science_bonus(nation, councilor_by_id, extra_advisor)
-    return base
+    return income_layer.nation_monthly_research(indexed, nation, councilor_by_id, extra_advisor)
 
 
 def nation_has_owned_knowledge_sector(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> bool:
-    return any(
-        cp.get("controlPointType") == "KnowledgeSector"
-        and ref_id(cp.get("faction")) == faction_id
-        and not cp.get("benefitsDisabled")
-        for cp in nation_control_points(indexed, nation)
-    )
+    return income_layer.nation_has_owned_knowledge_sector(indexed, nation, faction_id)
 
 
 def nation_research_contribution_month(
@@ -2363,81 +627,36 @@ def nation_research_contribution_month(
     effect_templates: dict[str, dict[str, Any]],
     extra_advisor: tuple[int, float] | None = None,
 ) -> float:
-    owned_points = active_owned_control_points(indexed, nation, faction_id)
-    num_control_points = int(as_float(nation.get("numControlPoints"), len(nation_control_points(indexed, nation))))
-    if not owned_points or num_control_points <= 0:
-        return 0.0
-    monthly_research = nation_monthly_research(indexed, nation, councilor_by_id, extra_advisor)
-    if nation_has_owned_knowledge_sector(indexed, nation, faction_id):
-        monthly_research *= DEFAULT_GLOBAL_CONFIG["knowledgeSectorResearchBonus"]
-    monthly_research = apply_effect_modifiers(
+    return income_layer.nation_research_contribution_month(
+        indexed,
+        nation,
+        faction_id,
+        councilor_by_id,
         effect_contexts,
         effect_templates,
-        "ControlPointResearch",
-        monthly_research,
+        INCOME_CONFIG,
+        extra_advisor,
     )
-    return monthly_research / num_control_points * len(owned_points)
 
 
 def nation_mission_control_contribution(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> int:
-    current_mc = nation_current_mission_control(indexed, nation)
-    num_control_points = int(as_float(nation.get("numControlPoints"), len(nation_control_points(indexed, nation))))
-    if current_mc <= 0 or num_control_points <= 0:
-        return 0
-    owned_points = active_owned_control_points(indexed, nation, faction_id)
-    remainder = current_mc % num_control_points
-    threshold = num_control_points - remainder
-    total = 0
-    for index, cp in enumerate(owned_points):
-        position = cp.get("positionInNation")
-        if not isinstance(position, int):
-            position = index
-        value = current_mc // num_control_points
-        if position >= threshold:
-            value += 1
-        total += value
-    return total
+    return income_layer.nation_mission_control_contribution(indexed, nation, faction_id)
 
 
 def module_is_active(module: dict[str, Any]) -> bool:
-    return (
-        bool(module.get("templateName"))
-        and bool(module.get("constructionCompleted"))
-        and bool(module.get("powered"))
-        and not module.get("destroyed")
-        and not module.get("decommissioning")
-    )
+    return hab_layer.module_is_active(module)
 
 
 def faction_sector_states(indexed: IndexedState, faction: dict[str, Any]) -> list[dict[str, Any]]:
-    refs = faction.get("habSectors") if isinstance(faction.get("habSectors"), list) else []
-    sectors: list[dict[str, Any]] = []
-    for sector_ref in refs:
-        found = resolve_ref(indexed, sector_ref)
-        if found:
-            sectors.append(found[2])
-    return sectors
+    return hab_layer.faction_sector_states(indexed, faction)
 
 
 def active_modules_in_sectors(indexed: IndexedState, sectors: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    modules: list[dict[str, Any]] = []
-    for sector in sectors:
-        refs = sector.get("habModules") if isinstance(sector.get("habModules"), list) else []
-        for module_ref in refs:
-            found = resolve_ref(indexed, module_ref)
-            if found and module_is_active(found[2]):
-                modules.append(found[2])
-    return modules
+    return hab_layer.active_modules_in_sectors(indexed, sectors)
 
 
 def hab_sector_states(indexed: IndexedState, hab: dict[str, Any]) -> list[dict[str, Any]]:
-    refs = hab.get("sectors") if isinstance(hab.get("sectors"), list) else []
-    sectors: list[dict[str, Any]] = []
-    for sector_ref in refs:
-        found = resolve_ref(indexed, sector_ref)
-        if found:
-            sectors.append(found[2])
-    return sectors
+    return hab_layer.hab_sector_states(indexed, hab)
 
 
 def hab_module_records(
@@ -2445,126 +664,51 @@ def hab_module_records(
     hab: dict[str, Any],
     hab_module_templates: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    hab_faction_id = ref_id(hab.get("faction"))
-    for sector in hab_sector_states(indexed, hab):
-        sector_faction_id = ref_id(sector.get("faction"))
-        sector_owned_by_hab = hab_faction_id is not None and sector_faction_id == hab_faction_id
-        refs = sector.get("habModules") if isinstance(sector.get("habModules"), list) else []
-        for slot, module_ref in enumerate(refs):
-            found = resolve_ref(indexed, module_ref)
-            if not found:
-                continue
-            module = found[2]
-            template_name = module.get("templateName")
-            template = hab_module_templates.get(template_name, {}) if template_name else {}
-            prior_template_name = module.get("priorModuleTemplateName")
-            prior_template = hab_module_templates.get(prior_template_name, {}) if prior_template_name else {}
-            records.append(
-                {
-                    "id": ref_id(module.get("ID")),
-                    "sectorId": ref_id(sector.get("ID")),
-                    "sectorNum": sector.get("sectorNum"),
-                    "sectorFaction": ref_summary(indexed, sector.get("faction")),
-                    "sectorFactionId": sector_faction_id,
-                    "habFactionId": hab_faction_id,
-                    "sectorOwnedByHabFaction": sector_owned_by_hab,
-                    "slot": slot,
-                    "state": module,
-                    "templateName": template_name,
-                    "template": template,
-                    "priorTemplateName": prior_template_name,
-                    "priorTemplate": prior_template,
-                    "display": module.get("displayName") or template.get("friendlyName") or template_name,
-                    "completed": bool(module.get("constructionCompleted")),
-                    "powered": bool(module.get("powered")),
-                    "destroyed": bool(module.get("destroyed")),
-                    "decommissioning": bool(module.get("decommissioning")),
-                }
-            )
-    return records
+    return hab_layer.hab_module_records(indexed, hab, hab_module_templates)
 
 
 def hab_module_empty(record: dict[str, Any]) -> bool:
-    return not bool(record.get("templateName"))
+    return hab_layer.hab_module_empty(record)
 
 
 def hab_slot_usable(record: dict[str, Any]) -> bool:
-    return bool(record.get("sectorOwnedByHabFaction"))
+    return hab_layer.hab_slot_usable(record)
 
 
 def hab_slot_summary(records: list[dict[str, Any]]) -> dict[str, int]:
-    raw = len(records)
-    usable = sum(1 for record in records if hab_slot_usable(record))
-    occupied = sum(1 for record in records if hab_slot_usable(record) and not hab_module_empty(record))
-    empty = sum(1 for record in records if hab_slot_usable(record) and hab_module_empty(record))
-    locked_empty = sum(1 for record in records if not hab_slot_usable(record) and hab_module_empty(record))
-    return {
-        "raw": raw,
-        "usable": usable,
-        "occupied": occupied,
-        "empty": empty,
-        "locked": raw - usable,
-        "lockedEmpty": locked_empty,
-    }
+    return hab_layer.hab_slot_summary(records)
 
 
 def hab_module_counts(records: list[dict[str, Any]]) -> dict[str, int]:
-    module_counts: dict[str, int] = {}
-    for record in records:
-        if hab_module_okay(record):
-            template_name = str(record.get("templateName"))
-            module_counts[template_name] = module_counts.get(template_name, 0) + 1
-    return module_counts
+    return hab_layer.hab_module_counts(records)
 
 
 def hab_module_okay(record: dict[str, Any]) -> bool:
-    return (
-        not hab_module_empty(record)
-        and not record.get("destroyed")
-        and not record.get("decommissioning")
-    )
+    return hab_layer.hab_module_okay(record)
 
 
 def hab_module_functional(record: dict[str, Any]) -> bool:
-    return bool(record.get("completed")) and not record.get("destroyed") and not record.get("decommissioning")
+    return hab_layer.hab_module_functional(record)
 
 
 def hab_module_active_record(record: dict[str, Any]) -> bool:
-    return hab_module_functional(record) and bool(record.get("powered"))
+    return hab_layer.hab_module_active_record(record)
 
 
 def hab_core_module_record(records: list[dict[str, Any]]) -> dict[str, Any] | None:
-    for record in records:
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
-        if template.get("coreModule"):
-            return record
-    return records[0] if records else None
+    return hab_layer.hab_core_module_record(records)
 
 
 def hab_template_special_rules(template: dict[str, Any]) -> list[str]:
-    return template.get("specialRules") if isinstance(template.get("specialRules"), list) else []
+    return hab_layer.hab_template_special_rules(template)
 
 
 def hab_site_daily_production(hab_site: dict[str, Any] | None, resource: str) -> float:
-    if not hab_site:
-        return 0.0
-    field = HAB_SITE_PRODUCTION_FIELDS.get(resource)
-    return as_float(hab_site.get(field), 0.0) if field else 0.0
+    return hab_layer.hab_site_daily_production(hab_site, resource, config=HAB_CONFIG)
 
 
 def faction_active_org_mining_bonus(indexed: IndexedState, faction: dict[str, Any]) -> float:
-    total = 0.0
-    for councilor_id in faction_councilor_ids(faction):
-        councilor = state_value_by_id(indexed, councilor_id)
-        if not councilor or councilor.get("detained") or councilor.get("isAlien"):
-            continue
-        org_refs = councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []
-        for org_ref in org_refs:
-            org = state_value_by_id(indexed, ref_id(org_ref))
-            if isinstance(org, dict) and org.get("applyingBonuses"):
-                total += as_float(org.get("miningBonus"), 0.0)
-    return total
+    return hab_layer.faction_active_org_mining_bonus(indexed, faction, faction_councilor_ids)
 
 
 def faction_mining_multiplier(
@@ -2574,14 +718,15 @@ def faction_mining_multiplier(
     effect_contexts: dict[str, list[str]],
     effect_templates: dict[str, dict[str, Any]],
 ) -> float:
-    if not faction:
-        return 1.0
-    value = 1.0 + faction_active_org_mining_bonus(indexed, faction)
-    value = apply_effect_modifiers(effect_contexts, effect_templates, "SpaceMiningBonus", value)
-    resource_context = MINING_BONUS_CONTEXTS.get(resource)
-    if resource_context:
-        value = apply_effect_modifiers(effect_contexts, effect_templates, resource_context, value)
-    return value
+    return hab_layer.faction_mining_multiplier(
+        indexed,
+        faction,
+        resource,
+        effect_contexts,
+        effect_templates,
+        config=HAB_CONFIG,
+        faction_councilor_ids=faction_councilor_ids,
+    )
 
 
 def hab_template_income(
@@ -2596,98 +741,43 @@ def hab_template_income(
     effect_templates: dict[str, dict[str, Any]] | None = None,
     mining_rate: float = 1.0,
 ) -> float:
-    if "MoneyIfNotBuilding" in hab_template_special_rules(template) and hab_has_construction:
-        return 0.0
-    field = HAB_INCOME_FIELDS.get(resource)
-    income = as_float(template.get(field), 0.0) if field else 0.0
-    if (
-        resource in BASIC_SPACE_RESOURCES
-        and template.get("mine")
-        and indexed is not None
-        and faction is not None
-        and hab_site is not None
-    ):
-        mining_multiplier = faction_mining_multiplier(
-            indexed,
-            faction,
-            resource,
-            effect_contexts or {},
-            effect_templates or {},
-        )
-        income += (
-            hab_site_daily_production(hab_site, resource)
-            * as_float(template.get("miningModifier"), 1.0)
-            * mining_multiplier
-            * mining_rate
-            * DAYS_PER_YEAR
-            / 12.0
-        )
-    return income
+    return hab_layer.hab_template_income(
+        resource,
+        template,
+        hab_has_construction,
+        indexed=indexed,
+        faction=faction,
+        hab_site=hab_site,
+        effect_contexts=effect_contexts,
+        effect_templates=effect_templates,
+        mining_rate=mining_rate,
+        config=HAB_CONFIG,
+        faction_councilor_ids=faction_councilor_ids,
+    )
 
 
 def hab_template_direct_support(resource: str, template: dict[str, Any]) -> float:
-    support = template.get("supportMaterials_month")
-    if not isinstance(support, dict):
-        return 0.0
-    field = HAB_SUPPORT_FIELDS.get(resource)
-    return as_float(support.get(field), 0.0) if field else 0.0
+    return hab_layer.hab_template_direct_support(resource, template, config=HAB_CONFIG)
 
 
 def hab_template_crew_support(resource: str, template: dict[str, Any]) -> float:
-    crew = as_float(template.get("crew"), 0.0)
-    rules = hab_template_special_rules(template)
-    if resource == "Money":
-        if "Stability" in rules:
-            return 0.0
-        return crew * DEFAULT_GLOBAL_CONFIG["crewSalary_year"] / 12.0
-    if resource == "Water":
-        return (
-            crew
-            * DEFAULT_GLOBAL_CONFIG["crewWaterConsumptionTons_year"]
-            * DEFAULT_GLOBAL_CONFIG["spaceResourceToTons"]
-            / 12.0
-        )
-    if resource == "Volatiles":
-        return (
-            crew
-            * DEFAULT_GLOBAL_CONFIG["crewVolatilesConsumptionTons_year"]
-            * DEFAULT_GLOBAL_CONFIG["spaceResourceToTons"]
-            / 12.0
-        )
-    return 0.0
+    return hab_layer.hab_template_crew_support(resource, template, config=HAB_CONFIG)
 
 
 def hab_template_support(resource: str, template: dict[str, Any], include_crew_support: bool = True) -> float:
-    total = hab_template_direct_support(resource, template)
-    if include_crew_support:
-        total += hab_template_crew_support(resource, template)
-    return total
+    return hab_layer.hab_template_support(resource, template, include_crew_support, config=HAB_CONFIG)
 
 
 def hab_crew(records: list[dict[str, Any]]) -> int:
-    return int(sum(as_float(record.get("template", {}).get("crew"), 0.0) for record in records if hab_module_okay(record)))
+    return hab_layer.hab_crew(records)
 
 
 def hab_administration_modifier(records: list[dict[str, Any]]) -> float:
-    modifier = 1.0
-    for record in records:
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
-        if hab_module_active_record(record) and "Efficiency" in hab_template_special_rules(template):
-            modifier *= 1.0 + as_float(template.get("specialRulesValue"), 0.0)
-    return modifier
+    return hab_layer.hab_administration_modifier(records)
 
 
 def hab_farm_crew_discount(records: list[dict[str, Any]], any_core_completed: bool) -> int:
-    if not any_core_completed:
-        return 0
-    return int(
-        sum(
-            as_float(record.get("template", {}).get("specialRulesValue"), 0.0)
-            for record in records
-            if hab_module_active_record(record)
-            and "Farm" in hab_template_special_rules(record.get("template", {}))
-        )
-    )
+    return hab_layer.hab_farm_crew_discount(records, any_core_completed)
 
 
 def hab_monthly_resource_income(
@@ -2703,125 +793,37 @@ def hab_monthly_resource_income(
     effect_templates: dict[str, dict[str, Any]] | None = None,
     mining_rate: float = 1.0,
 ) -> dict[str, float]:
-    income = 0.0
-    support = 0.0
-    farm_discount = 0
-    crew = hab_crew(records)
-    any_core_completed = bool(hab.get("anyCoreCompleted"))
-    core_record = hab_core_module_record(records)
-    core_id = core_record.get("id") if core_record else None
-    has_construction = any(hab_module_okay(record) and not record.get("completed") for record in records)
-    hab_site = state_value_by_id(indexed, ref_id(hab.get("habSite"))) if indexed is not None else None
-
-    for record in records:
-        if not hab_module_okay(record):
-            continue
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
-        include_income_and_support = (
-            (any_core_completed and hab_module_active_record(record))
-            or (resource == "MissionControl" and record.get("id") == core_id)
-        )
-        if include_income_and_support:
-            income += hab_template_income(
-                resource,
-                template,
-                has_construction,
-                indexed=indexed,
-                faction=faction,
-                hab_site=hab_site,
-                effect_contexts=effect_contexts,
-                effect_templates=effect_templates,
-                mining_rate=mining_rate,
-            )
-            support += hab_template_support(resource, template, include_crew_support=True)
-            if "Farm" in hab_template_special_rules(template):
-                farm_discount += int(as_float(template.get("specialRulesValue"), 0.0))
-        else:
-            support += hab_template_crew_support(resource, template)
-
-    if resource == "Water":
-        covered_crew = min(farm_discount, crew)
-        support -= (
-            covered_crew
-            * DEFAULT_GLOBAL_CONFIG["crewWaterConsumptionTons_year"]
-            * DEFAULT_GLOBAL_CONFIG["spaceResourceToTons"]
-            / 12.0
-        )
-    elif resource == "Volatiles":
-        covered_crew = min(farm_discount, crew)
-        support -= (
-            covered_crew
-            * DEFAULT_GLOBAL_CONFIG["crewVolatilesConsumptionTons_year"]
-            * DEFAULT_GLOBAL_CONFIG["spaceResourceToTons"]
-            / 12.0
-        )
-
-    if resource in HAB_ADMIN_ADVISER_RESOURCES:
-        income *= administration_adviser_multiplier
-        income *= administration_modifier
-    elif resource == "Research":
-        income *= science_adviser_multiplier
-        income *= administration_modifier
-    elif resource in {"Influence", "Operations", "Exotics"}:
-        income *= administration_modifier
-
-    support = max(support, 0.0)
-    return {"income": income, "support": support, "net": income - support}
+    return hab_layer.hab_monthly_resource_income(
+        hab,
+        records,
+        resource,
+        administration_modifier,
+        science_adviser_multiplier,
+        administration_adviser_multiplier,
+        indexed=indexed,
+        faction=faction,
+        effect_contexts=effect_contexts,
+        effect_templates=effect_templates,
+        mining_rate=mining_rate,
+        config=HAB_CONFIG,
+        faction_councilor_ids=faction_councilor_ids,
+    )
 
 
 def hab_power_summary(records: list[dict[str, Any]]) -> dict[str, int]:
-    generated = 0
-    consumed = 0
-    for record in records:
-        if not hab_module_active_record(record):
-            continue
-        power = int(as_float(record.get("template", {}).get("power"), 0.0))
-        if power > 0:
-            generated += power
-        elif power < 0:
-            consumed += -power
-    return {"consumed": consumed, "generated": generated, "net": generated - consumed}
+    return hab_layer.hab_power_summary(records)
 
 
 def hab_tech_bonuses(records: list[dict[str, Any]]) -> dict[str, float]:
-    bonuses: dict[str, float] = {}
-    for record in records:
-        if not hab_module_active_record(record):
-            continue
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
-        for bonus in template.get("techBonuses") if isinstance(template.get("techBonuses"), list) else []:
-            if not isinstance(bonus, dict):
-                continue
-            category = str(bonus.get("category"))
-            bonuses[category] = bonuses.get(category, 0.0) + as_float(bonus.get("bonus"), 0.0)
-    return bonuses
+    return hab_layer.hab_tech_bonuses(records)
 
 
 def hab_leo_priority_bonuses(hab: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, float]:
-    if not hab.get("inEarthLEO"):
-        return {}
-    bonuses: dict[str, float] = {}
-    for record in records:
-        if not hab_module_active_record(record):
-            continue
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
-        rules = hab_template_special_rules(template)
-        for rule, priority in HAB_LEO_PRIORITY_RULES.items():
-            if rule in rules:
-                bonuses[priority] = bonuses.get(priority, 0.0) + as_float(template.get("specialRulesValue"), 0.0)
-    return bonuses
+    return hab_layer.hab_leo_priority_bonuses(hab, records, config=HAB_CONFIG)
 
 
 def hab_control_point_capacity(hab: dict[str, Any], records: list[dict[str, Any]]) -> int:
-    total = 0
-    for record in records:
-        if not hab_module_active_record(record):
-            continue
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
-        if not hab.get("inEarthLEO") and "LEOControlPointCapacity" in hab_template_special_rules(template):
-            continue
-        total += int(as_float(template.get("controlPointCapacity"), 0.0))
-    return total
+    return hab_layer.hab_control_point_capacity(hab, records)
 
 
 def hab_module_construction_time_modifier(records: list[dict[str, Any]]) -> float:
@@ -4686,12 +2688,14 @@ def calculate_project_analysis(
     include_all: bool = False,
 ) -> dict[str, Any]:
     faction_id, faction = find_faction_state(indexed, faction_name)
-    project_templates = load_named_templates(templates_dir, "TIProjectTemplate.json")
-    tech_templates = load_named_templates(templates_dir, "TITechTemplate.json")
-    trait_templates = load_trait_templates(templates_dir)
-    org_templates = load_named_templates(templates_dir, "TIOrgTemplate.json")
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
-    utility_module_templates = load_named_templates(templates_dir, "TIUtilityModuleTemplate.json")
+    research_templates = load_research_templates(templates_dir)
+    base_daily_cache: dict[int, float] = {}
+    project_templates = research_templates.projects
+    tech_templates = research_templates.techs
+    trait_templates = research_templates.traits
+    org_templates = research_templates.orgs
+    hab_module_templates = research_templates.hab_modules
+    utility_module_templates = research_templates.utility_modules
     analysis_slot = slot if slot is not None else default_project_analysis_slot(faction)
     if analysis_slot is None:
         raise SystemExit("Faction has no unlocked project research slot.")
@@ -4700,9 +2704,22 @@ def calculate_project_analysis(
     if sort_axis not in PROJECT_ANALYSIS_SORT_CHOICES:
         raise SystemExit(f"Unknown project-analysis sort axis: {sort_axis}")
 
-    topbar = calculate_topbar(indexed, templates_dir, faction.get("templateName"), include_details=False)
+    topbar = calculate_topbar(
+        indexed,
+        templates_dir,
+        faction.get("templateName"),
+        include_details=False,
+        research_templates=research_templates,
+        base_daily_cache=base_daily_cache,
+    )
     bottlenecks = resource_bottlenecks(topbar)
-    base_daily = faction_base_research_daily(indexed, templates_dir, faction)
+    base_daily = faction_base_research_daily(
+        indexed,
+        templates_dir,
+        faction,
+        templates=research_templates,
+        cache=base_daily_cache,
+    )
     names = project_analysis_candidate_names(faction, project_templates, include_active=include_active)
     candidates = [
         project_candidate_analysis(
@@ -4748,7 +2765,13 @@ def calculate_project_analysis(
         ]
         for axis in ranking_axes
     }
-    research_ui = calculate_research_ui(indexed, templates_dir, faction.get("templateName"))
+    research_ui = calculate_research_ui(
+        indexed,
+        templates_dir,
+        faction.get("templateName"),
+        templates=research_templates,
+        base_daily_cache=base_daily_cache,
+    )
     return clean_numbers(
         {
             "faction": faction_brief(faction_id, faction),
@@ -4871,15 +2894,44 @@ def research_distribution(faction: dict[str, Any]) -> tuple[int, float]:
     return slots, slots * DEFAULT_GLOBAL_CONFIG["researchBonusPerSlotInUse"]
 
 
+@dataclass(frozen=True)
+class ResearchTemplates:
+    traits: dict[str, dict[str, Any]]
+    effects: dict[str, dict[str, Any]]
+    orgs: dict[str, dict[str, Any]]
+    hab_modules: dict[str, dict[str, Any]]
+    utility_modules: dict[str, dict[str, Any]]
+    techs: dict[str, dict[str, Any]]
+    projects: dict[str, dict[str, Any]]
+
+
+def load_research_templates(templates_dir: Path | None) -> ResearchTemplates:
+    return ResearchTemplates(
+        traits=load_trait_templates(templates_dir),
+        effects=load_named_templates(templates_dir, "TIEffectTemplate.json"),
+        orgs=load_named_templates(templates_dir, "TIOrgTemplate.json"),
+        hab_modules=load_named_templates(templates_dir, "TIHabModuleTemplate.json"),
+        utility_modules=load_named_templates(templates_dir, "TIUtilityModuleTemplate.json"),
+        techs=load_named_templates(templates_dir, "TITechTemplate.json"),
+        projects=load_named_templates(templates_dir, "TIProjectTemplate.json"),
+    )
+
+
+def faction_research_cache_key(faction: dict[str, Any]) -> int:
+    return ref_id(faction.get("ID")) or id(faction)
+
+
 def calculate_research_breakdown(
     indexed: IndexedState,
     templates_dir: Path | None,
     faction_name: str | None = None,
     include_details: bool = False,
+    templates: ResearchTemplates | None = None,
 ) -> dict[str, Any]:
-    trait_templates = load_trait_templates(templates_dir)
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    templates = templates or load_research_templates(templates_dir)
+    trait_templates = templates.traits
+    effect_templates = templates.effects
+    hab_module_templates = templates.hab_modules
     faction_id, faction = find_faction_state(indexed, faction_name)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
@@ -5447,11 +3499,29 @@ def faction_base_research_daily(
     indexed: IndexedState,
     templates_dir: Path | None,
     faction: dict[str, Any],
+    *,
+    templates: ResearchTemplates | None = None,
+    cache: dict[int, float] | None = None,
 ) -> float:
     name = faction.get("templateName") or faction.get("displayName")
     if not name or faction.get("templateName") == "AlienCouncil":
         return 0.0
-    return as_float(calculate_research_breakdown(indexed, templates_dir, str(name), include_details=False)["daily"]["beforeDistribution"], 0.0)
+    cache_key_value = faction_research_cache_key(faction)
+    if cache is not None and cache_key_value in cache:
+        return cache[cache_key_value]
+    value = as_float(
+        calculate_research_breakdown(
+            indexed,
+            templates_dir,
+            str(name),
+            include_details=False,
+            templates=templates,
+        )["daily"]["beforeDistribution"],
+        0.0,
+    )
+    if cache is not None:
+        cache[cache_key_value] = value
+    return value
 
 
 def global_research_contributions(indexed: IndexedState, progress: dict[str, Any]) -> list[dict[str, Any]]:
@@ -5495,18 +3565,39 @@ def calculate_research_ui(
     indexed: IndexedState,
     templates_dir: Path | None,
     faction_name: str | None = None,
+    *,
+    templates: ResearchTemplates | None = None,
+    base_daily_cache: dict[int, float] | None = None,
 ) -> dict[str, Any]:
-    trait_templates = load_trait_templates(templates_dir)
-    org_templates = load_named_templates(templates_dir, "TIOrgTemplate.json")
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
-    utility_module_templates = load_named_templates(templates_dir, "TIUtilityModuleTemplate.json")
-    tech_templates = load_named_templates(templates_dir, "TITechTemplate.json")
-    project_templates = load_named_templates(templates_dir, "TIProjectTemplate.json")
+    templates = templates or load_research_templates(templates_dir)
+    base_daily_cache = base_daily_cache if base_daily_cache is not None else {}
+    trait_templates = templates.traits
+    org_templates = templates.orgs
+    hab_module_templates = templates.hab_modules
+    utility_module_templates = templates.utility_modules
+    tech_templates = templates.techs
+    project_templates = templates.projects
 
     faction_id, faction = find_faction_state(indexed, faction_name)
-    selected_base_daily = faction_base_research_daily(indexed, templates_dir, faction)
+    selected_base_daily = faction_base_research_daily(
+        indexed,
+        templates_dir,
+        faction,
+        templates=templates,
+        cache=base_daily_cache,
+    )
     all_human_factions = [
-        (other_id, other, faction_base_research_daily(indexed, templates_dir, other))
+        (
+            other_id,
+            other,
+            faction_base_research_daily(
+                indexed,
+                templates_dir,
+                other,
+                templates=templates,
+                cache=base_daily_cache,
+            ),
+        )
         for other_id, other in human_faction_entries(indexed)
     ]
 
@@ -6090,17 +4181,38 @@ def calculate_research_plan(
     mode: str = "all",
     include_all_candidates: bool = False,
 ) -> dict[str, Any]:
-    trait_templates = load_trait_templates(templates_dir)
-    org_templates = load_named_templates(templates_dir, "TIOrgTemplate.json")
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
-    utility_module_templates = load_named_templates(templates_dir, "TIUtilityModuleTemplate.json")
-    tech_templates = load_named_templates(templates_dir, "TITechTemplate.json")
-    project_templates = load_named_templates(templates_dir, "TIProjectTemplate.json")
+    research_templates = load_research_templates(templates_dir)
+    base_daily_cache: dict[int, float] = {}
+    trait_templates = research_templates.traits
+    org_templates = research_templates.orgs
+    hab_module_templates = research_templates.hab_modules
+    utility_module_templates = research_templates.utility_modules
+    tech_templates = research_templates.techs
+    project_templates = research_templates.projects
 
     faction_id, faction = find_faction_state(indexed, faction_name)
-    base_daily = faction_base_research_daily(indexed, templates_dir, faction)
-    topbar = calculate_topbar(indexed, templates_dir, faction_name, include_details=False)
-    research_ui = calculate_research_ui(indexed, templates_dir, faction_name)
+    topbar = calculate_topbar(
+        indexed,
+        templates_dir,
+        faction_name,
+        include_details=False,
+        research_templates=research_templates,
+        base_daily_cache=base_daily_cache,
+    )
+    base_daily = faction_base_research_daily(
+        indexed,
+        templates_dir,
+        faction,
+        templates=research_templates,
+        cache=base_daily_cache,
+    )
+    research_ui = calculate_research_ui(
+        indexed,
+        templates_dir,
+        faction_name,
+        templates=research_templates,
+        base_daily_cache=base_daily_cache,
+    )
     progress_by_project = project_progress_records_by_template(faction)
 
     global_candidates: list[dict[str, Any]] = []
@@ -6587,9 +4699,12 @@ def calculate_topbar(
     templates_dir: Path | None,
     faction_name: str | None = None,
     include_details: bool = False,
+    *,
+    research_templates: ResearchTemplates | None = None,
+    base_daily_cache: dict[int, float] | None = None,
 ) -> dict[str, Any]:
-    trait_templates = load_trait_templates(templates_dir)
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    trait_templates = research_templates.traits if research_templates else load_trait_templates(templates_dir)
+    effect_templates = research_templates.effects if research_templates else load_named_templates(templates_dir, "TIEffectTemplate.json")
     faction_id, faction = find_faction_state(indexed, faction_name)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
@@ -6630,7 +4745,18 @@ def calculate_topbar(
                 rows[resource].pop("components", None)
             continue
         if resource == "Research":
-            research = calculate_research_breakdown(indexed, templates_dir, faction_name, include_details=include_details)
+            research = calculate_research_breakdown(
+                indexed,
+                templates_dir,
+                faction_name,
+                include_details=include_details,
+                templates=research_templates,
+            )
+            if base_daily_cache is not None:
+                base_daily_cache[faction_research_cache_key(faction)] = as_float(
+                    research["daily"]["beforeDistribution"],
+                    0.0,
+                )
             rows[resource] = {
                 "current": as_float(resources.get(resource), 0.0),
                 "daily": research["daily"]["total"],
@@ -7597,231 +5723,15 @@ def command_raw(save_path: Path, args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Parse Terra Invicta saves into compact summaries.")
-    parser.add_argument("--save", help="Path to a .gz Terra Invicta save. Defaults to newest local save.")
-    parser.add_argument("--templates-dir", help="Path to TerraInvicta_Data\\StreamingAssets\\Templates.")
-    parser.add_argument("--cache-dir", default=DEFAULT_CACHE_DIR, help="Directory for compact parser cache.")
-    parser.add_argument("--refresh-cache", action="store_true", help="Ignore and rebuild the compact cache.")
-    parser.add_argument("--compact", action="store_true", help="Print compact JSON.")
+    from ti_parser_cli import build_parser as build_cli_parser
 
-    subparsers = parser.add_subparsers(dest="command", required=False)
-
-    def add_compact_flag(subparser: argparse.ArgumentParser) -> None:
-        subparser.add_argument("--compact", action="store_true", default=argparse.SUPPRESS, help="Print compact JSON.")
-
-    summary = subparsers.add_parser("summary", help="Print compact campaign summary.")
-    summary.add_argument("--top-nations", type=int, default=20)
-    add_compact_flag(summary)
-
-    faction = subparsers.add_parser("faction", help="Print one faction summary.")
-    faction.add_argument("name")
-    faction.add_argument("--limit", type=int, default=50, help="Maximum controlled nations to include.")
-    add_compact_flag(faction)
-
-    nation = subparsers.add_parser("nation", help="Print one nation summary.")
-    nation.add_argument("name")
-    add_compact_flag(nation)
-
-    councilor = subparsers.add_parser("councilor", help="Print one councilor summary with calculated attributes.")
-    councilor.add_argument("name")
-    councilor.add_argument("--details", action="store_true", help="Include trait/org calculation detail lists.")
-    councilor.add_argument("--target-nation", help="Evaluate conditional trait modifiers against this target nation.")
-    councilor.add_argument(
-        "--current-location-context",
-        action="store_true",
-        help="Evaluate conditional trait modifiers against the councilor's current location nation.",
-    )
-    add_compact_flag(councilor)
-
-    org_plan = subparsers.add_parser(
-        "org-plan",
-        help="Recommend acquirable org assignments for councilor specialization and committee-wide stats.",
-    )
-    org_plan.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
-    org_plan.add_argument("--focus", choices=ORG_PLAN_FOCUS_CHOICES, default="balanced")
-    org_plan.add_argument("--top", type=int, default=5, help="Candidate rows per councilor objective view.")
-    org_plan.add_argument("--market-only", action="store_true", help="Exclude already-owned unassigned orgs from planning.")
-    org_plan.add_argument("--max-actions", type=int, default=4, help="Maximum assignment and replacement steps in committee search.")
-    org_plan.add_argument("--beam-width", type=int, default=8, help="Number of committee states retained at each search step.")
-    org_plan.add_argument("--all-candidates", action="store_true", help="Include full positive candidate action lists.")
-    add_compact_flag(org_plan)
-
-    research = subparsers.add_parser("research", help="Calculate faction research income from raw save values.")
-    research.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
-    research.add_argument("--details", action="store_true", help="Include nation/councilor/hab source details.")
-    add_compact_flag(research)
-
-    research_ui = subparsers.add_parser("research-ui", help="Reconstruct the Research screen's active global techs and projects.")
-    research_ui.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
-    add_compact_flag(research_ui)
-
-    research_plan = subparsers.add_parser(
-        "research-plan",
-        help="Build an LLM-ready report for choosing next global tech or project research.",
-    )
-    research_plan.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
-    research_plan.add_argument("--top", type=int, default=8, help="Rows per objective signal view.")
-    research_plan.add_argument("--mode", choices=("all", "global", "project"), default="all")
-    research_plan.add_argument("--all-candidates", action="store_true", help="Include full candidate lists, not just shortlists.")
-    add_compact_flag(research_plan)
-
-    topbar = subparsers.add_parser("topbar", help="Reconstruct the top resource bar values for a faction.")
-    topbar.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
-    topbar.add_argument("--details", action="store_true", help="Include yearly source components for each resource.")
-    add_compact_flag(topbar)
-
-    advise = subparsers.add_parser("advise", help="Estimate research change from assigning a councilor to Advise a nation.")
-    advise.add_argument("councilor")
-    advise.add_argument("nation")
-    advise.add_argument("--faction", help="Faction template/display/code. Defaults to the player faction.")
-    add_compact_flag(advise)
-
-    nation_ui = subparsers.add_parser("nation-ui", help="Calculate nation UI panel values from raw save values.")
-    nation_ui.add_argument("name")
-    nation_ui.add_argument("--faction", help="Faction template/display/code for faction-share fields. Defaults to player.")
-    add_compact_flag(nation_ui)
-
-    world_ui = subparsers.add_parser("world-ui", help="Calculate the Intel world data panel from raw save values.")
-    world_ui.add_argument("--faction", help="Faction template/display/code for sell-value modifiers. Defaults to player.")
-    add_compact_flag(world_ui)
-
-    hab_ui = subparsers.add_parser("hab-ui", help="Calculate hab UI panel values from raw save values.")
-    hab_ui.add_argument("name")
-    add_compact_flag(hab_ui)
-
-    hab_slots = subparsers.add_parser("hab-slots", help="List habs with currently usable empty slots.")
-    hab_slots.add_argument("--faction", help="Faction template/display/code. Defaults to the player faction.")
-    hab_slots.add_argument("--all", action="store_true", help="Include habs with zero usable empty slots.")
-    hab_slots.add_argument("--module-counts", action="store_true", help="Include per-hab module template counts.")
-    add_compact_flag(hab_slots)
-
-    hab_plan = subparsers.add_parser("hab-plan", help="Recommend module candidates for current or future hab slots.")
-    hab_plan.add_argument("name", nargs="?", help="Specific hab name/id fragment. Omit to scan faction habs.")
-    hab_plan.add_argument("--faction", help="Faction template/display/code. Defaults to the player faction.")
-    hab_plan.add_argument("--upgrading-to-tier", type=int, help="Only include habs whose core is upgrading to this tier.")
-    hab_plan.add_argument("--focus", choices=HAB_PLAN_FOCUS_CHOICES, default="balanced")
-    hab_plan.add_argument("--top", type=int, default=8, help="Candidate rows per category.")
-    hab_plan.add_argument("--all", action="store_true", help="Include habs with no planned empty slots.")
-    add_compact_flag(hab_plan)
-
-    project_analysis = subparsers.add_parser("project-analysis", help="Rank available project candidates on transparent heuristic axes.")
-    project_analysis.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
-    project_analysis.add_argument("--top", type=int, default=10, help="Candidate rows per ranking axis and in the main candidate list.")
-    project_analysis.add_argument("--sort", choices=PROJECT_ANALYSIS_SORT_CHOICES, default="research-sustainable")
-    project_analysis.add_argument("--slot", type=int, choices=range(3, 6), help="Project slot to use for hypothetical ETA estimates.")
-    project_analysis.add_argument("--include-active", action="store_true", help="Include currently active projects in the candidate set.")
-    project_analysis.add_argument("--all", action="store_true", help="Return every candidate instead of only the top rows for --sort.")
-    add_compact_flag(project_analysis)
-
-    types = subparsers.add_parser("types", help="Print gamestate type counts.")
-    types.add_argument("--limit", type=int, default=0)
-    add_compact_flag(types)
-
-    export = subparsers.add_parser("export", help="Export the compact snapshot.")
-    export.add_argument("--output", required=True)
-    add_compact_flag(export)
-
-    raw = subparsers.add_parser("raw", help="Read selected raw gamestate entries from the save.")
-    raw.add_argument("--type", required=True, help="Short or full gamestate type name.")
-    raw.add_argument("--id", type=int)
-    raw.add_argument("--template")
-    raw.add_argument("--display")
-    raw.add_argument("--keys", help="Comma-separated keys to include.")
-    raw.add_argument("--limit", type=int, default=5)
-    add_compact_flag(raw)
-
-    cache = subparsers.add_parser("cache", help="Build or validate the compact cache.")
-    cache.set_defaults(cache_command=True)
-    add_compact_flag(cache)
-
-    return parser
+    return build_cli_parser(sys.modules[__name__])
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    command = args.command or "summary"
+    from ti_parser_cli import main as cli_main
 
-    try:
-        save_path = resolve_save_path(args.save)
-        templates_dir = resolve_templates_dir(args.templates_dir)
-        if command == "raw":
-            command_raw(save_path, args)
-            return 0
-        if command == "org-plan":
-            command_org_plan(save_path, templates_dir, args)
-            return 0
-        if command == "research":
-            command_research(save_path, templates_dir, args)
-            return 0
-        if command == "research-ui":
-            command_research_ui(save_path, templates_dir, args)
-            return 0
-        if command == "research-plan":
-            command_research_plan(save_path, templates_dir, args)
-            return 0
-        if command == "topbar":
-            command_topbar(save_path, templates_dir, args)
-            return 0
-        if command == "advise":
-            command_advise(save_path, templates_dir, args)
-            return 0
-        if command == "nation-ui":
-            command_nation_ui(save_path, templates_dir, args)
-            return 0
-        if command == "world-ui":
-            command_world_ui(save_path, templates_dir, args)
-            return 0
-        if command == "hab-ui":
-            command_hab_ui(save_path, templates_dir, args)
-            return 0
-        if command == "hab-slots":
-            command_hab_slots(save_path, templates_dir, args)
-            return 0
-        if command == "hab-plan":
-            command_hab_plan(save_path, templates_dir, args)
-            return 0
-        if command == "project-analysis":
-            command_project_analysis(save_path, templates_dir, args)
-            return 0
-
-        snapshot, cache_path_value, cache_hit = load_or_build_snapshot(
-            save_path,
-            Path(args.cache_dir),
-            templates_dir,
-            refresh=args.refresh_cache,
-        )
-        if command == "summary":
-            command_summary(snapshot, args)
-        elif command == "faction":
-            command_faction(snapshot, args)
-        elif command == "nation":
-            command_nation(snapshot, args)
-        elif command == "councilor":
-            command_councilor(snapshot, args)
-        elif command == "types":
-            command_types(snapshot, args)
-        elif command == "export":
-            command_export(snapshot, args)
-        elif command == "cache":
-            print_json(
-                {
-                    "cache": str(cache_path_value),
-                    "cacheHit": cache_hit,
-                    "source": snapshot.get("source"),
-                    "templateSource": snapshot.get("templateSource"),
-                    "schemaVersion": snapshot.get("schemaVersion"),
-                },
-                compact=args.compact,
-            )
-        else:
-            parser.error(f"Unknown command: {command}")
-    except BrokenPipeError:
-        return 1
-    except Exception as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    return 0
+    return cli_main(sys.modules[__name__], argv)
 
 
 if __name__ == "__main__":
