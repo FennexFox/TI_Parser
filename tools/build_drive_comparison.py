@@ -1010,7 +1010,9 @@ HTML_TEMPLATE = r"""<!doctype html>
       font-size: 12px;
       line-height: 1.45;
       opacity: 1;
-      overflow: auto;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
     .tooltip.tooltip-empty {
       display: flex;
@@ -1041,6 +1043,49 @@ HTML_TEMPLATE = r"""<!doctype html>
       line-height: 1;
     }
     .tooltip-close:hover {
+      color: var(--ink);
+      border-color: var(--strong-line);
+    }
+    .tooltip-count {
+      color: var(--muted);
+      font-size: 11px;
+      margin: -16px 34px 8px 0;
+      min-height: 16px;
+    }
+    .tooltip-items {
+      min-height: 0;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      padding-right: 2px;
+    }
+    .tooltip-item {
+      position: relative;
+      padding: 9px 30px 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #151816;
+    }
+    .tooltip-item-close {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      width: 22px;
+      height: 22px;
+      min-height: 0;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      border-color: var(--line);
+      background: #202421;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1;
+    }
+    .tooltip-item-close:hover {
       color: var(--ink);
       border-color: var(--strong-line);
     }
@@ -1198,7 +1243,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       .table-shell { grid-column: 1; }
       .notes { grid-column: 1; }
       #chart { height: 560px; }
-      .tooltip { height: auto; min-height: 140px; }
+      .tooltip { height: min(52vh, 520px); min-height: 220px; }
     }
   </style>
 </head>
@@ -1322,8 +1367,10 @@ HTML_TEMPLATE = r"""<!doctype html>
       searchTerm: "",
       sortKey: "research",
       sortDirection: "asc",
-      lastTooltip: null,
-      hoverPoint: null,
+      lastTooltipItems: [],
+      hoverPoints: [],
+      dismissedTooltipKeys: new Set(),
+      hoverHitSignature: "",
       zoom: null,
       zoomContext: "",
       pan: null,
@@ -1380,7 +1427,10 @@ HTML_TEMPLATE = r"""<!doctype html>
     const tooltip = document.getElementById("tooltip");
     const categoryRoot = document.getElementById("categories");
     const familyRoot = document.getElementById("families");
+    const CHART_HIT_RADIUS_PX = 16;
     let chartViewport = null;
+    let chartHitTargets = [];
+    let currentChartRows = [];
 
     function setupControls() {
       const metric = document.getElementById("metric");
@@ -1397,6 +1447,11 @@ HTML_TEMPLATE = r"""<!doctype html>
       const nameSearch = document.getElementById("nameSearch");
 
       tooltip.addEventListener("click", event => {
+        const itemClose = event.target.closest(".tooltip-item-close");
+        if (itemClose) {
+          removeTooltipItem(itemClose.getAttribute("data-tooltip-key"));
+          return;
+        }
         if (event.target.closest(".tooltip-close")) {
           clearTooltip();
         }
@@ -1566,6 +1621,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       chart.addEventListener("pointermove", handleChartPointerMove);
       chart.addEventListener("pointerup", endChartPan);
       chart.addEventListener("pointercancel", endChartPan);
+      chart.addEventListener("pointerleave", handleChartPointerLeave);
       chart.addEventListener("dblclick", event => {
         event.preventDefault();
         state.zoom = null;
@@ -1881,6 +1937,9 @@ HTML_TEMPLATE = r"""<!doctype html>
       const margin = { top: 34, right: 32, bottom: 72, left: 86 };
       const innerW = width - margin.left - margin.right;
       const innerH = height - margin.top - margin.bottom;
+      currentChartRows = rows;
+      chartHitTargets = [];
+      state.hoverPoints = [];
       chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
       chart.innerHTML = "";
 
@@ -1949,7 +2008,11 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
 
     function handleChartPointerMove(event) {
-      if (!state.pan || !chartViewport || event.pointerId !== state.pan.pointerId) return;
+      if (!state.pan) {
+        updateHoverFromPointer(event);
+        return;
+      }
+      if (!chartViewport || event.pointerId !== state.pan.pointerId) return;
       const point = svgPointFromEvent(event);
       const dx = point.x - state.pan.startPoint.x;
       const dy = point.y - state.pan.startPoint.y;
@@ -1958,6 +2021,12 @@ HTML_TEMPLATE = r"""<!doctype html>
         panDomainByPixels(state.pan.yDomain, dy, [chartViewport.margin.top + chartViewport.innerH, chartViewport.margin.top], state.logY),
       );
       event.preventDefault();
+    }
+
+    function handleChartPointerLeave() {
+      state.hoverHitSignature = "";
+      state.dismissedTooltipKeys.clear();
+      setHoverPoints([]);
     }
 
     function endChartPan(event) {
@@ -1974,8 +2043,9 @@ HTML_TEMPLATE = r"""<!doctype html>
       state.zoom = sameDomain(nextX, chartViewport.baseXDomain, state.logX) && sameDomain(nextY, chartViewport.baseYDomain, state.logY)
         ? null
         : { xDomain: nextX, yDomain: nextY };
-      renderChart(filteredRows());
-      refreshTooltip(filteredRows());
+      const rows = filteredRows();
+      renderChart(rows);
+      refreshTooltip(rows);
     }
 
     function svgPointFromEvent(event) {
@@ -2002,6 +2072,49 @@ HTML_TEMPLATE = r"""<!doctype html>
         x: clamp(point.x, margin.left, margin.left + innerW),
         y: clamp(point.y, margin.top, margin.top + innerH),
       };
+    }
+
+    function updateHoverFromPointer(event) {
+      if (!chartViewport || !chartHitTargets.length) return;
+      const point = svgPointFromEvent(event);
+      if (!pointInPlot(point)) {
+        state.hoverHitSignature = "";
+        state.dismissedTooltipKeys.clear();
+        setHoverPoints([]);
+        return;
+      }
+      const hits = hitTargetsAt(point);
+      if (!hits.length) {
+        state.hoverHitSignature = "";
+        state.dismissedTooltipKeys.clear();
+        setHoverPoints([]);
+        return;
+      }
+      const signature = hits.map(hit => hit.key).join("|");
+      if (signature !== state.hoverHitSignature) {
+        state.hoverHitSignature = signature;
+        state.dismissedTooltipKeys.clear();
+      }
+      const visibleHits = hits.filter(hit => !state.dismissedTooltipKeys.has(hit.key));
+      const nextRefs = dedupeTooltipRefs(visibleHits);
+      setHoverPoints(nextRefs);
+      if (nextRefs.length && !sameTooltipRefs(nextRefs, state.lastTooltipItems)) {
+        state.lastTooltipItems = nextRefs;
+        refreshTooltip(currentChartRows);
+      }
+    }
+
+    function hitTargetsAt(point) {
+      const rect = chart.getBoundingClientRect();
+      const scaleX = Math.max(rect.width, 1) / chartViewport.width;
+      const scaleY = Math.max(rect.height, 1) / chartViewport.height;
+      return chartHitTargets
+        .map(target => ({
+          ...target,
+          distance: Math.hypot((target.x - point.x) * scaleX, (target.y - point.y) * scaleY),
+        }))
+        .filter(target => target.distance <= CHART_HIT_RADIUS_PX)
+        .sort((a, b) => a.distance - b.distance || a.order - b.order);
     }
 
     function invertScale(pixel, domain, range, logScale) {
@@ -2141,29 +2254,71 @@ HTML_TEMPLATE = r"""<!doctype html>
       };
     }
 
+    function pointKey(rowId, powerOptionId = null) {
+      return `${rowId}::${powerOptionId || ""}`;
+    }
+
+    function tooltipRef(rowOrId, powerOptionId = null) {
+      const rowId = typeof rowOrId === "object" ? (rowOrId.rowId || rowOrId.id) : rowOrId;
+      const optionId = typeof rowOrId === "object" && rowOrId.powerOptionId !== undefined && powerOptionId === null
+        ? rowOrId.powerOptionId
+        : powerOptionId;
+      const normalizedOptionId = optionId || "";
+      return { rowId, powerOptionId: normalizedOptionId, key: pointKey(rowId, normalizedOptionId) };
+    }
+
+    function dedupeTooltipRefs(items) {
+      const refs = [];
+      const seen = new Set();
+      (items || []).forEach(item => {
+        const ref = tooltipRef(item);
+        if (!ref.rowId || seen.has(ref.key)) return;
+        seen.add(ref.key);
+        refs.push(ref);
+      });
+      return refs;
+    }
+
+    function sameTooltipRefs(left, right) {
+      const a = dedupeTooltipRefs(left);
+      const b = dedupeTooltipRefs(right);
+      return a.length === b.length && a.every((item, index) => item.key === b[index].key);
+    }
+
     function isHoveredPoint(row, powerOptionId = null) {
-      return state.hoverPoint
-        && state.hoverPoint.rowId === row.id
-        && state.hoverPoint.powerOptionId === (powerOptionId || "");
+      const key = pointKey(row.id, powerOptionId);
+      return state.hoverPoints.some(item => item.key === key);
     }
 
-    function hoverPoint(row, powerOptionId = null) {
-      state.hoverPoint = { rowId: row.id, powerOptionId: powerOptionId || "" };
-      showTooltipFor(row, powerOptionId);
+    function setHoverPoints(items) {
+      state.hoverPoints = dedupeTooltipRefs(items);
       updateHoverStyles();
     }
 
-    function clearHoveredPoint(row, powerOptionId = null) {
-      if (!isHoveredPoint(row, powerOptionId)) return;
-      state.hoverPoint = null;
-      updateHoverStyles();
+    function registerHitTarget(row, powerOptionId, xCoord, yCoord, radius = 5) {
+      if (!Number.isFinite(xCoord) || !Number.isFinite(yCoord) || !pointVisibleInPlot(xCoord, yCoord)) return;
+      chartHitTargets.push({
+        ...tooltipRef(row, powerOptionId),
+        x: xCoord,
+        y: yCoord,
+        radius,
+        order: chartHitTargets.length,
+      });
+    }
+
+    function pointVisibleInPlot(xCoord, yCoord) {
+      if (!chartViewport) return false;
+      const { margin, innerW, innerH } = chartViewport;
+      return xCoord >= margin.left
+        && xCoord <= margin.left + innerW
+        && yCoord >= margin.top
+        && yCoord <= margin.top + innerH;
     }
 
     function updateHoverStyles() {
+      const hoveredKeys = new Set(state.hoverPoints.map(item => item.key));
       chart.querySelectorAll(".data-point").forEach(point => {
-        const hovered = state.hoverPoint
-          && point.getAttribute("data-row-id") === state.hoverPoint.rowId
-          && point.getAttribute("data-power-option-id") === state.hoverPoint.powerOptionId;
+        const hovered = hoveredKeys.has(pointKey(point.getAttribute("data-row-id"), point.getAttribute("data-power-option-id")));
         point.setAttribute("stroke", hovered ? "#fff" : (point.getAttribute("data-default-stroke") || "none"));
         point.setAttribute("stroke-width", hovered ? "2.2" : (point.getAttribute("data-default-stroke-width") || "0"));
       });
@@ -2178,10 +2333,10 @@ HTML_TEMPLATE = r"""<!doctype html>
         group.forEach(row => {
           const value = metricDefs[state.metric].value(row);
           if (!Number.isFinite(value) || value <= 0) return;
-          const circle = svgEl("circle", { ...pointAttrs(row, null, color), cx: x(row.cumulativeResearch), cy: y(value), r: 5.5 });
-          circle.addEventListener("mouseenter", () => hoverPoint(row));
-          circle.addEventListener("mousemove", () => hoverPoint(row));
-          circle.addEventListener("mouseleave", () => clearHoveredPoint(row));
+          const cx = x(row.cumulativeResearch);
+          const cy = y(value);
+          registerHitTarget(row, null, cx, cy, 5.5);
+          const circle = svgEl("circle", { ...pointAttrs(row, null, color), cx, cy, r: 5.5 });
           plot.appendChild(circle);
         });
       });
@@ -2234,17 +2389,16 @@ HTML_TEMPLATE = r"""<!doctype html>
           const ys = options.map(option => y(optionMetricValue(option)));
           plot.appendChild(svgEl("line", { x1: gx, x2: gx, y1: Math.min(...ys), y2: Math.max(...ys), stroke: color, style: strokeStyle, "stroke-width": 1.2, opacity: 0.32 }));
           options.forEach((option, index) => {
+            const cy = y(optionMetricValue(option));
+            registerHitTarget(row, option.id, gx, cy, index === 0 ? 5 : 3.4);
             const circle = svgEl("circle", {
               ...pointAttrs(row, option.id, index === 0 ? color : "var(--panel)", color, 1.5),
               cx: gx,
-              cy: y(optionMetricValue(option)),
+              cy,
               r: index === 0 ? 5 : 3.4,
               style: index === 0 ? fillStyle : "",
               opacity: index === 0 ? 0.96 : 0.78,
             });
-            circle.addEventListener("mouseenter", () => hoverPoint(row, option.id));
-            circle.addEventListener("mousemove", () => hoverPoint(row, option.id));
-            circle.addEventListener("mouseleave", () => clearHoveredPoint(row, option.id));
             plot.appendChild(circle);
           });
         });
@@ -2281,7 +2435,19 @@ HTML_TEMPLATE = r"""<!doctype html>
       return paintStyle("background", fallback, preferred);
     }
 
-    function tooltipHtml(row, option = null) {
+    function tooltipPanelHtml(items) {
+      const countText = UI_LANG === "en" ? `${items.length} selected` : `선택 항목 ${items.length}개`;
+      const count = items.length > 1 ? `<div class="tooltip-count">${countText}</div>` : "";
+      return `
+        <button class="tooltip-close" type="button" aria-label="선택 해제">&times;</button>
+        ${count}
+        <div class="tooltip-items">
+          ${items.map(item => tooltipHtml(item.row, item.option, item.key)).join("")}
+        </div>
+      `;
+    }
+
+    function tooltipHtml(row, option = null, key = "") {
       const metric = metricDefs[state.metric];
       const value = metric.value(row);
       const radiator = selectedRadiator();
@@ -2291,16 +2457,18 @@ HTML_TEMPLATE = r"""<!doctype html>
         ${breakdown}
       ` : "";
       return `
-        <button class="tooltip-close" type="button" aria-label="선택 해제">&times;</button>
-        <h2>${escapeHtml(row.displayName)}</h2>
-        <div class="muted">${escapeHtml(rowCategoryLabel(row))} / ${escapeHtml(rowFamilyLabel(row))} · ${escapeHtml(rowProjectLabel(row))}</div>
-        <div>누적 연구력: <strong>${formatResearch(row.cumulativeResearch)}</strong> · 자체 프로젝트: ${formatResearch(row.ownResearchCost)}</div>
-        <div>추력: ${formatNumber(row.thrustN / 1e6, " MN")} · EV: ${formatNumber(row.exhaustVelocityKps, " km/s")} · Isp: ${formatNumber(row.specificImpulseSeconds, " s")}</div>
-        <div>효율: ${formatPercent(row.efficiency)} · 출력 요구량: ${formatNumber(row.powerRequirementGW, " GW")}</div>
-        <div>드라이브 질량: ${formatNumber(row.driveMassTons, " t")}</div>
-        <div>라디에이터: ${escapeHtml(radiator ? radiator.displayName : "-")}</div>
-        ${!isBandMetric() ? `<div>${escapeHtml(metric.label)}: <strong>${metric.format(value)}</strong></div>` : ""}
-        ${selected}
+        <section class="tooltip-item" data-tooltip-key="${escapeHtml(key)}">
+          <button class="tooltip-item-close" type="button" data-tooltip-key="${escapeHtml(key)}" aria-label="항목 삭제">&times;</button>
+          <h2>${escapeHtml(row.displayName)}</h2>
+          <div class="muted">${escapeHtml(rowCategoryLabel(row))} / ${escapeHtml(rowFamilyLabel(row))} · ${escapeHtml(rowProjectLabel(row))}</div>
+          <div>누적 연구력: <strong>${formatResearch(row.cumulativeResearch)}</strong> · 자체 프로젝트: ${formatResearch(row.ownResearchCost)}</div>
+          <div>추력: ${formatNumber(row.thrustN / 1e6, " MN")} · EV: ${formatNumber(row.exhaustVelocityKps, " km/s")} · Isp: ${formatNumber(row.specificImpulseSeconds, " s")}</div>
+          <div>효율: ${formatPercent(row.efficiency)} · 출력 요구량: ${formatNumber(row.powerRequirementGW, " GW")}</div>
+          <div>드라이브 질량: ${formatNumber(row.driveMassTons, " t")}</div>
+          <div>라디에이터: ${escapeHtml(radiator ? radiator.displayName : "-")}</div>
+          ${!isBandMetric() ? `<div>${escapeHtml(metric.label)}: <strong>${metric.format(value)}</strong></div>` : ""}
+          ${selected}
+        </section>
       `;
     }
 
@@ -2333,32 +2501,72 @@ HTML_TEMPLATE = r"""<!doctype html>
       `;
     }
 
-    function showTooltipFor(row, powerOptionId = null) {
-      state.lastTooltip = { rowId: row.id, powerOptionId };
-      refreshTooltip(filteredRows());
+    function resolveTooltipItems(rows) {
+      const rowById = new Map(rows.map(row => [row.id, row]));
+      const resolved = [];
+      const seen = new Set();
+      state.lastTooltipItems.forEach(item => {
+        const ref = tooltipRef(item);
+        const row = rowById.get(ref.rowId);
+        if (!row) return;
+        let option = null;
+        let powerOptionId = "";
+        if (isBandMetric()) {
+          const options = massOptions(row);
+          option = options.find(candidate => candidate.id === ref.powerOptionId) || options[0] || null;
+          if (!option) return;
+          powerOptionId = option.id || "";
+        }
+        const key = pointKey(row.id, powerOptionId);
+        if (seen.has(key)) return;
+        seen.add(key);
+        resolved.push({ row, option, rowId: row.id, powerOptionId, key });
+      });
+      return resolved;
     }
 
-    function refreshTooltip(rows) {
-      if (!state.lastTooltip) return;
-      const row = rows.find(item => item.id === state.lastTooltip.rowId);
-      if (!row) {
+    function refreshTooltip(rows = currentChartRows) {
+      if (!state.lastTooltipItems.length) {
+        renderEmptyTooltip();
+        return;
+      }
+      const resolved = resolveTooltipItems(rows);
+      if (!resolved.length) {
         clearTooltip();
         return;
       }
-      let option = null;
-      if (isBandMetric()) {
-        const options = massOptions(row);
-        option = options.find(item => item.id === state.lastTooltip.powerOptionId) || options[0] || null;
-      }
-      tooltip.innerHTML = tooltipHtml(row, option);
+      const resolvedKeys = new Set(resolved.map(item => item.key));
+      state.lastTooltipItems = resolved.map(item => tooltipRef(item.rowId, item.powerOptionId));
+      state.hoverPoints = state.hoverPoints.filter(item => resolvedKeys.has(item.key));
+      tooltip.innerHTML = tooltipPanelHtml(resolved);
       tooltip.classList.remove("tooltip-empty");
+      updateHoverStyles();
+    }
+
+    function removeTooltipItem(key) {
+      if (!key) return;
+      state.dismissedTooltipKeys.add(key);
+      state.lastTooltipItems = state.lastTooltipItems.filter(item => tooltipRef(item).key !== key);
+      state.hoverPoints = state.hoverPoints.filter(item => item.key !== key);
+      if (state.lastTooltipItems.length) {
+        refreshTooltip(currentChartRows);
+      } else {
+        renderEmptyTooltip();
+      }
+      updateHoverStyles();
+    }
+
+    function renderEmptyTooltip() {
+      tooltip.innerHTML = `<div class="tooltip-placeholder">선택 없음</div>`;
+      tooltip.classList.add("tooltip-empty");
     }
 
     function clearTooltip() {
-      state.lastTooltip = null;
-      state.hoverPoint = null;
-      tooltip.innerHTML = `<div class="tooltip-placeholder">선택 없음</div>`;
-      tooltip.classList.add("tooltip-empty");
+      state.lastTooltipItems = [];
+      state.hoverPoints = [];
+      state.dismissedTooltipKeys.clear();
+      state.hoverHitSignature = "";
+      renderEmptyTooltip();
       updateHoverStyles();
     }
 
@@ -2637,6 +2845,7 @@ ENGLISH_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("추력:", "Thrust:"),
     ("출력 요구량:", "Power requirement:"),
     ("선택 해제", "Clear selection"),
+    ("항목 삭제", "Remove item"),
     ("자체 프로젝트", "Own project"),
     ("효율", "Efficiency"),
     ("드라이브 질량", "Drive mass"),
