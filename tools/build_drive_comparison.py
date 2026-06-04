@@ -1052,6 +1052,19 @@ HTML_TEMPLATE = r"""<!doctype html>
       margin: -16px 34px 8px 0;
       min-height: 16px;
     }
+    .tooltip-pin {
+      display: inline-flex;
+      align-items: center;
+      min-height: 18px;
+      padding: 1px 6px;
+      margin-right: 7px;
+      border: 1px solid #936f33;
+      border-radius: 999px;
+      background: rgba(224, 149, 61, 0.13);
+      color: #f1c17e;
+      font-size: 11px;
+      font-weight: 700;
+    }
     .tooltip-items {
       min-height: 0;
       overflow: auto;
@@ -1369,6 +1382,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       sortDirection: "asc",
       lastTooltipItems: [],
       hoverPoints: [],
+      tooltipPinned: false,
       dismissedTooltipKeys: new Set(),
       hoverHitSignature: "",
       zoom: null,
@@ -1428,6 +1442,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     const categoryRoot = document.getElementById("categories");
     const familyRoot = document.getElementById("families");
     const CHART_HIT_RADIUS_PX = 16;
+    const CHART_CLICK_TOLERANCE_PX = 5;
     let chartViewport = null;
     let chartHitTargets = [];
     let currentChartRows = [];
@@ -1627,6 +1642,7 @@ HTML_TEMPLATE = r"""<!doctype html>
         state.zoom = null;
         redrawChartOnly();
       });
+      document.addEventListener("keydown", handleChartKeyDown);
     }
 
     function updateChartControls() {
@@ -1939,7 +1955,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       const innerH = height - margin.top - margin.bottom;
       currentChartRows = rows;
       chartHitTargets = [];
-      state.hoverPoints = [];
+      state.hoverPoints = state.tooltipPinned ? dedupeTooltipRefs(state.lastTooltipItems) : [];
       chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
       chart.setAttribute("preserveAspectRatio", "xMidYMid meet");
       chart.innerHTML = "";
@@ -1996,6 +2012,9 @@ HTML_TEMPLATE = r"""<!doctype html>
       state.pan = {
         pointerId: event.pointerId,
         startPoint: point,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        hasMoved: false,
         xDomain: chartViewport.xDomain.slice(),
         yDomain: chartViewport.yDomain.slice(),
       };
@@ -2014,6 +2033,11 @@ HTML_TEMPLATE = r"""<!doctype html>
         return;
       }
       if (!chartViewport || event.pointerId !== state.pan.pointerId) return;
+      const movementPx = Math.hypot(event.clientX - state.pan.startClientX, event.clientY - state.pan.startClientY);
+      if (movementPx > CHART_CLICK_TOLERANCE_PX) {
+        state.pan.hasMoved = true;
+      }
+      if (!state.pan.hasMoved) return;
       const point = svgPointFromEvent(event);
       const dx = point.x - state.pan.startPoint.x;
       const dy = point.y - state.pan.startPoint.y;
@@ -2025,6 +2049,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
 
     function handleChartPointerLeave() {
+      if (state.tooltipPinned) return;
       state.hoverHitSignature = "";
       state.dismissedTooltipKeys.clear();
       setHoverPoints([]);
@@ -2032,9 +2057,16 @@ HTML_TEMPLATE = r"""<!doctype html>
 
     function endChartPan(event) {
       if (!state.pan || event.pointerId !== state.pan.pointerId) return;
+      const movementPx = Math.hypot(event.clientX - state.pan.startClientX, event.clientY - state.pan.startClientY);
+      const shouldPinClick = !state.pan.hasMoved && movementPx <= CHART_CLICK_TOLERANCE_PX;
+      const clickPoint = shouldPinClick ? svgPointFromEvent(event) : null;
       if (chart.hasPointerCapture(event.pointerId)) chart.releasePointerCapture(event.pointerId);
       state.pan = null;
       chart.classList.remove("is-panning");
+      if (shouldPinClick) {
+        handleChartClick(clickPoint);
+        event.preventDefault();
+      }
     }
 
     function setZoomDomains(xDomain, yDomain) {
@@ -2090,6 +2122,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
 
     function updateHoverFromPointer(event) {
+      if (state.tooltipPinned) return;
       if (!chartViewport || !chartHitTargets.length) return;
       const point = svgPointFromEvent(event);
       if (!pointInPlot(point)) {
@@ -2117,6 +2150,46 @@ HTML_TEMPLATE = r"""<!doctype html>
         state.lastTooltipItems = nextRefs;
         refreshTooltip(currentChartRows);
       }
+    }
+
+    function handleChartClick(point) {
+      if (!chartViewport || !pointInPlot(point)) {
+        clearTooltip();
+        return;
+      }
+      const hits = hitTargetsAt(point);
+      const visibleHits = state.tooltipPinned
+        ? hits
+        : hits.filter(hit => !state.dismissedTooltipKeys.has(hit.key));
+      if (!visibleHits.length) {
+        clearTooltip();
+        return;
+      }
+      pinTooltipItems(visibleHits);
+    }
+
+    function handleChartKeyDown(event) {
+      if (isEditableTarget(event.target)) return;
+      if (event.key === "Escape" && (state.tooltipPinned || state.lastTooltipItems.length)) {
+        clearTooltip();
+        event.preventDefault();
+        return;
+      }
+      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+      if ((key === "p" || event.code === "Space") && state.lastTooltipItems.length) {
+        if (state.tooltipPinned) {
+          unpinTooltip();
+        } else {
+          pinTooltipItems(state.hoverPoints.length ? state.hoverPoints : state.lastTooltipItems);
+        }
+        event.preventDefault();
+      }
+    }
+
+    function isEditableTarget(target) {
+      if (!target) return false;
+      const tagName = target.tagName ? target.tagName.toLowerCase() : "";
+      return target.isContentEditable || ["input", "select", "textarea", "button"].includes(tagName);
     }
 
     function hitTargetsAt(point) {
@@ -2449,8 +2522,12 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
 
     function tooltipPanelHtml(items) {
+      const pinnedText = UI_LANG === "en" ? "Pinned" : "고정됨";
       const countText = UI_LANG === "en" ? `${items.length} selected` : `선택 항목 ${items.length}개`;
-      const count = items.length > 1 ? `<div class="tooltip-count">${countText}</div>` : "";
+      const statusParts = [];
+      if (state.tooltipPinned) statusParts.push(`<span class="tooltip-pin">${pinnedText}</span>`);
+      if (items.length > 1) statusParts.push(countText);
+      const count = statusParts.length ? `<div class="tooltip-count">${statusParts.join("")}</div>` : "";
       return `
         <button class="tooltip-close" type="button" aria-label="선택 해제">&times;</button>
         ${count}
@@ -2458,6 +2535,27 @@ HTML_TEMPLATE = r"""<!doctype html>
           ${items.map(item => tooltipHtml(item.row, item.option, item.key)).join("")}
         </div>
       `;
+    }
+
+    function pinTooltipItems(items) {
+      const refs = dedupeTooltipRefs(items);
+      if (!refs.length) {
+        clearTooltip();
+        return;
+      }
+      state.tooltipPinned = true;
+      state.dismissedTooltipKeys.clear();
+      state.hoverHitSignature = refs.map(item => item.key).join("|");
+      state.lastTooltipItems = refs;
+      setHoverPoints(refs);
+      refreshTooltip(currentChartRows);
+    }
+
+    function unpinTooltip() {
+      state.tooltipPinned = false;
+      state.hoverHitSignature = "";
+      state.dismissedTooltipKeys.clear();
+      refreshTooltip(currentChartRows);
     }
 
     function tooltipHtml(row, option = null, key = "") {
@@ -2564,7 +2662,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       if (state.lastTooltipItems.length) {
         refreshTooltip(currentChartRows);
       } else {
-        renderEmptyTooltip();
+        clearTooltip();
       }
       updateHoverStyles();
     }
@@ -2577,6 +2675,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     function clearTooltip() {
       state.lastTooltipItems = [];
       state.hoverPoints = [];
+      state.tooltipPinned = false;
       state.dismissedTooltipKeys.clear();
       state.hoverHitSignature = "";
       renderEmptyTooltip();
