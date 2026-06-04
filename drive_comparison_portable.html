@@ -189,6 +189,12 @@
       accent-color: var(--accent);
       flex: 0 0 auto;
     }
+    .control-hint {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
     .check-row, .category-row, .family-row {
       display: flex;
       align-items: center;
@@ -631,6 +637,20 @@
         <label class="label" for="radiator">라디에이터</label>
         <select id="radiator"></select>
       </section>
+      <section id="bandAnalysisControls" class="control-block">
+        <span class="label">총질량/TWR 보조 표시</span>
+        <label id="showTwrInfoRow" class="check-row"><input id="showTwrInfo" type="checkbox" checked> TWR 정보 표시</label>
+        <label id="showMassInfoRow" class="check-row" style="display: none;"><input id="showMassInfo" type="checkbox" checked> 총질량 정보 표시</label>
+        <label class="check-row"><input id="paretoHighlight" type="checkbox" checked> 파레토 후보 강조</label>
+        <div id="minTwrControl" style="margin-top: 10px;">
+          <label class="label" for="minTwrExp">최소 TWR</label>
+          <div class="split">
+            <input id="minTwrExp" type="range" min="-8" max="1" value="-8" step="0.1">
+            <input id="minTwrNumber" type="number" min="0" max="10" value="0" step="0.0001">
+          </div>
+          <div id="minTwrReadout" class="control-hint">기준 없음</div>
+        </div>
+      </section>
       <section class="control-block">
         <span class="label">축 스케일</span>
         <label class="check-row"><input id="logX" type="checkbox"> X축 로그</label>
@@ -700,6 +720,10 @@
       radiatorId: DATA.defaults.radiatorId,
       logX: false,
       logY: true,
+      showTwrInfo: true,
+      showMassInfo: true,
+      paretoHighlight: true,
+      minTwr: 0,
       searchTerm: "",
       sortKey: "research",
       sortDirection: "asc",
@@ -744,7 +768,7 @@
         label: "목표 dV 총질량 (t)",
         hint: "총질량 = 기준 건조질량 + 드라이브 + 전원 + 라디에이터 + 추진체",
         value: row => {
-          const values = massOptions(row);
+          const values = chartMassOptions(row);
           return values.length ? values[0].totalMassTons : NaN;
         },
         format: value => formatNumber(value, " t"),
@@ -753,7 +777,7 @@
         label: "TWR",
         hint: "추력 / (목표 dV 총질량 * g)",
         value: row => {
-          const values = massOptions(row);
+          const values = chartMassOptions(row);
           return values.length ? values[0].twr : NaN;
         },
         format: value => formatNumber(value, ""),
@@ -782,6 +806,11 @@
       const radiator = document.getElementById("radiator");
       const logX = document.getElementById("logX");
       const logY = document.getElementById("logY");
+      const showTwrInfo = document.getElementById("showTwrInfo");
+      const showMassInfo = document.getElementById("showMassInfo");
+      const paretoHighlight = document.getElementById("paretoHighlight");
+      const minTwrExp = document.getElementById("minTwrExp");
+      const minTwrNumber = document.getElementById("minTwrNumber");
       const nameSearch = document.getElementById("nameSearch");
 
       tooltip.addEventListener("click", event => {
@@ -923,6 +952,29 @@
         state.logY = logY.checked;
         render();
       });
+      showTwrInfo.addEventListener("change", () => {
+        state.showTwrInfo = showTwrInfo.checked;
+        render();
+      });
+      showMassInfo.addEventListener("change", () => {
+        state.showMassInfo = showMassInfo.checked;
+        render();
+      });
+      paretoHighlight.addEventListener("change", () => {
+        state.paretoHighlight = paretoHighlight.checked;
+        render();
+      });
+      minTwrExp.addEventListener("input", () => {
+        const exponent = Number(minTwrExp.value);
+        state.minTwr = exponent <= Number(minTwrExp.min) ? 0 : Math.pow(10, exponent);
+        syncMinTwrInputs();
+        render();
+      });
+      minTwrNumber.addEventListener("input", () => {
+        state.minTwr = Math.max(0, Number(minTwrNumber.value) || 0);
+        syncMinTwrInputs();
+        render();
+      });
       nameSearch.addEventListener("input", () => {
         state.searchTerm = nameSearch.value.trim().toLocaleLowerCase();
         render();
@@ -970,7 +1022,33 @@
 
     function updateChartControls() {
       const fuelUnitBlock = document.getElementById("chartFuelUnit");
+      const bandAnalysisControls = document.getElementById("bandAnalysisControls");
+      const showTwrInfoRow = document.getElementById("showTwrInfoRow");
+      const showMassInfoRow = document.getElementById("showMassInfoRow");
+      const minTwrControl = document.getElementById("minTwrControl");
       fuelUnitBlock.style.display = state.metric === "fuelEfficiency" ? "" : "none";
+      bandAnalysisControls.style.display = isBandMetric() ? "" : "none";
+      showTwrInfoRow.style.display = state.metric === "totalMassTons" ? "" : "none";
+      showMassInfoRow.style.display = state.metric === "twr" ? "" : "none";
+      minTwrControl.style.display = state.metric === "totalMassTons" ? "" : "none";
+      syncMinTwrInputs();
+    }
+
+    function syncMinTwrInputs() {
+      const slider = document.getElementById("minTwrExp");
+      const number = document.getElementById("minTwrNumber");
+      const readout = document.getElementById("minTwrReadout");
+      if (!slider || !number || !readout) return;
+      if (state.minTwr <= 0) {
+        slider.value = slider.min;
+        number.value = "0";
+        readout.textContent = UI_LANG === "en" ? "No minimum threshold" : "기준 없음";
+        return;
+      }
+      const exponent = clamp(Math.log10(state.minTwr), Number(slider.min), Number(slider.max));
+      slider.value = String(exponent);
+      number.value = String(Number(state.minTwr.toPrecision(4)));
+      readout.textContent = `${UI_LANG === "en" ? "Showing" : "표시"}: TWR >= ${formatNumber(state.minTwr, "")}`;
     }
 
     function localLabel(item) {
@@ -1015,6 +1093,7 @@
         if (row.thrusterCount !== state.thrusters) return false;
         if (!state.categories[row.categoryKey]) return false;
         if (!state.families[row.familyKey]) return false;
+        if (state.metric === "totalMassTons" && state.minTwr > 0 && !chartMassOptions(row).length) return false;
         if (state.searchTerm) {
           const haystack = [
             row.displayName,
@@ -1069,6 +1148,14 @@
         };
       });
       return actualPowerFrontier(row, computed);
+    }
+
+    function chartMassOptions(row, metric = state.metric) {
+      const options = massOptions(row);
+      if (metric === "totalMassTons" && state.minTwr > 0) {
+        return options.filter(option => Number.isFinite(option.twr) && option.twr >= state.minTwr);
+      }
+      return options;
     }
 
     function actualPowerFrontier(row, options) {
@@ -1243,12 +1330,26 @@
         item.className = "legend-item";
         item.textContent = `${metricDefs[state.metric].label} 밴드: 개방 전원부터 이후 전원 후보`;
         legend.appendChild(item);
+        if (secondaryEncodingEnabled()) {
+          const secondary = document.createElement("span");
+          secondary.className = "legend-item";
+          secondary.textContent = state.metric === "totalMassTons"
+            ? "점 밝기: TWR 높을수록 밝음"
+            : "점 밝기: 총질량 낮을수록 밝음";
+          legend.appendChild(secondary);
+        }
+        if (state.paretoHighlight) {
+          const pareto = document.createElement("span");
+          pareto.className = "legend-item";
+          pareto.textContent = "흐린 점: Pareto 지배 후보";
+          legend.appendChild(pareto);
+        }
       }
     }
 
     function valueDomain(rows) {
       if (isBandMetric()) {
-        const values = rows.flatMap(row => massOptions(row).map(option => optionMetricValue(option)));
+        const values = rows.flatMap(row => chartMassOptions(row).map(option => optionMetricValue(option)));
         return paddedDomain(values, state.logY);
       }
       const values = rows.map(metricDefs[state.metric].value).filter(v => Number.isFinite(v) && v > 0);
@@ -1752,16 +1853,19 @@
     }
 
     function drawTotalMassBands(rows, x, y, plot) {
+      const pointData = bandPointData(rows);
+      const secondaryDomain = secondaryEncodingDomain(pointData);
+      const paretoKeys = state.paretoHighlight ? paretoPointKeys(pointData) : new Set();
       const groups = groupedRows(rows);
       groups.forEach(group => {
         const color = group[0].familyBandColor || group[0].familyColor;
         const colorOklch = group[0].familyBandColorOklch || color;
         const fillStyle = paintStyle("fill", color, colorOklch);
         const strokeStyle = paintStyle("stroke", color, colorOklch);
-        const maxOptions = Math.max(...group.map(row => massOptions(row).length), 0);
+        const maxOptions = Math.max(...group.map(row => chartMassOptions(row).length), 0);
         for (let index = maxOptions - 2; index >= 0; index--) {
           const pairs = group
-            .map(row => ({ row, options: massOptions(row) }))
+            .map(row => ({ row, options: chartMassOptions(row) }))
             .filter(item => item.options[index] && item.options[index + 1]);
           if (pairs.length < 2) continue;
           const upper = pairs.map(item => [x(item.row.cumulativeResearch), y(optionMetricValue(item.options[index]))]);
@@ -1777,7 +1881,7 @@
         }
         for (let index = 0; index < maxOptions; index++) {
           const points = group
-            .map(row => ({ row, option: massOptions(row)[index] }))
+            .map(row => ({ row, option: chartMassOptions(row)[index] }))
             .filter(item => item.option);
           if (points.length >= 2) {
             plot.appendChild(svgEl("path", {
@@ -1792,26 +1896,95 @@
           }
         }
         group.forEach(row => {
-          const options = massOptions(row);
+          const options = chartMassOptions(row);
           if (!options.length) return;
           const gx = x(row.cumulativeResearch);
           const ys = options.map(option => y(optionMetricValue(option)));
           plot.appendChild(svgEl("line", { x1: gx, x2: gx, y1: Math.min(...ys), y2: Math.max(...ys), stroke: color, style: strokeStyle, "stroke-width": 1.2, opacity: 0.32 }));
           options.forEach((option, index) => {
             const cy = y(optionMetricValue(option));
+            const key = pointKey(row.id, option.id);
+            const visual = bandPointVisual(option, secondaryDomain, paretoKeys.has(key));
             registerHitTarget(row, option.id, gx, cy, index === 0 ? 5 : 3.4);
             const circle = svgEl("circle", {
               ...pointAttrs(row, option.id, index === 0 ? color : "var(--panel)", color, 1.5),
               cx: gx,
               cy,
               r: index === 0 ? 5 : 3.4,
-              style: index === 0 ? fillStyle : "",
-              opacity: index === 0 ? 0.96 : 0.78,
+              style: `${index === 0 ? fillStyle : ""}${visual.style}`,
+              opacity: visual.opacity,
             });
             plot.appendChild(circle);
           });
         });
       });
+    }
+
+    function bandPointData(rows) {
+      return rows.flatMap(row => chartMassOptions(row).map(option => ({
+        row,
+        option,
+        key: pointKey(row.id, option.id),
+        research: row.cumulativeResearch,
+        totalMassTons: option.totalMassTons,
+        twr: option.twr,
+      }))).filter(item => Number.isFinite(item.research)
+        && Number.isFinite(item.totalMassTons)
+        && Number.isFinite(item.twr)
+        && item.totalMassTons > 0
+        && item.twr > 0);
+    }
+
+    function secondaryEncodingEnabled() {
+      return (state.metric === "totalMassTons" && state.showTwrInfo)
+        || (state.metric === "twr" && state.showMassInfo);
+    }
+
+    function secondaryEncodingDomain(points) {
+      if (!secondaryEncodingEnabled()) return null;
+      const scores = points.map(item => secondaryScore(item.option)).filter(Number.isFinite);
+      if (!scores.length) return null;
+      return { min: Math.min(...scores), max: Math.max(...scores) };
+    }
+
+    function secondaryScore(option) {
+      if (state.metric === "totalMassTons") {
+        return Math.log10(Math.max(option.twr, 1e-12));
+      }
+      if (state.metric === "twr") {
+        return -Math.log10(Math.max(option.totalMassTons, 1e-9));
+      }
+      return NaN;
+    }
+
+    function bandPointVisual(option, secondaryDomain, pareto) {
+      let normalized = 0.72;
+      if (secondaryDomain) {
+        const span = Math.max(secondaryDomain.max - secondaryDomain.min, 1e-9);
+        normalized = clamp((secondaryScore(option) - secondaryDomain.min) / span, 0, 1);
+      }
+      const encodedOpacity = secondaryDomain ? 0.42 + normalized * 0.58 : 0.88;
+      const paretoOpacity = state.paretoHighlight && !pareto ? 0.28 : 1;
+      const brightness = secondaryDomain ? 0.68 + normalized * 0.72 : 1;
+      return {
+        opacity: clamp(encodedOpacity * paretoOpacity, 0.12, 1),
+        style: `filter:brightness(${brightness.toFixed(2)});`,
+      };
+    }
+
+    function paretoPointKeys(points) {
+      const result = new Set();
+      points.forEach(candidate => {
+        const dominated = points.some(other => other.key !== candidate.key
+          && other.research <= candidate.research
+          && other.totalMassTons <= candidate.totalMassTons
+          && other.twr >= candidate.twr
+          && (other.research < candidate.research
+            || other.totalMassTons < candidate.totalMassTons
+            || other.twr > candidate.twr));
+        if (!dominated) result.add(candidate.key);
+      });
+      return result;
     }
 
     function isBandMetric(metric = state.metric) {
@@ -2013,7 +2186,7 @@
       const sorted = sortRows(rows);
       sorted.forEach(row => {
         const tr = document.createElement("tr");
-        const powerOptions = massOptions(row);
+        const powerOptions = isBandMetric() ? chartMassOptions(row) : massOptions(row);
         const powerCell = powerOptions.length
           ? reactorBandLabel(powerOptions)
           : `<span class="warning">없음</span>`;
@@ -2108,7 +2281,7 @@
     }
 
     function optionRange(row) {
-      const options = massOptions(row);
+      const options = isBandMetric() ? chartMassOptions(row) : massOptions(row);
       const values = options.map(option => optionMetricValue(option)).filter(Number.isFinite);
       if (!values.length) return { values: [], min: NaN, max: NaN };
       return { values, min: Math.min(...values), max: Math.max(...values) };
