@@ -1941,6 +1941,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       chartHitTargets = [];
       state.hoverPoints = [];
       chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      chart.setAttribute("preserveAspectRatio", "xMidYMid meet");
       chart.innerHTML = "";
 
       const xValues = rows.map(row => row.cumulativeResearch).filter(v => Number.isFinite(v) && v > 0);
@@ -2049,12 +2050,26 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
 
     function svgPointFromEvent(event) {
-      const rect = chart.getBoundingClientRect();
-      const scaleX = chartViewport.width / Math.max(rect.width, 1);
-      const scaleY = chartViewport.height / Math.max(rect.height, 1);
+      const transform = svgViewportTransform();
       return {
-        x: (event.clientX - rect.left) * scaleX,
-        y: (event.clientY - rect.top) * scaleY,
+        x: (event.clientX - transform.rect.left - transform.offsetX) / transform.scale,
+        y: (event.clientY - transform.rect.top - transform.offsetY) / transform.scale,
+      };
+    }
+
+    function svgViewportTransform() {
+      const rect = chart.getBoundingClientRect();
+      const viewWidth = Math.max(chartViewport.width, 1);
+      const viewHeight = Math.max(chartViewport.height, 1);
+      const scale = Math.min(Math.max(rect.width, 1) / viewWidth, Math.max(rect.height, 1) / viewHeight);
+      const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+      const drawnWidth = viewWidth * safeScale;
+      const drawnHeight = viewHeight * safeScale;
+      return {
+        rect,
+        scale: safeScale,
+        offsetX: (rect.width - drawnWidth) / 2,
+        offsetY: (rect.height - drawnHeight) / 2,
       };
     }
 
@@ -2105,13 +2120,11 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
 
     function hitTargetsAt(point) {
-      const rect = chart.getBoundingClientRect();
-      const scaleX = Math.max(rect.width, 1) / chartViewport.width;
-      const scaleY = Math.max(rect.height, 1) / chartViewport.height;
+      const transform = svgViewportTransform();
       return chartHitTargets
         .map(target => ({
           ...target,
-          distance: Math.hypot((target.x - point.x) * scaleX, (target.y - point.y) * scaleY),
+          distance: Math.hypot(target.x - point.x, target.y - point.y) * transform.scale,
         }))
         .filter(target => target.distance <= CHART_HIT_RADIUS_PX)
         .sort((a, b) => a.distance - b.distance || a.order - b.order);
