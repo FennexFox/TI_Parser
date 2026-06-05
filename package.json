@@ -1,0 +1,13 @@
+{
+  "name": "terra-invicta-drive-comparison",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local browser automation checks for Terra Invicta drive comparison HTML.",
+  "scripts": {
+    "verify:browser": "node tools/verify_drive_comparison_browser.mjs",
+    "playwright:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

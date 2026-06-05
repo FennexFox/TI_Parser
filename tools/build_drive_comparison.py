@@ -42,6 +42,33 @@ CATEGORY_META: dict[str, dict[str, Any]] = {
     "Alien": {"label": {"ko": "외계", "en": "Alien"}, "color": "#71717a", "colorOklch": "oklch(62% 0.035 285)"},
 }
 
+CATEGORY_HELP: dict[str, dict[str, str]] = {
+    "Chemical": {
+        "ko": "고추력·저효율 계통입니다. 연구 부담은 낮지만 장거리 dV에서는 추진체가 급증하므로 초반 단거리 요격, 저궤도 방어, 낮은 dV 프리셋을 점검할 때 유용합니다.",
+        "en": "High-thrust, low-efficiency drives. They are cheap to unlock, but propellant mass grows quickly at high dV, so use them for early short-range interceptors, orbital defense, and low-dV presets.",
+    },
+    "Electric": {
+        "ko": "고효율·저추력 계통입니다. 느린 장거리 이동과 저가 운용에는 좋지만 전투 가속은 낮은 편이어서 TWR 필터와 전원/라디에이터 조합을 함께 확인하는 것이 좋습니다.",
+        "en": "High-efficiency, low-thrust drives. They suit slow long-range transfers and cheap operation, but combat acceleration is usually low, so inspect TWR together with power and radiator choices.",
+    },
+    "Fission": {
+        "ko": "초중반의 실전형 전환 계통입니다. 화학보다 효율이 좋고 핵융합보다 빨리 열리므로 내행성권 전투함, 순찰함, 중간 dV 임무를 비교할 때 적합합니다.",
+        "en": "Practical early-to-midgame transition drives. They beat chemical efficiency and unlock before most fusion paths, making them useful for inner-system warships, patrol craft, and medium-dV missions.",
+    },
+    "Fusion": {
+        "ko": "중후반 핵심 투자 후보입니다. 계열별 성격 차이가 크지만 대체로 높은 dV와 실전 TWR을 함께 노릴 수 있어 어떤 핵융합 라인에 연구력을 넣을지 비교하기 좋습니다.",
+        "en": "Core mid-to-lategame investment candidates. Families differ sharply, but many can combine high dV with usable combat TWR, making this category the main place to compare fusion research paths.",
+    },
+    "Antimatter": {
+        "ko": "최후반 고성능·고비용 계통입니다. 연구와 자원 부담이 크지만 빠른 전략 기동과 고성능 전투함을 노릴 때 총질량/TWR의 상한선을 확인하기 좋습니다.",
+        "en": "Very-lategame, high-performance, high-cost drives. They are expensive in research and resources, but useful for checking the ceiling of fast strategic movement and elite combat ship designs.",
+    },
+    "Alien": {
+        "ko": "외계 부품 참고용 계통입니다. 일반적인 인류 연구 투자 대상은 아니며, 성능 기준선이나 데이터 확인을 위해 필요할 때만 켜는 편이 좋습니다.",
+        "en": "Reference category for alien components. These are not normal human research investments; enable them mainly for benchmarks or data inspection.",
+    },
+}
+
 SUBFAMILY_META: dict[tuple[str, str], dict[str, Any]] = {
     ("Chemical", "Chemical"): {
         "label": {"ko": "Chemical", "en": "Chemical"},
@@ -614,11 +641,14 @@ def build_data(templates_dir: Path, research_catalog_path: Path) -> dict[str, An
         if category_key not in present_categories and category_key != "Alien":
             continue
         category_meta = CATEGORY_META[category_key]
+        category_help = CATEGORY_HELP.get(category_key, {})
         categories.append(
             {
                 "key": category_key,
                 "label": label_text(category_meta["label"], "ko"),
                 "labelEn": label_text(category_meta["label"], "en"),
+                "help": label_text(category_help, "ko"),
+                "helpEn": label_text(category_help, "en"),
                 "color": category_meta["color"],
                 "colorOklch": category_meta["colorOklch"],
                 "alien": category_key == "Alien",
@@ -893,6 +923,9 @@ HTML_TEMPLATE = r"""<!doctype html>
       font-size: 11px;
       line-height: 1.35;
     }
+    [data-help] {
+      cursor: help;
+    }
     .family-name {
       min-width: 0;
       flex: 1 1 auto;
@@ -1100,7 +1133,8 @@ HTML_TEMPLATE = r"""<!doctype html>
       color: var(--muted);
       padding: 12px;
     }
-    .tooltip.tooltip-empty.has-diagnostic {
+    .tooltip.tooltip-empty.has-diagnostic,
+    .tooltip.tooltip-empty.has-panel {
       align-items: stretch;
       justify-content: flex-start;
       color: var(--ink);
@@ -1109,29 +1143,34 @@ HTML_TEMPLATE = r"""<!doctype html>
     .tooltip-placeholder {
       color: var(--muted);
     }
-    .scenario-panel {
+    .scenario-panel,
+    .usage-panel {
       display: grid;
       gap: 9px;
       width: 100%;
       color: #d8e1db;
     }
-    .scenario-panel h2 {
+    .scenario-panel h2,
+    .usage-panel h2 {
       margin: 0;
       color: var(--ink);
       font-size: 14px;
       line-height: 1.3;
     }
-    .scenario-panel p {
+    .scenario-panel p,
+    .usage-panel p {
       margin: 0;
       color: #a9b5ad;
       line-height: 1.45;
     }
-    .scenario-panel ul {
+    .scenario-panel ul,
+    .usage-panel ul {
       margin: 0;
       padding-left: 18px;
       color: #cdd7d0;
     }
-    .scenario-panel li {
+    .scenario-panel li,
+    .usage-panel li {
       margin: 3px 0;
     }
     .tooltip-close {
@@ -1185,10 +1224,14 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
     .tooltip-item {
       position: relative;
-      padding: 9px 30px 9px 40px;
+      padding: 9px 36px 9px 40px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #151816;
+    }
+    .tooltip-item.is-pinned {
+      border-color: rgba(224, 149, 61, 0.75);
+      box-shadow: inset 0 0 0 1px rgba(224, 149, 61, 0.12);
     }
     .tooltip-item-order {
       position: absolute;
@@ -1222,10 +1265,17 @@ HTML_TEMPLATE = r"""<!doctype html>
       opacity: 0.35;
       cursor: default;
     }
-    .tooltip-item-close {
+    .tooltip-item-actions {
       position: absolute;
       top: 7px;
       right: 7px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 5px;
+      align-items: start;
+    }
+    .tooltip-item-pin,
+    .tooltip-item-close {
       width: 22px;
       height: 22px;
       min-height: 0;
@@ -1240,6 +1290,19 @@ HTML_TEMPLATE = r"""<!doctype html>
       font-size: 15px;
       line-height: 1;
     }
+    .tooltip-item-pin {
+      width: 22px;
+      min-width: 0;
+      padding: 0;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .tooltip-item-pin[aria-pressed="true"] {
+      border-color: #936f33;
+      background: rgba(224, 149, 61, 0.16);
+      color: #f1c17e;
+    }
+    .tooltip-item-pin:hover,
     .tooltip-item-close:hover {
       color: var(--ink);
       border-color: var(--strong-line);
@@ -1413,7 +1476,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   <header>
     <h1>Terra Invicta 드라이브 비교</h1>
     <div class="subtle">
-      X축은 추진기 프로젝트와 최초 호환 전원을 함께 고려한 최소 누적 연구력입니다. 총질량/TWR 그래프에서 추가 전원 연구력 반영을 켜면 더 높은 전원 후보를 따로 연구하는 비용도 각 후보의 X좌표에 포함합니다. breakdown은 차트 오른쪽 상세 패널에서 확인할 수 있습니다.
+      X축은 최초 호환 전원을 포함한 누적 연구력입니다. 같은 연구력 대비 총질량, TWR, 추력, 효율을 비교해 어느 추진기 계통에 투자할지 판단하는 데 초점을 둡니다.
     </div>
   </header>
   <main>
@@ -1560,6 +1623,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       lastTooltipItems: [],
       hoverPoints: [],
       tooltipPinned: false,
+      pinnedTooltipItems: [],
       dismissedTooltipKeys: new Set(),
       hoverHitSignature: "",
       zoom: null,
@@ -1632,10 +1696,33 @@ HTML_TEMPLATE = r"""<!doctype html>
       "other",
       "familyFilter",
     ];
+    const HELP_TEXT = {
+      showTwrInfo: {
+        ko: "목표 dV 총질량 그래프에서 각 점의 밝기를 TWR로 인코딩합니다. 같은 총질량이라도 실제로 가속이 가능한 후보인지 빠르게 구분할 때 유용합니다.",
+        en: "On the target-dV total-mass chart, point brightness encodes TWR. This helps separate low-mass candidates that can actually accelerate from low-mass but sluggish designs.",
+      },
+      showMassInfo: {
+        ko: "TWR 그래프에서 각 점의 밝기를 총질량의 역수로 인코딩합니다. 높은 TWR 후보 중에서도 같은 목표 dV를 더 가벼운 총질량으로 달성하는 조합을 찾는 데 도움을 줍니다.",
+        en: "On the TWR chart, point brightness encodes the inverse of total mass. This helps find high-TWR candidates that also reach the target dV with a lighter ship.",
+      },
+      paretoHighlight: {
+        ko: "누적 연구력은 더 낮고, 총질량은 더 가볍고, TWR은 더 높은 후보가 존재하면 해당 후보를 흐리게 표시합니다. 명백히 밀리는 조합을 줄여 투자 후보를 좁히는 기능입니다.",
+        en: "Dims candidates that are dominated by another option with no more research, no more total mass, and at least as much TWR. It narrows attention to stronger investment candidates.",
+      },
+      showImpracticalCandidates: {
+        ko: "최소 TWR 또는 극단적 질량비 때문에 보통 숨겨지는 후보도 차트에 남깁니다. 왜 특정 계열이 사라지는지 조사하거나 낮은 dV 프리셋을 찾을 때 사용하세요.",
+        en: "Keeps candidates that would normally be hidden by minimum TWR or extreme mass ratio. Use it to inspect why a family disappears or to design lower-dV presets.",
+      },
+      minTwr: {
+        ko: "총질량 그래프에서 습질량 기준 TWR이 이 값보다 낮은 후보를 숨깁니다. 값을 낮추면 장거리 dV에는 가능하지만 가속이 매우 느린 조합까지 확인할 수 있습니다.",
+        en: "On total-mass charts, hides candidates whose wet-mass TWR is below this threshold. Lower it to inspect designs that can reach the dV but accelerate very slowly.",
+      },
+    };
     let chartViewport = null;
     let chartHitTargets = [];
     let currentChartRows = [];
     let currentDiagnostics = null;
+    const allDriveRowsById = new Map(DATA.drives.map(row => [row.id, row]));
 
     function setupControls() {
       const metric = document.getElementById("metric");
@@ -1658,6 +1745,12 @@ HTML_TEMPLATE = r"""<!doctype html>
       const minTwrNumber = document.getElementById("minTwrNumber");
       const nameSearch = document.getElementById("nameSearch");
 
+      applyHelp(showTwrInfo.closest(".check-row"), helpText("showTwrInfo"));
+      applyHelp(showMassInfo.closest(".check-row"), helpText("showMassInfo"));
+      applyHelp(paretoHighlight.closest(".check-row"), helpText("paretoHighlight"));
+      applyHelp(showImpracticalCandidates.closest(".check-row"), helpText("showImpracticalCandidates"));
+      applyHelp(document.querySelector("#minTwrControl .label"), helpText("minTwr"));
+
       metric.value = state.metric;
       dryMass.value = String(clamp(state.dryMassTons, Number(dryMass.min), Number(dryMass.max)));
       dryMassNumber.value = String(Math.round(state.dryMassTons));
@@ -1678,8 +1771,13 @@ HTML_TEMPLATE = r"""<!doctype html>
           removeTooltipItem(itemClose.getAttribute("data-tooltip-key"));
           return;
         }
+        const itemPin = event.target.closest(".tooltip-item-pin");
+        if (itemPin) {
+          toggleTooltipItemPin(itemPin.getAttribute("data-tooltip-key"));
+          return;
+        }
         if (event.target.closest(".tooltip-close")) {
-          clearTooltip();
+          clearTooltip({ keepPinned: true });
         }
       });
 
@@ -1707,6 +1805,8 @@ HTML_TEMPLATE = r"""<!doctype html>
           syncFilterInputs();
           render();
         });
+        applyHelp(label, localCategoryHelp(category));
+        label.tabIndex = 0;
         const swatch = document.createElement("span");
         swatch.className = "family-swatch";
         swatch.setAttribute("style", backgroundStyle(category.color, category.colorOklch || category.color));
@@ -1788,7 +1888,8 @@ HTML_TEMPLATE = r"""<!doctype html>
         render();
       });
       dryMassNumber.addEventListener("input", () => {
-        const value = clamp(Number(dryMassNumber.value) || 1, 1, 1000000);
+        const raw = Number(dryMassNumber.value);
+        const value = clamp(Number.isFinite(raw) ? raw : 0, 0, 1000000);
         state.dryMassTons = value;
         dryMass.value = String(clamp(value, Number(dryMass.min), Number(dryMass.max)));
         render();
@@ -1799,7 +1900,8 @@ HTML_TEMPLATE = r"""<!doctype html>
         render();
       });
       targetDvNumber.addEventListener("input", () => {
-        const value = clamp(Number(targetDvNumber.value) || 1, 1, 100000);
+        const raw = Number(targetDvNumber.value);
+        const value = clamp(Number.isFinite(raw) ? raw : 0, 0, 100000);
         state.targetDvKps = value;
         targetDv.value = String(clamp(value, Number(targetDv.min), Number(targetDv.max)));
         render();
@@ -1926,6 +2028,22 @@ HTML_TEMPLATE = r"""<!doctype html>
     function localLabel(item) {
       if (UI_LANG === "en") return item.labelEn || item.label || item.key;
       return item.label || item.labelEn || item.key;
+    }
+
+    function localCategoryHelp(category) {
+      if (UI_LANG === "en") return category.helpEn || category.help || "";
+      return category.help || category.helpEn || "";
+    }
+
+    function helpText(key) {
+      const item = HELP_TEXT[key] || {};
+      return UI_LANG === "en" ? (item.en || item.ko || "") : (item.ko || item.en || "");
+    }
+
+    function applyHelp(element, text) {
+      if (!element || !text) return;
+      element.dataset.help = text;
+      element.title = text;
     }
 
     function rowCategoryLabel(row) {
@@ -2469,7 +2587,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       const innerH = height - margin.top - margin.bottom;
       currentChartRows = rows;
       chartHitTargets = [];
-      state.hoverPoints = state.tooltipPinned ? dedupeTooltipRefs(state.lastTooltipItems) : [];
+      state.hoverPoints = state.tooltipPinned ? dedupeTooltipRefs(state.lastTooltipItems) : pinnedTooltipRefs();
       chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
       chart.setAttribute("preserveAspectRatio", "xMidYMid meet");
       chart.innerHTML = "";
@@ -2566,7 +2684,12 @@ HTML_TEMPLATE = r"""<!doctype html>
       if (state.tooltipPinned) return;
       state.hoverHitSignature = "";
       state.dismissedTooltipKeys.clear();
-      setHoverPoints([]);
+      const pinned = pinnedTooltipRefs();
+      setHoverPoints(pinned);
+      if (pinned.length && !sameTooltipRefs(pinned, state.lastTooltipItems)) {
+        state.lastTooltipItems = pinned;
+        refreshTooltip(currentChartRows);
+      }
     }
 
     function endChartPan(event) {
@@ -2642,14 +2765,24 @@ HTML_TEMPLATE = r"""<!doctype html>
       if (!pointInPlot(point)) {
         state.hoverHitSignature = "";
         state.dismissedTooltipKeys.clear();
-        setHoverPoints([]);
+        const pinned = pinnedTooltipRefs();
+        setHoverPoints(pinned);
+        if (pinned.length && !sameTooltipRefs(pinned, state.lastTooltipItems)) {
+          state.lastTooltipItems = pinned;
+          refreshTooltip(currentChartRows);
+        }
         return;
       }
       const hits = hitTargetsAt(point);
       if (!hits.length) {
         state.hoverHitSignature = "";
         state.dismissedTooltipKeys.clear();
-        setHoverPoints([]);
+        const pinned = pinnedTooltipRefs();
+        setHoverPoints(pinned);
+        if (pinned.length && !sameTooltipRefs(pinned, state.lastTooltipItems)) {
+          state.lastTooltipItems = pinned;
+          refreshTooltip(currentChartRows);
+        }
         return;
       }
       const signature = hits.map(hit => hit.key).join("|");
@@ -2658,7 +2791,7 @@ HTML_TEMPLATE = r"""<!doctype html>
         state.dismissedTooltipKeys.clear();
       }
       const visibleHits = hits.filter(hit => !state.dismissedTooltipKeys.has(hit.key));
-      const nextRefs = dedupeTooltipRefs(visibleHits);
+      const nextRefs = mergePinnedTooltipRefs(visibleHits);
       setHoverPoints(nextRefs);
       if (nextRefs.length && !sameTooltipRefs(nextRefs, state.lastTooltipItems)) {
         state.lastTooltipItems = nextRefs;
@@ -2668,7 +2801,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 
     function handleChartClick(point) {
       if (!chartViewport || !pointInPlot(point)) {
-        clearTooltip();
+        clearTooltip({ keepPinned: true });
         return;
       }
       const hits = hitTargetsAt(point);
@@ -2676,7 +2809,7 @@ HTML_TEMPLATE = r"""<!doctype html>
         ? hits
         : hits.filter(hit => !state.dismissedTooltipKeys.has(hit.key));
       if (!visibleHits.length) {
-        clearTooltip();
+        clearTooltip({ keepPinned: true });
         return;
       }
       pinTooltipItems(visibleHits);
@@ -2685,7 +2818,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     function handleChartKeyDown(event) {
       if (isEditableTarget(event.target)) return;
       if (event.key === "Escape" && (state.tooltipPinned || state.lastTooltipItems.length)) {
-        clearTooltip();
+        clearTooltip({ keepPinned: true });
         event.preventDefault();
         return;
       }
@@ -2877,6 +3010,41 @@ HTML_TEMPLATE = r"""<!doctype html>
         refs.push(ref);
       });
       return refs;
+    }
+
+    function resolveTooltipRow(ref, rowById, rows) {
+      const direct = rowById.get(ref.rowId);
+      if (direct) return direct;
+      const original = allDriveRowsById.get(ref.rowId);
+      if (!original) return null;
+      return rows.find(row => row.baseKey === original.baseKey
+        && row.thrusterCount === state.thrusters
+        && row.familyKey === original.familyKey)
+        || rows.find(row => row.baseKey === original.baseKey && row.thrusterCount === state.thrusters)
+        || null;
+    }
+
+    function isPinnedTooltipKey(key) {
+      return state.pinnedTooltipItems.some(item => item.key === key);
+    }
+
+    function pinnedTooltipRefs() {
+      const lastPinned = dedupeTooltipRefs(state.lastTooltipItems).filter(item => isPinnedTooltipKey(item.key));
+      const included = new Set(lastPinned.map(item => item.key));
+      const missingPinned = dedupeTooltipRefs(state.pinnedTooltipItems).filter(item => !included.has(item.key));
+      return [...lastPinned, ...missingPinned];
+    }
+
+    function mergePinnedTooltipRefs(items) {
+      const pinned = pinnedTooltipRefs();
+      const pinnedKeys = new Set(pinned.map(item => item.key));
+      const transient = dedupeTooltipRefs(items).filter(item => !pinnedKeys.has(item.key));
+      return [...pinned, ...transient];
+    }
+
+    function syncPinnedTooltipOrder() {
+      const pinnedKeys = new Set(state.pinnedTooltipItems.map(item => item.key));
+      state.pinnedTooltipItems = dedupeTooltipRefs(state.lastTooltipItems).filter(item => pinnedKeys.has(item.key));
     }
 
     function sameTooltipRefs(left, right) {
@@ -3238,9 +3406,12 @@ HTML_TEMPLATE = r"""<!doctype html>
 
     function tooltipPanelHtml(items) {
       const pinnedText = UI_LANG === "en" ? "Pinned" : "고정됨";
+      const pinnedCardText = UI_LANG === "en" ? "pinned cards" : "고정 카드";
       const countText = UI_LANG === "en" ? `${items.length} selected` : `선택 항목 ${items.length}개`;
       const statusParts = [];
       if (state.tooltipPinned) statusParts.push(`<span class="tooltip-pin">${pinnedText}</span>`);
+      const pinnedCount = items.filter(item => isPinnedTooltipKey(item.key)).length;
+      if (pinnedCount) statusParts.push(`<span class="tooltip-pin">${pinnedCount} ${pinnedCardText}</span>`);
       if (items.length > 1) statusParts.push(countText);
       const count = statusParts.length ? `<div class="tooltip-count">${statusParts.join("")}</div>` : "";
       return `
@@ -3260,9 +3431,10 @@ HTML_TEMPLATE = r"""<!doctype html>
       }
       state.tooltipPinned = true;
       state.dismissedTooltipKeys.clear();
-      state.hoverHitSignature = refs.map(item => item.key).join("|");
-      state.lastTooltipItems = refs;
-      setHoverPoints(refs);
+      const nextRefs = dedupeTooltipRefs([...state.lastTooltipItems, ...refs]);
+      state.hoverHitSignature = nextRefs.map(item => item.key).join("|");
+      state.lastTooltipItems = nextRefs;
+      setHoverPoints(nextRefs);
       refreshTooltip(currentChartRows);
     }
 
@@ -3277,17 +3449,22 @@ HTML_TEMPLATE = r"""<!doctype html>
       const radiator = selectedRadiator();
       const selected = option ? tooltipBreakdownHtml(row, option) : "";
       const powerName = option ? option.displayName : (UI_LANG === "en" ? "No power plant candidate" : "전원 후보 없음");
+      const pinned = isPinnedTooltipKey(key);
+      const pinLabel = UI_LANG === "en" ? (pinned ? "Unpin this card" : "Pin this card") : (pinned ? "이 카드 고정 해제" : "이 카드 고정");
       const unlockResearch = rowUnlockResearchValue(row);
       const powerResearch = option && state.usePowerResearch
         ? `<div>추가 전원 포함 연구력: <strong>${formatResearch(optionResearchValue(row, option))}</strong></div>`
         : "";
       return `
-        <section class="tooltip-item" data-tooltip-key="${escapeHtml(key)}">
+        <section class="tooltip-item${pinned ? " is-pinned" : ""}" data-tooltip-key="${escapeHtml(key)}">
           <div class="tooltip-item-order" aria-label="순서 변경">
             <button class="tooltip-item-move" type="button" data-tooltip-key="${escapeHtml(key)}" data-direction="up" aria-label="위로 이동"${index === 0 ? " disabled" : ""}>▲</button>
             <button class="tooltip-item-move" type="button" data-tooltip-key="${escapeHtml(key)}" data-direction="down" aria-label="아래로 이동"${index >= itemCount - 1 ? " disabled" : ""}>▼</button>
           </div>
-          <button class="tooltip-item-close" type="button" data-tooltip-key="${escapeHtml(key)}" aria-label="항목 삭제">&times;</button>
+          <div class="tooltip-item-actions">
+            <button class="tooltip-item-close" type="button" data-tooltip-key="${escapeHtml(key)}" aria-label="항목 삭제">&times;</button>
+            <button class="tooltip-item-pin" type="button" data-tooltip-key="${escapeHtml(key)}" aria-label="${escapeHtml(pinLabel)}" aria-pressed="${pinned ? "true" : "false"}">📌</button>
+          </div>
           <h2>${escapeHtml(row.displayName)}<span class="tooltip-title-power">${escapeHtml(powerName)}</span></h2>
           <div class="muted">${escapeHtml(rowCategoryLabel(row))} / ${escapeHtml(rowFamilyLabel(row))} · ${escapeHtml(rowProjectLabel(row))}</div>
           <div>개방 연구력: <strong>${formatResearch(unlockResearch)}</strong> · 추진기 연구: ${formatResearch(row.cumulativeResearch)} · 자체 프로젝트: ${formatResearch(row.ownResearchCost)}</div>
@@ -3342,7 +3519,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       const seen = new Set();
       state.lastTooltipItems.forEach(item => {
         const ref = tooltipRef(item);
-        const row = rowById.get(ref.rowId);
+        const row = resolveTooltipRow(ref, rowById, rows);
         if (!row) return;
         const options = chartMassOptions(row, state.metric);
         const option = options.find(candidate => candidate.id === ref.powerOptionId) || defaultTooltipOption(row);
@@ -3351,7 +3528,7 @@ HTML_TEMPLATE = r"""<!doctype html>
         const key = pointKey(row.id, powerOptionId);
         if (seen.has(key)) return;
         seen.add(key);
-        resolved.push({ row, option, rowId: row.id, powerOptionId, key });
+        resolved.push({ row, option, rowId: row.id, powerOptionId, key, sourceKey: ref.key });
       });
       return resolved;
     }
@@ -3366,12 +3543,20 @@ HTML_TEMPLATE = r"""<!doctype html>
         clearTooltip();
         return;
       }
-      const resolvedKeys = new Set(resolved.map(item => item.key));
+      const pinnedKeys = new Set(state.pinnedTooltipItems.map(item => item.key));
+      const hoverKeys = new Set(state.hoverPoints.map(item => item.key));
       state.lastTooltipItems = resolved.map(item => tooltipRef(item.rowId, item.powerOptionId));
-      state.hoverPoints = state.hoverPoints.filter(item => resolvedKeys.has(item.key));
+      state.pinnedTooltipItems = resolved
+        .filter(item => pinnedKeys.has(item.sourceKey) || pinnedKeys.has(item.key))
+        .map(item => tooltipRef(item.rowId, item.powerOptionId));
+      const nextPinnedKeys = new Set(state.pinnedTooltipItems.map(item => item.key));
+      state.hoverPoints = resolved
+        .filter(item => hoverKeys.has(item.sourceKey) || hoverKeys.has(item.key) || nextPinnedKeys.has(item.key))
+        .map(item => tooltipRef(item.rowId, item.powerOptionId));
       tooltip.innerHTML = tooltipPanelHtml(resolved);
       tooltip.classList.remove("tooltip-empty");
       tooltip.classList.remove("has-diagnostic");
+      tooltip.classList.remove("has-panel");
       updateHoverStyles();
     }
 
@@ -3385,10 +3570,26 @@ HTML_TEMPLATE = r"""<!doctype html>
       const [moving] = refs.splice(index, 1);
       refs.splice(nextIndex, 0, moving);
       state.lastTooltipItems = refs;
+      syncPinnedTooltipOrder();
       const hoveredKeys = new Set(state.hoverPoints.map(item => item.key));
       if (hoveredKeys.size) {
         state.hoverPoints = refs.filter(item => hoveredKeys.has(item.key));
       }
+      refreshTooltip(currentChartRows);
+    }
+
+    function toggleTooltipItemPin(key) {
+      if (!key) return;
+      const refs = dedupeTooltipRefs(state.lastTooltipItems);
+      const ref = refs.find(item => item.key === key);
+      if (!ref) return;
+      if (isPinnedTooltipKey(key)) {
+        state.pinnedTooltipItems = state.pinnedTooltipItems.filter(item => item.key !== key);
+      } else {
+        state.pinnedTooltipItems = dedupeTooltipRefs([...state.pinnedTooltipItems, ref]);
+      }
+      state.lastTooltipItems = mergePinnedTooltipRefs(refs);
+      setHoverPoints(mergePinnedTooltipRefs(state.hoverPoints));
       refreshTooltip(currentChartRows);
     }
 
@@ -3397,6 +3598,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       state.dismissedTooltipKeys.add(key);
       state.lastTooltipItems = state.lastTooltipItems.filter(item => tooltipRef(item).key !== key);
       state.hoverPoints = state.hoverPoints.filter(item => item.key !== key);
+      state.pinnedTooltipItems = state.pinnedTooltipItems.filter(item => item.key !== key);
       if (state.lastTooltipItems.length) {
         refreshTooltip(currentChartRows);
       } else {
@@ -3412,21 +3614,57 @@ HTML_TEMPLATE = r"""<!doctype html>
       if (family) {
         tooltip.innerHTML = scenarioPanelHtml(family, currentDiagnostics.zeroFamilies.length);
         tooltip.classList.add("has-diagnostic");
+        tooltip.classList.remove("has-panel");
       } else {
-        tooltip.innerHTML = `<div class="tooltip-placeholder">${UI_LANG === "en" ? "No selection" : "선택 없음"}</div>`;
+        tooltip.innerHTML = usagePanelHtml();
         tooltip.classList.remove("has-diagnostic");
+        tooltip.classList.add("has-panel");
       }
       tooltip.classList.add("tooltip-empty");
     }
 
-    function clearTooltip() {
-      state.lastTooltipItems = [];
-      state.hoverPoints = [];
+    function clearTooltip(options = {}) {
+      const keepPinned = !!options.keepPinned;
+      const pinnedRefs = keepPinned ? pinnedTooltipRefs() : [];
+      state.lastTooltipItems = pinnedRefs;
+      state.hoverPoints = pinnedRefs;
       state.tooltipPinned = false;
+      if (!keepPinned) state.pinnedTooltipItems = [];
       state.dismissedTooltipKeys.clear();
-      state.hoverHitSignature = "";
-      renderEmptyTooltip();
+      state.hoverHitSignature = pinnedRefs.map(item => item.key).join("|");
+      if (pinnedRefs.length) {
+        refreshTooltip(currentChartRows);
+      } else {
+        renderEmptyTooltip();
+      }
       updateHoverStyles();
+    }
+
+    function usagePanelHtml() {
+      if (UI_LANG === "en") {
+        return `
+          <div class="usage-panel">
+            <h2>How to use detail cards</h2>
+            <p>Hover over a chart point to show its total-mass/TWR card here. Click a point to keep the current card set while you inspect other parts of the chart.</p>
+            <ul>
+              <li>Use Pin on an individual card to keep that drive visible while hovering over distant candidates.</li>
+              <li>Use the arrow buttons to reorder cards, and the x button to remove cards that are no longer useful.</li>
+              <li>For total-mass and TWR charts, compare the mass breakdown, wet-mass TWR, and power plant line together before choosing a research path.</li>
+            </ul>
+          </div>
+        `;
+      }
+      return `
+        <div class="usage-panel">
+          <h2>상세 카드 사용법</h2>
+          <p>차트의 데이터포인트에 마우스를 올리면 해당 추진기와 전원 조합의 총질량/TWR 카드가 이 영역에 표시됩니다. 데이터포인트를 클릭하면 현재 카드 묶음을 유지한 채 다른 지점을 살펴볼 수 있습니다.</p>
+          <ul>
+            <li>개별 카드의 핀 버튼을 누르면 서로 멀리 떨어진 후보를 계속 남겨 두고 비교할 수 있습니다.</li>
+            <li>화살표 버튼으로 카드 순서를 바꾸고, x 버튼으로 더 이상 필요 없는 카드를 삭제할 수 있습니다.</li>
+            <li>총질량/TWR 그래프에서는 질량 breakdown, 습질량 TWR, 전원 계열을 함께 보면서 어떤 연구 계통에 투자할지 판단하세요.</li>
+          </ul>
+        </div>
+      `;
     }
 
     function scenarioPanelHtml(family, zeroFamilyCount) {
@@ -3744,8 +3982,8 @@ ENGLISH_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ('<html lang="ko">', '<html lang="en">'),
     ("Terra Invicta 드라이브 비교", "Terra Invicta Drive Comparison"),
     (
-        "X축은 추진기 프로젝트와 최초 호환 전원을 함께 고려한 최소 누적 연구력입니다. 총질량/TWR 그래프에서 추가 전원 연구력 반영을 켜면 더 높은 전원 후보를 따로 연구하는 비용도 각 후보의 X좌표에 포함합니다. breakdown은 차트 오른쪽 상세 패널에서 확인할 수 있습니다.",
-        "The X axis is the minimum cumulative research that includes both the drive project and its first compatible power plant. On total-mass/TWR charts, enabling additional power research also includes the separate research cost for higher power candidates in each candidate's X coordinate. The breakdown appears in the detail panel on the right side of the chart.",
+        "X축은 최초 호환 전원을 포함한 누적 연구력입니다. 같은 연구력 대비 총질량, TWR, 추력, 효율을 비교해 어느 추진기 계통에 투자할지 판단하는 데 초점을 둡니다.",
+        "The X axis is cumulative research including the first compatible power plant. Use it to compare total mass, TWR, thrust, and efficiency at similar research costs and decide which drive path to invest in.",
     ),
     ("세로축", "Vertical axis"),
     ("시뮬레이션(총 질량, TWR)", "Simulation (total mass, TWR)"),
