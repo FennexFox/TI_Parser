@@ -196,6 +196,31 @@
       font-size: 11px;
       line-height: 1.35;
     }
+    .family-name {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .family-count {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .family-warnings {
+      display: grid;
+      gap: 5px;
+      margin-top: 8px;
+    }
+    .family-warning {
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      border-radius: 6px;
+      padding: 6px 8px;
+      background: rgba(245, 158, 11, 0.08);
+      color: #f1c17e;
+      font-size: 11px;
+      line-height: 1.35;
+    }
     .check-row, .category-row, .family-row {
       display: flex;
       align-items: center;
@@ -274,7 +299,7 @@
     }
     .axis text {
       fill: #a9b5ad;
-      font-size: 11px;
+      font-size: 12px;
     }
     .axis path, .axis line {
       stroke: var(--strong-line);
@@ -284,9 +309,9 @@
       stroke: #2a302c;
       shape-rendering: crispEdges;
     }
-    .axis-title {
+    .axis .axis-title {
       fill: #d8e1db;
-      font-size: 12px;
+      font-size: 16px;
       font-weight: 650;
     }
     .legend {
@@ -338,6 +363,19 @@
       color: var(--ink);
       font-weight: 700;
     }
+    .diagnostic-banner {
+      margin: 0 0 10px;
+      padding: 7px 9px;
+      border: 1px solid rgba(245, 158, 11, 0.32);
+      border-radius: 6px;
+      background: rgba(245, 158, 11, 0.07);
+      color: #f1c17e;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .diagnostic-banner[hidden] {
+      display: none;
+    }
     .tooltip {
       position: relative;
       pointer-events: auto;
@@ -365,8 +403,39 @@
       color: var(--muted);
       padding: 12px;
     }
+    .tooltip.tooltip-empty.has-diagnostic {
+      align-items: stretch;
+      justify-content: flex-start;
+      color: var(--ink);
+      padding: 12px;
+    }
     .tooltip-placeholder {
       color: var(--muted);
+    }
+    .scenario-panel {
+      display: grid;
+      gap: 9px;
+      width: 100%;
+      color: #d8e1db;
+    }
+    .scenario-panel h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.3;
+    }
+    .scenario-panel p {
+      margin: 0;
+      color: #a9b5ad;
+      line-height: 1.45;
+    }
+    .scenario-panel ul {
+      margin: 0;
+      padding-left: 18px;
+      color: #cdd7d0;
+    }
+    .scenario-panel li {
+      margin: 3px 0;
     }
     .tooltip-close {
       position: absolute;
@@ -680,15 +749,15 @@
       <section class="control-block">
         <label class="label" for="dryMass">Base hull dry mass (t)</label>
         <div class="split">
-          <input id="dryMass" type="range" min="100" max="10000" value="10000" step="100">
-          <input id="dryMassNumber" type="number" min="1" max="1000000" value="10000" step="10">
+          <input id="dryMass" type="range" min="100" max="100000" value="10000" step="100">
+          <input id="dryMassNumber" type="number" min="0" max="1000000" value="10000" step="10">
         </div>
       </section>
       <section class="control-block">
         <label class="label" for="targetDv">Target dV (km/s)</label>
         <div class="split">
-          <input id="targetDv" type="range" min="10" max="5000" value="500" step="10">
-          <input id="targetDvNumber" type="number" min="1" max="100000" value="500" step="10">
+          <input id="targetDv" type="range" min="0" max="2000" value="500" step="5">
+          <input id="targetDvNumber" type="number" min="0" max="100000" value="500" step="1">
         </div>
       </section>
       <section class="control-block">
@@ -700,6 +769,7 @@
         <label id="showTwrInfoRow" class="check-row"><input id="showTwrInfo" type="checkbox" checked> Show TWR information</label>
         <label id="showMassInfoRow" class="check-row" style="display: none;"><input id="showMassInfo" type="checkbox" checked> Show total mass information</label>
         <label class="check-row"><input id="paretoHighlight" type="checkbox" checked> Highlight Pareto candidates</label>
+        <label class="check-row"><input id="showImpracticalCandidates" type="checkbox"> Show impractical candidates</label>
         <div id="minTwrControl" style="margin-top: 10px;">
           <label class="label" for="minTwrExp">Minimum TWR</label>
           <div class="split">
@@ -725,6 +795,7 @@
           <button id="clearFamilies" type="button">Clear all</button>
         </div>
         <div id="families"></div>
+        <div id="familyWarnings" class="family-warnings"></div>
       </section>
     </aside>
     <section class="chart-shell">
@@ -740,6 +811,7 @@
           <div id="metricHint"></div>
         </div>
       </div>
+      <div id="chartDiagnostic" class="diagnostic-banner" hidden></div>
       <div class="chart-body">
         <svg id="chart" role="img" aria-label="Drive comparison chart"></svg>
         <div id="tooltip" class="tooltip tooltip-empty"><div class="tooltip-placeholder">No selection</div></div>
@@ -782,6 +854,7 @@
       showTwrInfo: true,
       showMassInfo: true,
       paretoHighlight: true,
+      showImpracticalCandidates: false,
       usePowerResearch: false,
       minTwr: 0.0001,
       searchTerm: "",
@@ -850,9 +923,22 @@
     const familyRoot = document.getElementById("families");
     const CHART_HIT_RADIUS_PX = 16;
     const CHART_CLICK_TOLERANCE_PX = 5;
+    const EXTREME_MASS_RATIO = 1_000_000;
+    const MASS_RATIO_OVERFLOW_EXPONENT = 709;
+    const HIDDEN_REASON_PRIORITY = [
+      "minTwr",
+      "targetDvOrMassRatio",
+      "researchFilter",
+      "invalidPowerPlant",
+      "invalidComputation",
+      "axisRange",
+      "other",
+      "familyFilter",
+    ];
     let chartViewport = null;
     let chartHitTargets = [];
     let currentChartRows = [];
+    let currentDiagnostics = null;
 
     function setupControls() {
       const metric = document.getElementById("metric");
@@ -869,6 +955,7 @@
       const showTwrInfo = document.getElementById("showTwrInfo");
       const showMassInfo = document.getElementById("showMassInfo");
       const paretoHighlight = document.getElementById("paretoHighlight");
+      const showImpracticalCandidates = document.getElementById("showImpracticalCandidates");
       const powerResearchToggle = document.getElementById("powerResearchToggle");
       const minTwrExp = document.getElementById("minTwrExp");
       const minTwrNumber = document.getElementById("minTwrNumber");
@@ -948,8 +1035,13 @@
         swatch.className = "family-swatch";
         swatch.setAttribute("style", backgroundStyle(family.color, family.colorOklch || family.color));
         const text = document.createElement("span");
+        text.className = "family-name";
         text.textContent = localLabel(family);
-        label.append(input, swatch, text);
+        const count = document.createElement("span");
+        count.className = "family-count";
+        count.dataset.familyCount = family.key;
+        count.textContent = "0 / 0";
+        label.append(input, swatch, text, count);
         familyRoot.appendChild(label);
       });
 
@@ -1039,6 +1131,10 @@
         state.paretoHighlight = paretoHighlight.checked;
         render();
       });
+      showImpracticalCandidates.addEventListener("change", () => {
+        state.showImpracticalCandidates = showImpracticalCandidates.checked;
+        render();
+      });
       powerResearchToggle.addEventListener("click", () => {
         state.usePowerResearch = !state.usePowerResearch;
         render();
@@ -1113,6 +1209,8 @@
       minTwrControl.style.display = state.metric === "totalMassTons" ? "" : "none";
       powerResearchToggle.style.display = isBandMetric() ? "" : "none";
       powerResearchToggle.setAttribute("aria-pressed", state.usePowerResearch ? "true" : "false");
+      const showImpracticalCandidates = document.getElementById("showImpracticalCandidates");
+      if (showImpracticalCandidates) showImpracticalCandidates.checked = !!state.showImpracticalCandidates;
       syncMinTwrInputs();
     }
 
@@ -1166,24 +1264,155 @@
     }
 
     function filteredRows() {
-      return DATA.drives.filter(row => {
-        if (row.thrusterCount !== state.thrusters) return false;
-        if (!state.categories[row.categoryKey]) return false;
-        if (!state.families[row.familyKey]) return false;
-        if (state.metric === "totalMassTons" && state.minTwr > 0 && !chartMassOptions(row).length) return false;
-        if (state.searchTerm) {
-          const haystack = [
-            row.displayName,
-            row.baseDisplayName,
-            row.requiredProject,
-            rowProjectLabel(row),
-            rowCategoryLabel(row),
-            rowFamilyLabel(row),
-          ].join(" ").toLocaleLowerCase();
-          if (!haystack.includes(state.searchTerm)) return false;
+      return computeDriveDiagnostics().visibleRows;
+    }
+
+    function computeDriveDiagnostics() {
+      const familyStats = new Map(DATA.subfamilies.map(family => [family.key, {
+        ...family,
+        total: 0,
+        visible: 0,
+        hidden: 0,
+        selected: !!state.categories[family.categoryKey] && !!state.families[family.key],
+        hiddenReasons: {},
+      }]));
+      const visibleRows = [];
+      DATA.drives.forEach(row => {
+        const evaluation = evaluateDriveVisibility(row);
+        if (evaluation.visible) visibleRows.push(row);
+        if (!rowInFamilyDiagnosticScope(row)) return;
+        const stats = familyStats.get(row.familyKey);
+        if (!stats) return;
+        stats.total += 1;
+        if (evaluation.visible) {
+          stats.visible += 1;
+        } else if (stats.selected) {
+          stats.hidden += 1;
+          const reasons = evaluation.reasons.filter(reason => reason !== "familyFilter");
+          (reasons.length ? reasons : ["other"]).forEach(reason => {
+            stats.hiddenReasons[reason] = (stats.hiddenReasons[reason] || 0) + 1;
+          });
         }
-        return Number.isFinite(rowUnlockResearchValue(row)) && rowUnlockResearchValue(row) > 0;
       });
+      const families = DATA.subfamilies.map(family => {
+        const stats = familyStats.get(family.key);
+        return {
+          ...stats,
+          dominantReason: dominantHiddenReason(stats.hiddenReasons),
+        };
+      });
+      return {
+        visibleRows,
+        families,
+        zeroFamilies: families.filter(family => family.selected && family.total > 0 && family.visible === 0),
+      };
+    }
+
+    function evaluateDriveVisibility(row) {
+      const reasons = [];
+      if (row.thrusterCount !== state.thrusters || !rowMatchesSearch(row) || !rowFamilySelected(row)) {
+        reasons.push("familyFilter");
+      }
+      if (!Number.isFinite(rowUnlockResearchValue(row)) || rowUnlockResearchValue(row) <= 0) {
+        reasons.push("researchFilter");
+      }
+      if (isBandMetric()) {
+        reasons.push(...bandMetricHiddenReasons(row));
+      } else {
+        const value = metricDefs[state.metric].value(row);
+        if (!Number.isFinite(value) || value <= 0) reasons.push("axisRange");
+      }
+      return {
+        visible: reasons.length === 0,
+        reasons: [...new Set(reasons)],
+      };
+    }
+
+    function rowFamilySelected(row) {
+      return !!state.categories[row.categoryKey] && !!state.families[row.familyKey];
+    }
+
+    function rowInFamilyDiagnosticScope(row) {
+      return row.thrusterCount === state.thrusters && rowMatchesSearch(row);
+    }
+
+    function rowMatchesSearch(row) {
+      if (!state.searchTerm) return true;
+      const haystack = [
+        row.displayName,
+        row.baseDisplayName,
+        row.requiredProject,
+        rowProjectLabel(row),
+        rowCategoryLabel(row),
+        rowFamilyLabel(row),
+      ].join(" ").toLocaleLowerCase();
+      return haystack.includes(state.searchTerm);
+    }
+
+    function bandMetricHiddenReasons(row) {
+      const configuredOptions = row.powerOptions || row.reactorOptions || [];
+      if (!configuredOptions.length) return ["invalidPowerPlant"];
+      const massInfo = massRatioDiagnostics(row);
+      const options = massOptions(row);
+      if (!options.length) {
+        if (massInfo.overflow || massInfo.extreme) return ["targetDvOrMassRatio"];
+        return [massInfo.invalid ? "invalidComputation" : "invalidPowerPlant"];
+      }
+      const finiteMetricOptions = options.filter(option => Number.isFinite(optionMetricValue(option)) && optionMetricValue(option) > 0);
+      if (!finiteMetricOptions.length) return ["invalidComputation"];
+      const reasons = [];
+      if (state.metric === "totalMassTons" && state.minTwr > 0 && !state.showImpracticalCandidates) {
+        const twrPassing = finiteMetricOptions.some(option => Number.isFinite(option.twr) && option.twr >= state.minTwr);
+        if (!twrPassing) {
+          reasons.push("minTwr");
+          if (massInfo.extreme || massInfo.overflow || finiteMetricOptions.some(isExtremeMassRatioOption)) {
+            reasons.push("targetDvOrMassRatio");
+          }
+        }
+      }
+      return reasons;
+    }
+
+    function massRatioDiagnostics(row) {
+      const targetDv = Number(state.targetDvKps);
+      const exhaustVelocity = Number(row.exhaustVelocityKps);
+      if (!Number.isFinite(targetDv) || !Number.isFinite(exhaustVelocity) || exhaustVelocity <= 0) {
+        return { invalid: true, overflow: false, extreme: false, massRatio: NaN };
+      }
+      const exponent = targetDv / exhaustVelocity;
+      if (!Number.isFinite(exponent)) {
+        return { invalid: true, overflow: false, extreme: false, massRatio: NaN };
+      }
+      if (exponent > MASS_RATIO_OVERFLOW_EXPONENT) {
+        return { invalid: false, overflow: true, extreme: true, massRatio: Infinity };
+      }
+      const massRatio = Math.exp(exponent);
+      return {
+        invalid: !Number.isFinite(massRatio),
+        overflow: !Number.isFinite(massRatio),
+        extreme: Number.isFinite(massRatio) && massRatio >= EXTREME_MASS_RATIO,
+        massRatio,
+      };
+    }
+
+    function isExtremeMassRatioOption(option) {
+      return Number.isFinite(option.massRatio) && option.massRatio >= EXTREME_MASS_RATIO;
+    }
+
+    function isImpracticalOption(option) {
+      if (!state.showImpracticalCandidates) return false;
+      return (state.metric === "totalMassTons" && state.minTwr > 0 && Number.isFinite(option.twr) && option.twr < state.minTwr)
+        || isExtremeMassRatioOption(option);
+    }
+
+    function dominantHiddenReason(hiddenReasons) {
+      return HIDDEN_REASON_PRIORITY.find(reason => (hiddenReasons && hiddenReasons[reason] > 0)) || "other";
+    }
+
+    function rowUnlockResearchValue(row) {
+      const value = Number(row.unlockCumulativeResearch);
+      if (Number.isFinite(value) && value > 0) return value;
+      return Number(row.cumulativeResearch);
     }
 
     function rowUnlockResearchValue(row) {
@@ -1203,6 +1432,7 @@
       const radiatorSpecificPower = radiator ? Number(radiator.specificPowerKWPerKg) : NaN;
       const massRatioMinusOne = Math.exp(targetDv / row.exhaustVelocityKps) - 1;
       if (!Number.isFinite(massRatioMinusOne) || massRatioMinusOne < 0) return [];
+      const massRatio = massRatioMinusOne + 1;
       const options = row.powerOptions || row.reactorOptions || [];
       const computed = options.map(option => {
         const selfContained = !!option.selfContained || row.powerRequirementGW <= 0;
@@ -1228,6 +1458,8 @@
           propellantTons,
           totalMassTons,
           twr,
+          massRatio,
+          massRatioMinusOne,
         };
       });
       return actualPowerFrontier(row, computed);
@@ -1235,7 +1467,7 @@
 
     function chartMassOptions(row, metric = state.metric) {
       const options = massOptions(row);
-      if (metric === "totalMassTons" && state.minTwr > 0) {
+      if (metric === "totalMassTons" && state.minTwr > 0 && !state.showImpracticalCandidates) {
         return options.filter(option => Number.isFinite(option.twr) && option.twr >= state.minTwr);
       }
       return options;
@@ -1328,12 +1560,16 @@
     }
 
     function render() {
-      const rows = filteredRows();
+      const diagnostics = computeDriveDiagnostics();
+      currentDiagnostics = diagnostics;
+      const rows = diagnostics.visibleRows;
       const metric = metricDefs[state.metric];
       document.getElementById("visibleCount").textContent = rows.length;
       document.getElementById("metricHint").textContent = metric.hint;
       document.getElementById("metricColumn").textContent = metric.label;
       updateChartControls();
+      renderFamilyDiagnostics(diagnostics);
+      renderChartDiagnostic(diagnostics);
       renderLegend(rows);
       renderChart(rows);
       renderTable(rows);
@@ -1342,7 +1578,9 @@
     }
 
     function redrawChartOnly() {
-      const rows = filteredRows();
+      const diagnostics = computeDriveDiagnostics();
+      currentDiagnostics = diagnostics;
+      const rows = diagnostics.visibleRows;
       renderChart(rows);
       updateZoomButton();
       refreshTooltip(rows);
@@ -1358,6 +1596,7 @@
         state.dryMassTons,
         state.targetDvKps,
         state.radiatorId,
+        state.showImpracticalCandidates ? 1 : 0,
         state.usePowerResearch ? 1 : 0,
         state.logX ? 1 : 0,
         state.logY ? 1 : 0,
@@ -1379,6 +1618,68 @@
         button.dataset.arrow = active ? (state.sortDirection === "asc" ? "▲" : "▼") : "";
         button.setAttribute("aria-sort", active ? (state.sortDirection === "asc" ? "ascending" : "descending") : "none");
       });
+    }
+
+    function renderFamilyDiagnostics(diagnostics) {
+      const byKey = new Map(diagnostics.families.map(family => [family.key, family]));
+      document.querySelectorAll(".family-row").forEach(row => {
+        const stats = byKey.get(row.dataset.familyKey);
+        const count = row.querySelector(".family-count");
+        if (!count || !stats) return;
+        count.textContent = UI_LANG === "en"
+          ? `${stats.visible} / ${stats.total} shown`
+          : `${stats.visible} / ${stats.total} 표시`;
+      });
+      const warningsRoot = document.getElementById("familyWarnings");
+      if (!warningsRoot) return;
+      warningsRoot.innerHTML = "";
+      diagnostics.zeroFamilies.forEach(family => {
+        const item = document.createElement("div");
+        item.className = "family-warning";
+        item.textContent = familyWarningText(family);
+        warningsRoot.appendChild(item);
+      });
+    }
+
+    function renderChartDiagnostic(diagnostics) {
+      const banner = document.getElementById("chartDiagnostic");
+      if (!banner) return;
+      if (!diagnostics.zeroFamilies.length) {
+        banner.hidden = true;
+        banner.textContent = "";
+        return;
+      }
+      const count = diagnostics.zeroFamilies.length;
+      banner.hidden = false;
+      banner.textContent = UI_LANG === "en"
+        ? `${count} selected drive ${count === 1 ? "family has" : "families have"} no visible candidates under the current scenario.`
+        : `선택된 Drive 계열 ${count}개는 현재 시나리오에서 표시 후보가 없습니다.`;
+    }
+
+    function familyWarningText(family) {
+      const label = localLabel(family);
+      const phrase = hiddenReasonPhrase(family.dominantReason, family.hiddenReasons);
+      return UI_LANG === "en"
+        ? `${label}: ${family.hidden} drives hidden by ${phrase}.`
+        : `${label}: ${family.hidden}개 Drive가 ${phrase} 때문에 숨겨졌습니다.`;
+    }
+
+    function hiddenReasonPhrase(reason, hiddenReasons = {}) {
+      const reasonKey = reason || "other";
+      if (reasonKey === "minTwr" && hiddenReasons.targetDvOrMassRatio) {
+        return UI_LANG === "en" ? "current dV / minimum TWR settings" : "현재 dV / Minimum TWR 설정";
+      }
+      const phrases = {
+        minTwr: UI_LANG === "en" ? "the current minimum TWR filter" : "현재 Minimum TWR 필터",
+        targetDvOrMassRatio: UI_LANG === "en" ? "the current target dV / mass-ratio scenario" : "현재 목표 dV / 질량비 시나리오",
+        researchFilter: UI_LANG === "en" ? "research unlock constraints" : "연구 개방 조건",
+        invalidPowerPlant: UI_LANG === "en" ? "missing compatible power candidates" : "호환 Power plant 후보 부족",
+        invalidComputation: UI_LANG === "en" ? "non-finite mass or TWR calculations" : "계산 불능 질량 또는 TWR",
+        axisRange: UI_LANG === "en" ? "the current axis range or metric" : "현재 축 범위 또는 지표",
+        other: UI_LANG === "en" ? "other current filters" : "기타 현재 필터",
+        familyFilter: UI_LANG === "en" ? "family/category filters" : "Category/계열 필터",
+      };
+      return phrases[reasonKey] || phrases.other;
     }
 
     function renderLegend(rows) {
@@ -2051,14 +2352,16 @@
             const cy = y(optionMetricValue(option));
             const key = pointKey(row.id, option.id);
             const visual = bandPointVisual(option, secondaryDomain, paretoKeys.has(key));
+            const impractical = isImpracticalOption(option);
             registerHitTarget(row, option.id, gx, cy, index === 0 ? 5 : 3.4);
             const circle = svgEl("circle", {
-              ...pointAttrs(row, option.id, index === 0 ? color : "var(--panel)", color, 1.5),
+              ...pointAttrs(row, option.id, index === 0 ? color : "var(--panel)", impractical ? "var(--danger)" : color, impractical ? 2 : 1.5),
               cx: gx,
               cy,
               r: index === 0 ? 5 : 3.4,
               style: `${index === 0 ? fillStyle : ""}${visual.style}`,
-              opacity: visual.opacity,
+              opacity: impractical ? Math.max(visual.opacity * 0.78, 0.38) : visual.opacity,
+              "data-impractical": impractical ? "true" : "false",
             });
             plot.appendChild(circle);
           });
@@ -2311,6 +2614,9 @@
         [UI_LANG === "en" ? "Propellant" : "Propellant", option.propellantTons, "stack-propellant"],
       ];
       const total = Math.max(option.totalMassTons, 1e-9);
+      const impracticalNote = isImpracticalOption(option)
+        ? `<div class="warning">${UI_LANG === "en" ? "Shown as an impractical candidate under the current scenario." : "현재 시나리오에서 비현실적 후보로 표시 중입니다."}</div>`
+        : "";
       const componentRows = components.map(([label, value]) => `
             <span>${label}</span><strong>${formatNumber(value, " t")}</strong>
       `).join("");
@@ -2321,6 +2627,7 @@
       return `
         <div class="tooltip-breakdown">
           <div><strong>${totalLabel}</strong>: ${formatNumber(option.totalMassTons, " t")} · ${twrLabel}: ${formatTwr(option.twr, " g")}</div>
+          ${impracticalNote}
           <div class="tooltip-breakdown-grid">
             ${componentRows}
           </div>
@@ -2367,6 +2674,7 @@
       state.hoverPoints = state.hoverPoints.filter(item => resolvedKeys.has(item.key));
       tooltip.innerHTML = tooltipPanelHtml(resolved);
       tooltip.classList.remove("tooltip-empty");
+      tooltip.classList.remove("has-diagnostic");
       updateHoverStyles();
     }
 
@@ -2401,7 +2709,16 @@
     }
 
     function renderEmptyTooltip() {
-      tooltip.innerHTML = `<div class="tooltip-placeholder">No selection</div>`;
+      const family = currentDiagnostics && currentDiagnostics.zeroFamilies.length
+        ? currentDiagnostics.zeroFamilies[0]
+        : null;
+      if (family) {
+        tooltip.innerHTML = scenarioPanelHtml(family, currentDiagnostics.zeroFamilies.length);
+        tooltip.classList.add("has-diagnostic");
+      } else {
+        tooltip.innerHTML = `<div class="tooltip-placeholder">${UI_LANG === "en" ? "No selection" : "No selection"}</div>`;
+        tooltip.classList.remove("has-diagnostic");
+      }
       tooltip.classList.add("tooltip-empty");
     }
 
@@ -2413,6 +2730,73 @@
       state.hoverHitSignature = "";
       renderEmptyTooltip();
       updateHoverStyles();
+    }
+
+    function scenarioPanelHtml(family, zeroFamilyCount) {
+      const title = UI_LANG === "en" ? "Why are some drives hidden?" : "왜 일부 Drive가 숨겨졌나요?";
+      const body = scenarioExplanationText(family);
+      const suggestions = scenarioSuggestions();
+      const more = zeroFamilyCount > 1
+        ? (UI_LANG === "en"
+          ? `<p>${zeroFamilyCount - 1} additional selected ${zeroFamilyCount - 1 === 1 ? "family is" : "families are"} also hidden under this scenario.</p>`
+          : `<p>이 외에도 선택된 계열 ${zeroFamilyCount - 1}개가 현재 시나리오에서 숨겨져 있습니다.</p>`)
+        : "";
+      return `
+        <div class="scenario-panel">
+          <h2>${escapeHtml(title)}</h2>
+          <p>${escapeHtml(body)}</p>
+          ${more}
+          <div>
+            <div class="muted">${escapeHtml(UI_LANG === "en" ? "Suggestions" : "제안")}</div>
+            <ul>
+              ${suggestions.map(item => `<li>${escapeHtml(item)}</li>`).join("")}
+            </ul>
+          </div>
+        </div>
+      `;
+    }
+
+    function scenarioExplanationText(family) {
+      const familyName = localLabel(family);
+      const dryMass = formatNumber(state.dryMassTons, " t");
+      const targetDv = formatNumber(state.targetDvKps, UI_LANG === "en" ? " km/s" : " km/s");
+      const reason = family.dominantReason;
+      if (reason === "minTwr") {
+        return UI_LANG === "en"
+          ? `At ${dryMass} dry mass and ${targetDv} target dV, ${familyName} drives exist, but none meet the current minimum TWR filter. In this scenario their propellant mass can become very large, lowering wet-mass TWR.`
+          : `건조질량 ${dryMass}, 목표 dV ${targetDv} 조건에서 ${familyName} Drive는 존재하지만 현재 Minimum TWR 필터를 만족하지 못합니다. 이 시나리오에서는 Propellant 질량이 매우 커져 습질량 TWR이 낮아질 수 있습니다.`;
+      }
+      if (reason === "targetDvOrMassRatio") {
+        return UI_LANG === "en"
+          ? `At ${dryMass} dry mass and ${targetDv} target dV, ${familyName} drives exist, but the required mass ratio is extreme for the current scenario.`
+          : `건조질량 ${dryMass}, 목표 dV ${targetDv} 조건에서 ${familyName} Drive는 존재하지만 현재 시나리오의 요구 질량비가 극단적으로 큽니다.`;
+      }
+      if (reason === "invalidPowerPlant") {
+        return UI_LANG === "en"
+          ? `${familyName} drives exist, but no compatible power candidate can be evaluated under the current scenario.`
+          : `${familyName} Drive는 존재하지만 현재 시나리오에서 평가 가능한 호환 Power plant 후보가 없습니다.`;
+      }
+      if (reason === "researchFilter") {
+        return UI_LANG === "en"
+          ? `${familyName} drives exist, but their research unlock values are not usable under the current data filters.`
+          : `${familyName} Drive는 존재하지만 현재 데이터 필터에서 연구 개방Value을 사용할 수 없습니다.`;
+      }
+      if (reason === "invalidComputation") {
+        return UI_LANG === "en"
+          ? `${familyName} drives exist, but the current scenario does not produce finite mass or TWR values for them.`
+          : `${familyName} Drive는 존재하지만 현재 시나리오에서 유한한 질량 또는 TWR Value을 계산할 수 없습니다.`;
+      }
+      return UI_LANG === "en"
+        ? `${familyName} drives exist, but none are visible under the current axis, scenario, and filter settings.`
+        : `${familyName} Drive는 존재하지만 현재 축, 시나리오, 필터 설정에서는 표시되는 후보가 없습니다.`;
+    }
+
+    function scenarioSuggestions() {
+      const suggestions = UI_LANG === "en"
+        ? ["Lower target dV", "Lower or disable the minimum TWR filter", "Use a lower-dV scenario for this drive family"]
+        : ["목표 dV 낮추기", "Minimum TWR 필터 낮추기 또는 해제하기", "이 Drive 계열에 맞는 낮은 dV 시나리오 사용하기"];
+      suggestions.push(UI_LANG === "en" ? "Enable Show impractical candidates" : "Show impractical candidates 켜기");
+      return suggestions;
     }
 
     function renderTable(rows) {

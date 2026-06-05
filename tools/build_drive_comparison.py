@@ -1446,15 +1446,15 @@ HTML_TEMPLATE = r"""<!doctype html>
       <section class="control-block">
         <label class="label" for="dryMass">기준 선체 건조 질량 (t)</label>
         <div class="split">
-          <input id="dryMass" type="range" min="100" max="10000" value="10000" step="100">
-          <input id="dryMassNumber" type="number" min="1" max="1000000" value="10000" step="10">
+          <input id="dryMass" type="range" min="100" max="100000" value="10000" step="100">
+          <input id="dryMassNumber" type="number" min="0" max="1000000" value="10000" step="10">
         </div>
       </section>
       <section class="control-block">
         <label class="label" for="targetDv">목표 dV (km/s)</label>
         <div class="split">
-          <input id="targetDv" type="range" min="10" max="5000" value="500" step="10">
-          <input id="targetDvNumber" type="number" min="1" max="100000" value="500" step="10">
+          <input id="targetDv" type="range" min="0" max="2000" value="500" step="5">
+          <input id="targetDvNumber" type="number" min="0" max="100000" value="500" step="1">
         </div>
       </section>
       <section class="control-block">
@@ -2104,6 +2104,12 @@ HTML_TEMPLATE = r"""<!doctype html>
 
     function dominantHiddenReason(hiddenReasons) {
       return HIDDEN_REASON_PRIORITY.find(reason => (hiddenReasons && hiddenReasons[reason] > 0)) || "other";
+    }
+
+    function rowUnlockResearchValue(row) {
+      const value = Number(row.unlockCumulativeResearch);
+      if (Number.isFinite(value) && value > 0) return value;
+      return Number(row.cumulativeResearch);
     }
 
     function rowUnlockResearchValue(row) {
