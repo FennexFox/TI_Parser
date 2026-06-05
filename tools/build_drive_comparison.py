@@ -9,7 +9,7 @@ import math
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,8 +26,8 @@ from ti_save_parser import (  # noqa: E402
 
 
 STANDARD_GRAVITY_MPS2 = 9.80665
-TARGET_DV_KPS = 1000.0
-DEFAULT_DRY_MASS_TONS = 1000.0
+TARGET_DV_KPS = 500.0
+DEFAULT_DRY_MASS_TONS = 10000.0
 
 CATEGORY_ORDER = ("Chemical", "Electric", "Fission", "Fusion", "Antimatter", "Alien")
 DEFAULT_CATEGORY_KEY = "Fusion"
@@ -217,6 +217,15 @@ class ResearchCostIndex:
 
     def cumulative_cost(self, name: str | None) -> float:
         return sum(self.own_cost(node_name) for node_name in self.closure(name))
+
+    def closure_cost(self, closure: Iterable[str]) -> float:
+        return sum(self.own_cost(node_name) for node_name in set(closure))
+
+    def combined_cumulative_cost(self, *names: str | None) -> float:
+        closure: set[str] = set()
+        for name in names:
+            closure.update(self.closure(name))
+        return self.closure_cost(closure)
 
     def _closure(self, name: str, stack: frozenset[str]) -> frozenset[str]:
         if name in self._closure_cache:
@@ -584,6 +593,17 @@ def build_data(templates_dir: Path, research_catalog_path: Path) -> dict[str, An
             "powerOptions": [],
         }
         row["powerOptions"] = compatible_power_sequence(row, power_plants, closure, cumulative)
+        for option in row["powerOptions"]:
+            option["combinedCumulativeResearch"] = research.combined_cumulative_cost(
+                project,
+                str(option.get("requiredProject") or "") or None,
+            )
+        first_power_research = (
+            as_float(row["powerOptions"][0].get("combinedCumulativeResearch"), 0.0)
+            if row["powerOptions"]
+            else 0.0
+        )
+        row["unlockCumulativeResearch"] = max(cumulative, first_power_research)
         drive_rows.append(row)
 
     present_categories = {row["categoryKey"] for row in drive_rows}
@@ -752,6 +772,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
       gap: 14px;
       align-items: stretch;
+      position: relative;
     }
     .table-shell {
       grid-column: 2;
@@ -922,6 +943,19 @@ HTML_TEMPLATE = r"""<!doctype html>
     .compact-command:disabled:hover {
       border-color: var(--strong-line);
     }
+    .toggle-button {
+      display: inline-flex;
+      align-items: center;
+      width: auto;
+      justify-content: center;
+      margin-top: 0;
+      white-space: nowrap;
+    }
+    .toggle-button[aria-pressed="true"] {
+      border-color: #0f766e;
+      background: rgba(20, 184, 166, 0.16);
+      color: #b9fff4;
+    }
     #chart {
       width: 100%;
       height: min(70vh, 680px);
@@ -1019,6 +1053,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      z-index: 5;
     }
     .tooltip.tooltip-empty {
       display: flex;
@@ -1081,10 +1116,42 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
     .tooltip-item {
       position: relative;
-      padding: 9px 30px 9px 10px;
+      padding: 9px 30px 9px 40px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #151816;
+    }
+    .tooltip-item-order {
+      position: absolute;
+      top: 7px;
+      left: 7px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 3px;
+    }
+    .tooltip-item-move {
+      width: 26px;
+      height: 18px;
+      min-height: 0;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      border-color: var(--line);
+      background: #202421;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1;
+      user-select: none;
+    }
+    .tooltip-item-move:hover:not(:disabled) {
+      color: var(--ink);
+      border-color: var(--strong-line);
+    }
+    .tooltip-item-move:disabled {
+      opacity: 0.35;
+      cursor: default;
     }
     .tooltip-item-close {
       position: absolute;
@@ -1114,6 +1181,13 @@ HTML_TEMPLATE = r"""<!doctype html>
       line-height: 1.3;
       color: var(--ink);
       letter-spacing: 0;
+    }
+    .tooltip-title-power {
+      display: block;
+      margin-top: 2px;
+      color: #f1c17e;
+      font-size: 12px;
+      font-weight: 600;
     }
     .tooltip .muted { color: #a9b5ad; }
     .tooltip-breakdown {
@@ -1270,7 +1344,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   <header>
     <h1>Terra Invicta 드라이브 비교</h1>
     <div class="subtle">
-      X축은 로컬 연구 카탈로그에서 계산한 최소 누적 연구력입니다. 총질량 그래프는 각 드라이브 개방 시점의 호환 전원부터 이후 전원 후보까지 적용했을 때의 목표 dV 달성 질량을 보여주며, breakdown은 차트 오른쪽 상세 패널에서 확인할 수 있습니다.
+      X축은 추진기 프로젝트와 최초 호환 전원을 함께 고려한 최소 누적 연구력입니다. 총질량/TWR 그래프에서 추가 전원 연구력 반영을 켜면 더 높은 전원 후보를 따로 연구하는 비용도 각 후보의 X좌표에 포함합니다. breakdown은 차트 오른쪽 상세 패널에서 확인할 수 있습니다.
     </div>
   </header>
   <main>
@@ -1278,11 +1352,15 @@ HTML_TEMPLATE = r"""<!doctype html>
       <section class="control-block">
         <label class="label" for="metric">세로축</label>
         <select id="metric">
-          <option value="thrustMN">추력 (MN)</option>
-          <option value="fuelEfficiency">연료효율 (km/s or s)</option>
-          <option value="powerRequirementGW">출력 요구량 (GW)</option>
-          <option value="totalMassTons">목표 dV 총질량 (t)</option>
-          <option value="twr">TWR</option>
+          <optgroup label="시뮬레이션(총 질량, TWR)">
+            <option value="totalMassTons">목표 dV 총질량 (t)</option>
+            <option value="twr">TWR</option>
+          </optgroup>
+          <optgroup label="기본 정보(추력, 효율, 출력)">
+            <option value="thrustMN">추력 (MN)</option>
+            <option value="fuelEfficiency">연료효율 (km/s or s)</option>
+            <option value="powerRequirementGW">출력 요구량 (GW)</option>
+          </optgroup>
         </select>
       </section>
       <section class="control-block">
@@ -1299,15 +1377,15 @@ HTML_TEMPLATE = r"""<!doctype html>
       <section class="control-block">
         <label class="label" for="dryMass">기준 선체 건조 질량 (t)</label>
         <div class="split">
-          <input id="dryMass" type="range" min="100" max="10000" value="1000" step="100">
-          <input id="dryMassNumber" type="number" min="1" max="1000000" value="1000" step="10">
+          <input id="dryMass" type="range" min="100" max="10000" value="10000" step="100">
+          <input id="dryMassNumber" type="number" min="1" max="1000000" value="10000" step="10">
         </div>
       </section>
       <section class="control-block">
         <label class="label" for="targetDv">목표 dV (km/s)</label>
         <div class="split">
-          <input id="targetDv" type="range" min="10" max="5000" value="1000" step="10">
-          <input id="targetDvNumber" type="number" min="1" max="100000" value="1000" step="10">
+          <input id="targetDv" type="range" min="10" max="5000" value="500" step="10">
+          <input id="targetDvNumber" type="number" min="1" max="100000" value="500" step="10">
         </div>
       </section>
       <section class="control-block">
@@ -1322,10 +1400,10 @@ HTML_TEMPLATE = r"""<!doctype html>
         <div id="minTwrControl" style="margin-top: 10px;">
           <label class="label" for="minTwrExp">최소 TWR</label>
           <div class="split">
-            <input id="minTwrExp" type="range" min="-8" max="1" value="-8" step="0.1">
-            <input id="minTwrNumber" type="number" min="0" max="10" value="0" step="0.0001">
+            <input id="minTwrExp" type="range" min="-4" max="1" value="-4" step="0.1">
+            <input id="minTwrNumber" type="number" min="0.0001" max="10" value="0.0001" step="0.0001">
           </div>
-          <div id="minTwrReadout" class="control-hint">기준 없음</div>
+          <div id="minTwrReadout" class="control-hint">표시: TWR >= 0.0001 g</div>
         </div>
       </section>
       <section class="control-block">
@@ -1354,6 +1432,7 @@ HTML_TEMPLATE = r"""<!doctype html>
             <label><input type="radio" name="fuelUnit" value="kps" checked>km/s</label>
             <label><input type="radio" name="fuelUnit" value="seconds">s</label>
           </div>
+          <button id="powerResearchToggle" class="compact-command toggle-button" type="button" aria-pressed="false" style="display: none;">추가 전원 연구력 반영</button>
           <button id="resetZoom" class="compact-command" type="button" disabled>보기 초기화</button>
           <div id="metricHint"></div>
         </div>
@@ -1389,7 +1468,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     const STANDARD_GRAVITY_MPS2 = 9.80665;
     const UI_LANG = document.documentElement.lang === "en" ? "en" : "ko";
     const state = {
-      metric: "thrustMN",
+      metric: "totalMassTons",
       thrusters: DATA.defaults.thrusterCount,
       fuelEfficiencyUnit: "kps",
       dryMassTons: DATA.defaults.dryMassTons,
@@ -1400,7 +1479,8 @@ HTML_TEMPLATE = r"""<!doctype html>
       showTwrInfo: true,
       showMassInfo: true,
       paretoHighlight: true,
-      minTwr: 0,
+      usePowerResearch: false,
+      minTwr: 0.0001,
       searchTerm: "",
       sortKey: "research",
       sortDirection: "asc",
@@ -1457,7 +1537,7 @@ HTML_TEMPLATE = r"""<!doctype html>
           const values = chartMassOptions(row);
           return values.length ? values[0].twr : NaN;
         },
-        format: value => formatNumber(value, ""),
+        format: value => formatTwr(value, ""),
       },
     };
 
@@ -1486,11 +1566,26 @@ HTML_TEMPLATE = r"""<!doctype html>
       const showTwrInfo = document.getElementById("showTwrInfo");
       const showMassInfo = document.getElementById("showMassInfo");
       const paretoHighlight = document.getElementById("paretoHighlight");
+      const powerResearchToggle = document.getElementById("powerResearchToggle");
       const minTwrExp = document.getElementById("minTwrExp");
       const minTwrNumber = document.getElementById("minTwrNumber");
       const nameSearch = document.getElementById("nameSearch");
 
+      metric.value = state.metric;
+      dryMass.value = String(clamp(state.dryMassTons, Number(dryMass.min), Number(dryMass.max)));
+      dryMassNumber.value = String(Math.round(state.dryMassTons));
+      targetDv.value = String(clamp(state.targetDvKps, Number(targetDv.min), Number(targetDv.max)));
+      targetDvNumber.value = String(Math.round(state.targetDvKps));
+
       tooltip.addEventListener("click", event => {
+        const moveButton = event.target.closest(".tooltip-item-move");
+        if (moveButton) {
+          moveTooltipItemByOffset(
+            moveButton.getAttribute("data-tooltip-key"),
+            moveButton.getAttribute("data-direction") === "up" ? -1 : 1,
+          );
+          return;
+        }
         const itemClose = event.target.closest(".tooltip-item-close");
         if (itemClose) {
           removeTooltipItem(itemClose.getAttribute("data-tooltip-key"));
@@ -1641,14 +1736,18 @@ HTML_TEMPLATE = r"""<!doctype html>
         state.paretoHighlight = paretoHighlight.checked;
         render();
       });
+      powerResearchToggle.addEventListener("click", () => {
+        state.usePowerResearch = !state.usePowerResearch;
+        render();
+      });
       minTwrExp.addEventListener("input", () => {
         const exponent = Number(minTwrExp.value);
-        state.minTwr = exponent <= Number(minTwrExp.min) ? 0 : Math.pow(10, exponent);
+        state.minTwr = Math.pow(10, exponent);
         syncMinTwrInputs();
         render();
       });
       minTwrNumber.addEventListener("input", () => {
-        state.minTwr = Math.max(0, Number(minTwrNumber.value) || 0);
+        state.minTwr = clamp(Number(minTwrNumber.value) || 0.0001, 0.0001, 10);
         syncMinTwrInputs();
         render();
       });
@@ -1703,11 +1802,14 @@ HTML_TEMPLATE = r"""<!doctype html>
       const showTwrInfoRow = document.getElementById("showTwrInfoRow");
       const showMassInfoRow = document.getElementById("showMassInfoRow");
       const minTwrControl = document.getElementById("minTwrControl");
+      const powerResearchToggle = document.getElementById("powerResearchToggle");
       fuelUnitBlock.style.display = state.metric === "fuelEfficiency" ? "" : "none";
       bandAnalysisControls.style.display = isBandMetric() ? "" : "none";
       showTwrInfoRow.style.display = state.metric === "totalMassTons" ? "" : "none";
       showMassInfoRow.style.display = state.metric === "twr" ? "" : "none";
       minTwrControl.style.display = state.metric === "totalMassTons" ? "" : "none";
+      powerResearchToggle.style.display = isBandMetric() ? "" : "none";
+      powerResearchToggle.setAttribute("aria-pressed", state.usePowerResearch ? "true" : "false");
       syncMinTwrInputs();
     }
 
@@ -1716,16 +1818,11 @@ HTML_TEMPLATE = r"""<!doctype html>
       const number = document.getElementById("minTwrNumber");
       const readout = document.getElementById("minTwrReadout");
       if (!slider || !number || !readout) return;
-      if (state.minTwr <= 0) {
-        slider.value = slider.min;
-        number.value = "0";
-        readout.textContent = UI_LANG === "en" ? "No minimum threshold" : "기준 없음";
-        return;
-      }
+      state.minTwr = clamp(state.minTwr || 0.0001, 0.0001, 10);
       const exponent = clamp(Math.log10(state.minTwr), Number(slider.min), Number(slider.max));
       slider.value = String(exponent);
       number.value = String(Number(state.minTwr.toPrecision(4)));
-      readout.textContent = `${UI_LANG === "en" ? "Showing" : "표시"}: TWR >= ${formatNumber(state.minTwr, "")}`;
+      readout.textContent = `${UI_LANG === "en" ? "Showing" : "표시"}: TWR >= ${formatTwr(state.minTwr, " g")}`;
     }
 
     function localLabel(item) {
@@ -1782,8 +1879,14 @@ HTML_TEMPLATE = r"""<!doctype html>
           ].join(" ").toLocaleLowerCase();
           if (!haystack.includes(state.searchTerm)) return false;
         }
-        return Number.isFinite(row.cumulativeResearch) && row.cumulativeResearch > 0;
+        return Number.isFinite(rowUnlockResearchValue(row)) && rowUnlockResearchValue(row) > 0;
       });
+    }
+
+    function rowUnlockResearchValue(row) {
+      const value = Number(row.unlockCumulativeResearch);
+      if (Number.isFinite(value) && value > 0) return value;
+      return Number(row.cumulativeResearch);
     }
 
     function selectedRadiator() {
@@ -1952,6 +2055,7 @@ HTML_TEMPLATE = r"""<!doctype html>
         state.dryMassTons,
         state.targetDvKps,
         state.radiatorId,
+        state.usePowerResearch ? 1 : 0,
         state.logX ? 1 : 0,
         state.logY ? 1 : 0,
         state.searchTerm,
@@ -2005,8 +2109,16 @@ HTML_TEMPLATE = r"""<!doctype html>
       if (isBandMetric()) {
         const item = document.createElement("span");
         item.className = "legend-item";
-        item.textContent = `${metricDefs[state.metric].label} 밴드: 개방 전원부터 이후 전원 후보`;
+        item.textContent = state.usePowerResearch
+          ? `${metricDefs[state.metric].label} 밴드: 추가 전원 연구력 포함`
+          : `${metricDefs[state.metric].label} 밴드: 최초 전원 연구력 기준`;
         legend.appendChild(item);
+        const powerResearch = document.createElement("span");
+        powerResearch.className = "legend-item";
+        powerResearch.textContent = state.usePowerResearch
+          ? "X축: 최초+추가 전원 포함 연구력"
+          : "X축: 최초 전원 포함 연구력";
+        legend.appendChild(powerResearch);
         if (secondaryEncodingEnabled()) {
           const secondary = document.createElement("span");
           secondary.className = "legend-item";
@@ -2061,7 +2173,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       chart.setAttribute("preserveAspectRatio", "xMidYMid meet");
       chart.innerHTML = "";
 
-      const xValues = rows.map(row => row.cumulativeResearch).filter(v => Number.isFinite(v) && v > 0);
+      const xValues = chartResearchValues(rows);
       const baseXDomain = paddedDomain(xValues, state.logX);
       const baseYDomain = valueDomain(rows);
       const xDomain = state.zoom ? constrainDomain(state.zoom.xDomain, baseXDomain, state.logX) : baseXDomain;
@@ -2403,7 +2515,7 @@ HTML_TEMPLATE = r"""<!doctype html>
         axis.appendChild(text);
       });
       const xTitle = svgEl("text", { class: "axis-title", x: margin.left + innerW / 2, y: height - 22, "text-anchor": "middle" });
-      xTitle.textContent = `누적 연구력${state.logX ? " (log)" : ""}`;
+      xTitle.textContent = `${state.usePowerResearch && isBandMetric() ? "누적 연구력 (최초+추가 전원 포함)" : "누적 연구력 (최초 전원 포함)"}${state.logX ? " (log)" : ""}`;
       axis.appendChild(xTitle);
       const yTitle = svgEl("text", {
         class: "axis-title",
@@ -2423,7 +2535,7 @@ HTML_TEMPLATE = r"""<!doctype html>
         if (!groups.has(row.familyKey)) groups.set(row.familyKey, []);
         groups.get(row.familyKey).push(row);
       });
-      groups.forEach(group => group.sort((a, b) => a.cumulativeResearch - b.cumulativeResearch || a.baseDisplayName.localeCompare(b.baseDisplayName)));
+      groups.forEach(group => group.sort((a, b) => rowUnlockResearchValue(a) - rowUnlockResearchValue(b) || a.baseDisplayName.localeCompare(b.baseDisplayName)));
       return groups;
     }
 
@@ -2515,18 +2627,49 @@ HTML_TEMPLATE = r"""<!doctype html>
       const groups = groupedRows(rows);
       groups.forEach(group => {
         const color = group[0].familyColor;
-        const path = linePath(group.map(row => [x(row.cumulativeResearch), y(metricDefs[state.metric].value(row))]));
+        const path = linePath(group.map(row => [x(rowUnlockResearchValue(row)), y(metricDefs[state.metric].value(row))]));
         plot.appendChild(svgEl("path", { d: path, fill: "none", stroke: color, "stroke-width": 2.2, "stroke-linejoin": "round", "stroke-linecap": "round", opacity: 0.82 }));
         group.forEach(row => {
           const value = metricDefs[state.metric].value(row);
           if (!Number.isFinite(value) || value <= 0) return;
-          const cx = x(row.cumulativeResearch);
+          const cx = x(rowUnlockResearchValue(row));
           const cy = y(value);
-          registerHitTarget(row, null, cx, cy, 5.5);
-          const circle = svgEl("circle", { ...pointAttrs(row, null, color), cx, cy, r: 5.5 });
+          const option = defaultTooltipOption(row);
+          const powerOptionId = option ? option.id : null;
+          registerHitTarget(row, powerOptionId, cx, cy, 5.5);
+          const circle = svgEl("circle", { ...pointAttrs(row, powerOptionId, color), cx, cy, r: 5.5 });
           plot.appendChild(circle);
         });
       });
+    }
+
+    function chartResearchValues(rows) {
+      const values = isBandMetric()
+        ? rows.flatMap(row => [
+          rowUnlockResearchValue(row),
+          ...chartMassOptions(row).map(option => optionAdditionalResearchValue(row, option)),
+        ])
+        : rows.map(row => rowUnlockResearchValue(row));
+      return values.filter(value => Number.isFinite(value) && value > 0);
+    }
+
+    function optionAdditionalResearchValue(row, option = null) {
+      if (!option) return rowUnlockResearchValue(row);
+      const combined = Number(option.combinedCumulativeResearch);
+      if (Number.isFinite(combined) && combined > 0) return combined;
+      const plantResearch = Number(option.cumulativeResearch);
+      return Math.max(rowUnlockResearchValue(row), Number.isFinite(plantResearch) ? plantResearch : 0);
+    }
+
+    function optionResearchValue(row, option = null) {
+      if (isBandMetric() && state.usePowerResearch && option) {
+        return optionAdditionalResearchValue(row, option);
+      }
+      return rowUnlockResearchValue(row);
+    }
+
+    function optionX(row, option, x) {
+      return x(optionResearchValue(row, option));
     }
 
     function drawTotalMassBands(rows, x, y, plot) {
@@ -2540,45 +2683,68 @@ HTML_TEMPLATE = r"""<!doctype html>
         const fillStyle = paintStyle("fill", color, colorOklch);
         const strokeStyle = paintStyle("stroke", color, colorOklch);
         const maxOptions = Math.max(...group.map(row => chartMassOptions(row).length), 0);
-        for (let index = maxOptions - 2; index >= 0; index--) {
-          const pairs = group
-            .map(row => ({ row, options: chartMassOptions(row) }))
-            .filter(item => item.options[index] && item.options[index + 1]);
-          if (pairs.length < 2) continue;
-          const upper = pairs.map(item => [x(item.row.cumulativeResearch), y(optionMetricValue(item.options[index]))]);
-          const lower = pairs.slice().reverse().map(item => [x(item.row.cumulativeResearch), y(optionMetricValue(item.options[index + 1]))]);
-          const polygon = [...upper, ...lower];
-          plot.appendChild(svgEl("path", {
-            d: linePath(polygon) + "Z",
-            fill: color,
-            style: fillStyle,
-            opacity: Math.max(0.06, 0.22 - index * 0.025),
-            stroke: "none",
-          }));
-        }
-        for (let index = 0; index < maxOptions; index++) {
-          const points = group
-            .map(row => ({ row, option: chartMassOptions(row)[index] }))
-            .filter(item => item.option);
-          if (points.length >= 2) {
+        if (state.usePowerResearch) {
+          drawPowerResearchBandSurfaces(group, x, y, plot, color, fillStyle, strokeStyle);
+        } else {
+          for (let index = maxOptions - 2; index >= 0; index--) {
+            const pairs = group
+              .map(row => ({ row, options: chartMassOptions(row) }))
+              .filter(item => item.options[index] && item.options[index + 1]);
+            if (pairs.length < 2) continue;
+            const upper = pairs.map(item => [optionX(item.row, item.options[index], x), y(optionMetricValue(item.options[index]))]);
+            const lower = pairs.slice().reverse().map(item => [optionX(item.row, item.options[index + 1], x), y(optionMetricValue(item.options[index + 1]))]);
+            const polygon = [...upper, ...lower];
             plot.appendChild(svgEl("path", {
-              d: linePath(points.map(item => [x(item.row.cumulativeResearch), y(optionMetricValue(item.option))])),
-              fill: "none",
-              stroke: color,
-              style: strokeStyle,
-              "stroke-width": index === 0 ? 2.1 : 1.2,
-              "stroke-dasharray": index === 0 ? "" : "5 5",
-              opacity: index === 0 ? 0.9 : 0.45,
+              d: linePath(polygon) + "Z",
+              fill: color,
+              style: fillStyle,
+              opacity: Math.max(0.06, 0.22 - index * 0.025),
+              stroke: "none",
             }));
+          }
+          for (let index = 0; index < maxOptions; index++) {
+            const points = group
+              .map(row => ({ row, option: chartMassOptions(row)[index] }))
+              .filter(item => item.option);
+            if (points.length >= 2) {
+              plot.appendChild(svgEl("path", {
+                d: linePath(points.map(item => [optionX(item.row, item.option, x), y(optionMetricValue(item.option))])),
+                fill: "none",
+                stroke: color,
+                style: strokeStyle,
+                "stroke-width": index === 0 ? 2.1 : 1.2,
+                "stroke-dasharray": index === 0 ? "" : "5 5",
+                opacity: index === 0 ? 0.9 : 0.45,
+              }));
+            }
           }
         }
         group.forEach(row => {
           const options = chartMassOptions(row);
           if (!options.length) return;
-          const gx = x(row.cumulativeResearch);
-          const ys = options.map(option => y(optionMetricValue(option)));
-          plot.appendChild(svgEl("line", { x1: gx, x2: gx, y1: Math.min(...ys), y2: Math.max(...ys), stroke: color, style: strokeStyle, "stroke-width": 1.2, opacity: 0.32 }));
+          const optionPoints = options.map(option => ({
+            option,
+            xCoord: optionX(row, option, x),
+            yCoord: y(optionMetricValue(option)),
+          })).sort((a, b) => a.xCoord - b.xCoord || a.yCoord - b.yCoord);
+          if (optionPoints.length > 1) {
+            if (state.usePowerResearch) {
+              plot.appendChild(svgEl("path", {
+                d: linePath(optionPoints.map(point => [point.xCoord, point.yCoord])),
+                fill: "none",
+                stroke: color,
+                style: strokeStyle,
+                "stroke-width": 1.1,
+                opacity: 0.28,
+              }));
+            } else {
+              const gx = optionPoints[0].xCoord;
+              const ys = optionPoints.map(point => point.yCoord);
+              plot.appendChild(svgEl("line", { x1: gx, x2: gx, y1: Math.min(...ys), y2: Math.max(...ys), stroke: color, style: strokeStyle, "stroke-width": 1.2, opacity: 0.32 }));
+            }
+          }
           options.forEach((option, index) => {
+            const gx = optionX(row, option, x);
             const cy = y(optionMetricValue(option));
             const key = pointKey(row.id, option.id);
             const visual = bandPointVisual(option, secondaryDomain, paretoKeys.has(key));
@@ -2597,12 +2763,80 @@ HTML_TEMPLATE = r"""<!doctype html>
       });
     }
 
+    function drawPowerResearchBandSurfaces(group, x, y, plot, color, fillStyle, strokeStyle) {
+      const stepGroups = new Map();
+      const pairGroups = new Map();
+      const familyKey = group[0] ? group[0].familyKey : "";
+      group.forEach(row => {
+        const options = chartMassOptions(row);
+        options.forEach((option, index) => {
+          const step = powerStepIndex(option, index);
+          if (!stepGroups.has(step)) stepGroups.set(step, []);
+          stepGroups.get(step).push({ row, option, index: step });
+          const next = options[index + 1];
+          if (next) {
+            const nextStep = powerStepIndex(next, index + 1);
+            const pairKey = `${step}::${nextStep}`;
+            if (!pairGroups.has(pairKey)) pairGroups.set(pairKey, []);
+            pairGroups.get(pairKey).push({ row, upper: option, lower: next, index: step, lowerIndex: nextStep });
+          }
+        });
+      });
+
+      pairGroups.forEach((pairs, pairKey) => {
+        if (pairs.length < 2) return;
+        const ordered = pairs.slice().sort((a, b) => pairSortValue(a) - pairSortValue(b)
+          || rowUnlockResearchValue(a.row) - rowUnlockResearchValue(b.row)
+          || a.row.baseDisplayName.localeCompare(b.row.baseDisplayName));
+        const upper = ordered.map(item => [optionX(item.row, item.upper, x), y(optionMetricValue(item.upper))]);
+        const lower = ordered.slice().reverse().map(item => [optionX(item.row, item.lower, x), y(optionMetricValue(item.lower))]);
+        const avgIndex = ordered.reduce((sum, item) => sum + item.index, 0) / ordered.length;
+        plot.appendChild(svgEl("path", {
+          d: linePath([...upper, ...lower]) + "Z",
+          fill: color,
+          style: fillStyle,
+          opacity: Math.max(0.05, 0.18 - avgIndex * 0.02),
+          stroke: "none",
+          "data-band-family": familyKey,
+          "data-band-pair-step": pairKey,
+        }));
+      });
+
+      stepGroups.forEach((points, step) => {
+        if (points.length < 2) return;
+        const ordered = points.slice().sort((a, b) => optionResearchValue(a.row, a.option) - optionResearchValue(b.row, b.option)
+          || rowUnlockResearchValue(a.row) - rowUnlockResearchValue(b.row)
+          || a.row.baseDisplayName.localeCompare(b.row.baseDisplayName));
+        const avgIndex = ordered.reduce((sum, item) => sum + item.index, 0) / ordered.length;
+        plot.appendChild(svgEl("path", {
+          d: linePath(ordered.map(item => [optionX(item.row, item.option, x), y(optionMetricValue(item.option))])),
+          fill: "none",
+          stroke: color,
+          style: strokeStyle,
+          "stroke-width": avgIndex < 0.5 ? 2.1 : 1.2,
+          "stroke-dasharray": avgIndex < 0.5 ? "" : "5 5",
+          opacity: avgIndex < 0.5 ? 0.9 : 0.45,
+          "data-band-family": familyKey,
+          "data-band-step": step,
+        }));
+      });
+    }
+
+    function powerStepIndex(option, fallbackIndex = 0) {
+      const value = Number(option && option.sequenceIndex);
+      return Number.isFinite(value) ? value : fallbackIndex;
+    }
+
+    function pairSortValue(item) {
+      return (optionResearchValue(item.row, item.upper) + optionResearchValue(item.row, item.lower)) / 2;
+    }
+
     function bandPointData(rows) {
       return rows.flatMap(row => chartMassOptions(row).map(option => ({
         row,
         option,
         key: pointKey(row.id, option.id),
-        research: row.cumulativeResearch,
+        research: optionResearchValue(row, option),
         totalMassTons: option.totalMassTons,
         twr: option.twr,
       }))).filter(item => Number.isFinite(item.research)
@@ -2672,6 +2906,11 @@ HTML_TEMPLATE = r"""<!doctype html>
       return metric === "twr" ? option.twr : option.totalMassTons;
     }
 
+    function defaultTooltipOption(row) {
+      const options = chartMassOptions(row, state.metric);
+      return options[0] || massOptions(row)[0] || null;
+    }
+
     function linePath(points) {
       return points.map((point, index) => `${index === 0 ? "M" : "L"}${point[0].toFixed(2)},${point[1].toFixed(2)}`).join(" ");
     }
@@ -2705,7 +2944,7 @@ HTML_TEMPLATE = r"""<!doctype html>
         <button class="tooltip-close" type="button" aria-label="선택 해제">&times;</button>
         ${count}
         <div class="tooltip-items">
-          ${items.map(item => tooltipHtml(item.row, item.option, item.key)).join("")}
+          ${items.map((item, index) => tooltipHtml(item.row, item.option, item.key, index, items.length)).join("")}
         </div>
       `;
     }
@@ -2731,38 +2970,42 @@ HTML_TEMPLATE = r"""<!doctype html>
       refreshTooltip(currentChartRows);
     }
 
-    function tooltipHtml(row, option = null, key = "") {
-      const metric = metricDefs[state.metric];
-      const value = metric.value(row);
+    function tooltipHtml(row, option = null, key = "", index = 0, itemCount = 1) {
       const radiator = selectedRadiator();
-      const breakdown = option ? tooltipBreakdownHtml(row, option) : "";
-      const selected = option ? `
-        <div><strong>${escapeHtml(option.displayName)}</strong>: ${formatNumber(option.totalMassTons, " t")} total · TWR ${formatNumber(option.twr, "")}</div>
-        ${breakdown}
-      ` : "";
+      const selected = option ? tooltipBreakdownHtml(row, option) : "";
+      const powerName = option ? option.displayName : (UI_LANG === "en" ? "No power plant candidate" : "전원 후보 없음");
+      const unlockResearch = rowUnlockResearchValue(row);
+      const powerResearch = option && state.usePowerResearch
+        ? `<div>추가 전원 포함 연구력: <strong>${formatResearch(optionResearchValue(row, option))}</strong></div>`
+        : "";
       return `
         <section class="tooltip-item" data-tooltip-key="${escapeHtml(key)}">
+          <div class="tooltip-item-order" aria-label="순서 변경">
+            <button class="tooltip-item-move" type="button" data-tooltip-key="${escapeHtml(key)}" data-direction="up" aria-label="위로 이동"${index === 0 ? " disabled" : ""}>▲</button>
+            <button class="tooltip-item-move" type="button" data-tooltip-key="${escapeHtml(key)}" data-direction="down" aria-label="아래로 이동"${index >= itemCount - 1 ? " disabled" : ""}>▼</button>
+          </div>
           <button class="tooltip-item-close" type="button" data-tooltip-key="${escapeHtml(key)}" aria-label="항목 삭제">&times;</button>
-          <h2>${escapeHtml(row.displayName)}</h2>
+          <h2>${escapeHtml(row.displayName)}<span class="tooltip-title-power">${escapeHtml(powerName)}</span></h2>
           <div class="muted">${escapeHtml(rowCategoryLabel(row))} / ${escapeHtml(rowFamilyLabel(row))} · ${escapeHtml(rowProjectLabel(row))}</div>
-          <div>누적 연구력: <strong>${formatResearch(row.cumulativeResearch)}</strong> · 자체 프로젝트: ${formatResearch(row.ownResearchCost)}</div>
+          <div>개방 연구력: <strong>${formatResearch(unlockResearch)}</strong> · 추진기 연구: ${formatResearch(row.cumulativeResearch)} · 자체 프로젝트: ${formatResearch(row.ownResearchCost)}</div>
+          ${powerResearch}
           <div>추력: ${formatNumber(row.thrustN / 1e6, " MN")} · EV: ${formatNumber(row.exhaustVelocityKps, " km/s")} · Isp: ${formatNumber(row.specificImpulseSeconds, " s")}</div>
           <div>효율: ${formatPercent(row.efficiency)} · 출력 요구량: ${formatNumber(row.powerRequirementGW, " GW")}</div>
-          <div>드라이브 질량: ${formatNumber(row.driveMassTons, " t")}</div>
           <div>라디에이터: ${escapeHtml(radiator ? radiator.displayName : "-")}</div>
-          ${!isBandMetric() ? `<div>${escapeHtml(metric.label)}: <strong>${metric.format(value)}</strong></div>` : ""}
           ${selected}
         </section>
       `;
     }
 
     function tooltipBreakdownHtml(row, option) {
+      const totalLabel = UI_LANG === "en" ? "Total mass" : "총질량";
+      const twrLabel = UI_LANG === "en" ? "TWR" : "TWR";
       const components = [
-        ["선체", option.baseDryTons, "stack-hull"],
-        ["드라이브", row.driveMassTons, "stack-drive"],
-        ["전원", option.powerPlantMassTons, "stack-reactor"],
-        ["라디에이터", option.radiatorMassTons, "stack-radiator"],
-        ["추진체", option.propellantTons, "stack-propellant"],
+        [UI_LANG === "en" ? "Hull" : "선체", option.baseDryTons, "stack-hull"],
+        [UI_LANG === "en" ? "Drive" : "드라이브", row.driveMassTons, "stack-drive"],
+        [UI_LANG === "en" ? "Power plant" : "전원", option.powerPlantMassTons, "stack-reactor"],
+        [UI_LANG === "en" ? "Radiator" : "라디에이터", option.radiatorMassTons, "stack-radiator"],
+        [UI_LANG === "en" ? "Propellant" : "추진체", option.propellantTons, "stack-propellant"],
       ];
       const total = Math.max(option.totalMassTons, 1e-9);
       const componentRows = components.map(([label, value]) => `
@@ -2774,13 +3017,14 @@ HTML_TEMPLATE = r"""<!doctype html>
       }).join("");
       return `
         <div class="tooltip-breakdown">
+          <div><strong>${totalLabel}</strong>: ${formatNumber(option.totalMassTons, " t")} · ${twrLabel}: ${formatTwr(option.twr, " g")}</div>
           <div class="tooltip-breakdown-grid">
             ${componentRows}
           </div>
           <div class="tooltip-stack" aria-hidden="true">
             ${componentSegments}
           </div>
-          <div class="muted">폐열: ${formatNumber(option.wasteHeatGW, " GW")}</div>
+          <div class="muted">${UI_LANG === "en" ? "Waste heat" : "폐열"}: ${formatNumber(option.wasteHeatGW, " GW")}</div>
         </div>
       `;
     }
@@ -2793,14 +3037,10 @@ HTML_TEMPLATE = r"""<!doctype html>
         const ref = tooltipRef(item);
         const row = rowById.get(ref.rowId);
         if (!row) return;
-        let option = null;
-        let powerOptionId = "";
-        if (isBandMetric()) {
-          const options = massOptions(row);
-          option = options.find(candidate => candidate.id === ref.powerOptionId) || options[0] || null;
-          if (!option) return;
-          powerOptionId = option.id || "";
-        }
+        const options = chartMassOptions(row, state.metric);
+        const option = options.find(candidate => candidate.id === ref.powerOptionId) || defaultTooltipOption(row);
+        if (!option) return;
+        const powerOptionId = option.id || "";
         const key = pointKey(row.id, powerOptionId);
         if (seen.has(key)) return;
         seen.add(key);
@@ -2825,6 +3065,23 @@ HTML_TEMPLATE = r"""<!doctype html>
       tooltip.innerHTML = tooltipPanelHtml(resolved);
       tooltip.classList.remove("tooltip-empty");
       updateHoverStyles();
+    }
+
+    function moveTooltipItemByOffset(key, offset) {
+      if (!key || !offset) return;
+      const refs = dedupeTooltipRefs(state.lastTooltipItems);
+      const index = refs.findIndex(item => item.key === key);
+      if (index < 0) return;
+      const nextIndex = clamp(index + offset, 0, refs.length - 1);
+      if (nextIndex === index) return;
+      const [moving] = refs.splice(index, 1);
+      refs.splice(nextIndex, 0, moving);
+      state.lastTooltipItems = refs;
+      const hoveredKeys = new Set(state.hoverPoints.map(item => item.key));
+      if (hoveredKeys.size) {
+        state.hoverPoints = refs.filter(item => hoveredKeys.has(item.key));
+      }
+      refreshTooltip(currentChartRows);
     }
 
     function removeTooltipItem(key) {
@@ -2858,7 +3115,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     function renderTable(rows) {
       const tbody = document.getElementById("tableBody");
       tbody.innerHTML = "";
-      const maxResearch = Math.max(...rows.map(row => row.cumulativeResearch).filter(Number.isFinite), 1);
+      const maxResearch = Math.max(...rows.map(rowUnlockResearchValue).filter(Number.isFinite), 1);
       const metricDomain = tableMetricDomain(rows);
       const sorted = sortRows(rows);
       sorted.forEach(row => {
@@ -2890,7 +3147,7 @@ HTML_TEMPLATE = r"""<!doctype html>
           result = String(aValue ?? "").localeCompare(String(bValue ?? ""), undefined, { numeric: true, sensitivity: "base" });
         }
         if (result === 0) {
-          result = a.cumulativeResearch - b.cumulativeResearch || a.displayName.localeCompare(b.displayName);
+          result = rowUnlockResearchValue(a) - rowUnlockResearchValue(b) || a.displayName.localeCompare(b.displayName);
         }
         return result * direction;
       });
@@ -2899,20 +3156,21 @@ HTML_TEMPLATE = r"""<!doctype html>
     function sortValue(row, key) {
       if (key === "drive") return row.displayName;
       if (key === "family") return `${rowCategoryLabel(row)} / ${rowFamilyLabel(row)}`;
-      if (key === "research") return row.cumulativeResearch;
+      if (key === "research") return rowUnlockResearchValue(row);
       if (key === "metric") return metricDefs[state.metric].value(row);
       if (key === "reactor") {
         const options = massOptions(row);
         return options.length ? reactorBandText(options) : "";
       }
-      return row.cumulativeResearch;
+      return rowUnlockResearchValue(row);
     }
 
     function researchCell(row, maxResearch) {
-      const width = clamp(row.cumulativeResearch / maxResearch * 100, 0, 100);
+      const research = rowUnlockResearchValue(row);
+      const width = clamp(research / maxResearch * 100, 0, 100);
       return `
-        <div class="cell-viz" title="${formatNumber(row.cumulativeResearch, " research")}">
-          <span class="cell-value">${formatResearch(row.cumulativeResearch)}</span>
+        <div class="cell-viz" title="${formatNumber(research, " research")}">
+          <span class="cell-value">${formatResearch(research)}</span>
           <div class="sparkbar" aria-hidden="true"><span class="spark-fill" style="width:${width.toFixed(2)}%"></span></div>
         </div>
       `;
@@ -3040,6 +3298,15 @@ HTML_TEMPLATE = r"""<!doctype html>
       return `${formatCompact(value, 1_000_000)}${suffix}`;
     }
 
+    function formatTwr(value, suffix = "") {
+      if (!Number.isFinite(value)) return "-";
+      const abs = Math.abs(value);
+      const text = abs > 0 && abs < 0.001
+        ? Number(value.toPrecision(2)).toString()
+        : formatCompact(value, 1_000_000);
+      return `${text}${suffix}`;
+    }
+
     function formatCompact(value, threshold = 1_000) {
       if (!Number.isFinite(value)) return "-";
       const abs = Math.abs(value);
@@ -3084,7 +3351,8 @@ ENGLISH_BLOCK_REPLACEMENTS: tuple[tuple[str, str], ...] = (
         "총질량 = 기준 건조질량 + 드라이브 + 전원 + 라디에이터 + 추진체",
         "Total mass = base dry mass + drive + power plant + radiator + propellant",
     ),
-    (" 밴드: 개방 전원부터 이후 전원 후보", " band: unlocked power plant through later candidates"),
+    (" 밴드: 최초 전원 연구력 기준", " band: first power research basis"),
+    (" 밴드: 추가 전원 연구력 포함", " band: including additional power research"),
 )
 
 
@@ -3092,10 +3360,12 @@ ENGLISH_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ('<html lang="ko">', '<html lang="en">'),
     ("Terra Invicta 드라이브 비교", "Terra Invicta Drive Comparison"),
     (
-        "X축은 로컬 연구 카탈로그에서 계산한 최소 누적 연구력입니다. 총질량 그래프는 각 드라이브 개방 시점의 호환 전원부터 이후 전원 후보까지 적용했을 때의 목표 dV 달성 질량을 보여주며, breakdown은 차트 오른쪽 상세 패널에서 확인할 수 있습니다.",
-        "The X axis is the minimum cumulative research computed from the local research catalog. Total-mass charts show the target dV mass from the compatible power plant available when each drive unlocks through later power candidates; the breakdown appears in the detail panel on the right side of the chart.",
+        "X축은 추진기 프로젝트와 최초 호환 전원을 함께 고려한 최소 누적 연구력입니다. 총질량/TWR 그래프에서 추가 전원 연구력 반영을 켜면 더 높은 전원 후보를 따로 연구하는 비용도 각 후보의 X좌표에 포함합니다. breakdown은 차트 오른쪽 상세 패널에서 확인할 수 있습니다.",
+        "The X axis is the minimum cumulative research that includes both the drive project and its first compatible power plant. On total-mass/TWR charts, enabling additional power research also includes the separate research cost for higher power candidates in each candidate's X coordinate. The breakdown appears in the detail panel on the right side of the chart.",
     ),
     ("세로축", "Vertical axis"),
+    ("시뮬레이션(총 질량, TWR)", "Simulation (total mass, TWR)"),
+    ("기본 정보(추력, 효율, 출력)", "Basic information (thrust, efficiency, power)"),
     ("이름 검색", "Name search"),
     ("드라이브 또는 프로젝트", "Drive or project"),
     ("추력 (MN)", "Thrust (MN)"),
@@ -3113,7 +3383,16 @@ ENGLISH_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("TWR 정보 표시", "Show TWR information"),
     ("총질량 정보 표시", "Show total mass information"),
     ("파레토 후보 강조", "Highlight Pareto candidates"),
+    ("추가 전원 연구력 반영", "Include additional power research"),
+    ("X축: 최초+추가 전원 포함 연구력", "X axis: first + additional power research"),
+    ("X축: 최초 전원 포함 연구력", "X axis: first power-inclusive research"),
+    ("추가 전원 포함 연구력:", "Additional power-inclusive research:"),
+    ("누적 연구력 (최초+추가 전원 포함)", "Cumulative research (first + additional power included)"),
+    ("누적 연구력 (최초 전원 포함)", "Cumulative research (first power included)"),
+    ("개방 연구력:", "Unlock research:"),
+    ("추진기 연구:", "Drive research:"),
     ("최소 TWR", "Minimum TWR"),
+    ("표시: TWR >= 0.0001 g", "Showing: TWR >= 0.0001 g"),
     ("기준 없음", "No minimum threshold"),
     ("점 밝기: TWR 높을수록 밝음", "Point brightness: brighter means higher TWR"),
     ("점 밝기: 총질량 낮을수록 밝음", "Point brightness: brighter means lower total mass"),
@@ -3140,6 +3419,9 @@ ENGLISH_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("출력 요구량:", "Power requirement:"),
     ("선택 해제", "Clear selection"),
     ("항목 삭제", "Remove item"),
+    ("순서 변경", "Reorder card"),
+    ("위로 이동", "Move up"),
+    ("아래로 이동", "Move down"),
     ("자체 프로젝트", "Own project"),
     ("효율", "Efficiency"),
     ("드라이브 질량", "Drive mass"),
