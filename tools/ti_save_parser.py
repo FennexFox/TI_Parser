@@ -1550,6 +1550,42 @@ def hab_body_is_irradiated(
     ) > 1.0
 
 
+def module_one_per_hab_conflict_names(
+    template: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]] | None = None,
+) -> set[str]:
+    template_name = str(template.get("dataName") or "")
+    conflict_names = {template_name} if template_name else set()
+    if not hab_module_templates:
+        return conflict_names
+
+    upgrade_links: dict[str, set[str]] = {}
+    mining_templates: set[str] = set()
+    for catalog_name, catalog_template in hab_module_templates.items():
+        name = str(catalog_template.get("dataName") or catalog_name or "")
+        if not name:
+            continue
+        if catalog_template.get("mine"):
+            mining_templates.add(name)
+        prior_name = str(catalog_template.get("upgradesFromName") or "")
+        if not prior_name:
+            continue
+        upgrade_links.setdefault(name, set()).add(prior_name)
+        upgrade_links.setdefault(prior_name, set()).add(name)
+
+    pending = list(conflict_names)
+    while pending:
+        name = pending.pop()
+        for related_name in upgrade_links.get(name, set()):
+            if related_name not in conflict_names:
+                conflict_names.add(related_name)
+                pending.append(related_name)
+
+    if template.get("mine"):
+        conflict_names.update(mining_templates)
+    return conflict_names
+
+
 def module_unmet_requirements(
     indexed: IndexedState,
     template: dict[str, Any],
@@ -1558,6 +1594,7 @@ def module_unmet_requirements(
     target_tier: int,
     module_counts: dict[str, int],
     body_templates: dict[str, dict[str, Any]] | None = None,
+    hab_module_templates: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     template_name = str(template.get("dataName"))
@@ -1579,8 +1616,10 @@ def module_unmet_requirements(
     finished_projects = faction.get("finishedProjectNames") if isinstance(faction.get("finishedProjectNames"), list) else []
     if required_project and required_project not in finished_projects:
         reasons.append(f"missing project {required_project}")
-    if template.get("onePerHab") and module_counts.get(template_name, 0) > 0:
-        reasons.append("one per hab already present")
+    if template.get("onePerHab"):
+        conflict_names = module_one_per_hab_conflict_names(template, hab_module_templates)
+        if any(module_counts.get(name, 0) > 0 for name in conflict_names):
+            reasons.append("one per hab already present")
 
     rules = hab_template_special_rules(template)
     if "EarthLEOOnly" in rules and not hab.get("inEarthLEO"):
@@ -2231,7 +2270,16 @@ def hab_module_candidate_rows(
     module_counts = hab_module_counts(records)
     rows: list[dict[str, Any]] = []
     for template in hab_module_templates.values():
-        reasons = module_unmet_requirements(indexed, template, hab, faction, target_tier, module_counts, body_templates)
+        reasons = module_unmet_requirements(
+            indexed,
+            template,
+            hab,
+            faction,
+            target_tier,
+            module_counts,
+            body_templates,
+            hab_module_templates,
+        )
         if reasons:
             continue
         row = module_candidate_row(
@@ -2301,6 +2349,7 @@ def hab_module_upgrade_rows(
                 target_tier,
                 module_counts,
                 body_templates,
+                hab_module_templates,
             )
             reasons = [reason for reason in reasons if reason != "core module"]
             if reasons:
@@ -2835,6 +2884,7 @@ def calculate_hab_plan(
                 "This is a planning model, not an exact in-game optimizer.",
                 "plannedEmpty includes currently usable empty slots plus locked empty placeholders only when the core is upgrading to a higher tier.",
                 "Candidates are filtered by known project unlocks, target tier, hab type, one-per-hab rules, and simple location-only special rules.",
+                "candidateSummary.topPower and upgradeSummary.topPower are comparison shortlists, not recommendations to add generation; only suggestedFill entries labeled power support indicate a habitat-local power need.",
                 "Scores are separated by output type: research is Research/month, projects is Projects/month, category-bonus is raw tech bonus sum, resources is scarcity-weighted net resource flow.",
                 "construction.materials applies module mass, gravity scaling, solar-mirror distance scaling, irradiated-location extra metals, helium-3 fissiles substitution, and the two-thirds upgrade discount.",
                 "construction.constructionTime_Days includes active hab construction-speed modifiers and the in-progress core completion minimum when applicable.",
@@ -3206,6 +3256,7 @@ def prospective_module_unlocks_for_project(
                 target_tier,
                 hab_module_counts(records),
                 body_templates,
+                hab_module_templates,
             )
             if reasons:
                 for reason in reasons:

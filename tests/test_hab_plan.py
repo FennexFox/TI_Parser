@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -414,6 +415,160 @@ class HabPlanTests(unittest.TestCase):
 
         self.assertIn("requires gas giant orbit", earth_reasons)
         self.assertNotIn("requires gas giant orbit", jupiter_reasons)
+
+    def test_candidate_rows_exclude_one_per_hab_upgrade_family_and_mining_duplicates(self):
+        templates = {
+            "OutpostMiningComplex": {
+                "dataName": "OutpostMiningComplex",
+                "habType": "Base",
+                "tier": 1,
+                "onePerHab": True,
+                "mine": True,
+            },
+            "SettlementMiningComplex": {
+                "dataName": "SettlementMiningComplex",
+                "habType": "Base",
+                "tier": 2,
+                "onePerHab": True,
+                "mine": True,
+                "upgradesFromName": "OutpostMiningComplex",
+            },
+            "ColonyMiningComplex": {
+                "dataName": "ColonyMiningComplex",
+                "habType": "Base",
+                "tier": 3,
+                "onePerHab": True,
+                "mine": True,
+                "upgradesFromName": "SettlementMiningComplex",
+            },
+            "AutomatedMiningComplex": {
+                "dataName": "AutomatedMiningComplex",
+                "habType": "Base",
+                "tier": 1,
+                "onePerHab": True,
+                "mine": True,
+            },
+            "AdministrationNode": {
+                "dataName": "AdministrationNode",
+                "habType": "Any",
+                "tier": 1,
+                "onePerHab": True,
+            },
+            "AdministrationTower": {
+                "dataName": "AdministrationTower",
+                "habType": "Any",
+                "tier": 2,
+                "onePerHab": True,
+                "upgradesFromName": "AdministrationNode",
+            },
+            "AdministrationComplex": {
+                "dataName": "AdministrationComplex",
+                "habType": "Any",
+                "tier": 3,
+                "onePerHab": True,
+                "upgradesFromName": "AdministrationTower",
+            },
+            "OperationsCenter": {
+                "dataName": "OperationsCenter",
+                "habType": "Any",
+                "tier": 2,
+                "onePerHab": True,
+            },
+        }
+        records = [
+            {"templateName": "ColonyMiningComplex"},
+            {"templateName": "AdministrationComplex"},
+        ]
+
+        def load_templates(_templates_dir, filename):
+            return templates if filename == "TIHabModuleTemplate.json" else {}
+
+        def candidate_row(*args, **_kwargs):
+            return {
+                "template": args[4]["dataName"],
+                "scores": {"resources": 1.0},
+                "power": 0,
+                "missionControl": 0,
+            }
+
+        with patch.object(ti, "load_named_templates", side_effect=load_templates), patch.object(
+            ti,
+            "module_candidate_row",
+            side_effect=candidate_row,
+        ):
+            rows = ti.hab_module_candidate_rows(
+                ti.build_index({"gamestates": {}}),
+                None,
+                {"habType": "Base"},
+                records,
+                1,
+                {"finishedProjectNames": []},
+                3,
+                {"net": 0},
+                0,
+                {},
+            )
+
+        self.assertEqual({row["template"] for row in rows}, {"OperationsCenter"})
+
+    def test_upgrade_rows_allow_replacing_existing_one_per_hab_module(self):
+        templates = {
+            "OutpostMiningComplex": {
+                "dataName": "OutpostMiningComplex",
+                "habType": "Base",
+                "tier": 1,
+                "onePerHab": True,
+                "mine": True,
+            },
+            "SettlementMiningComplex": {
+                "dataName": "SettlementMiningComplex",
+                "habType": "Base",
+                "tier": 2,
+                "onePerHab": True,
+                "mine": True,
+                "upgradesFromName": "OutpostMiningComplex",
+            },
+        }
+        records = [
+            {
+                "templateName": "OutpostMiningComplex",
+                "template": templates["OutpostMiningComplex"],
+                "completed": True,
+                "powered": True,
+                "sectorNum": 1,
+                "slot": 2,
+            }
+        ]
+
+        def load_templates(_templates_dir, filename):
+            return templates if filename == "TIHabModuleTemplate.json" else {}
+
+        def candidate_row(*args, **_kwargs):
+            return {
+                "template": args[4]["dataName"],
+                "scores": {"resources": 1.0},
+                "power": 0,
+                "missionControl": 0,
+            }
+
+        with patch.object(ti, "load_named_templates", side_effect=load_templates), patch.object(
+            ti,
+            "module_candidate_row",
+            side_effect=candidate_row,
+        ):
+            rows = ti.hab_module_upgrade_rows(
+                ti.build_index({"gamestates": {}}),
+                None,
+                {"habType": "Base", "tier": 1},
+                records,
+                1,
+                {"finishedProjectNames": []},
+                {"net": 0},
+                0,
+                {},
+            )
+
+        self.assertEqual([row["template"] for row in rows], ["SettlementMiningComplex"])
 
     def test_earth_counts_as_colonized_body_for_orbital_modules(self):
         gamestates = {}
