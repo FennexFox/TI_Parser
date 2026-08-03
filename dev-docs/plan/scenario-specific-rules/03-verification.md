@@ -25,7 +25,7 @@
 ## Acceptance criteria
 
 - Full tests pass.
-- Broken Earth real-save outputs show cost 40, CP usage near 42.690437, and populated DLC research metadata.
+- Broken Earth real-save outputs show cost 40, CP usage scaled by 0.7, and populated DLC research metadata.
 - A standard save remains on standard rules; a 2003 save loads the Millennium overlay.
 
 ## Validation commands
@@ -34,7 +34,7 @@
 
 ## Manual smoke tests
 
-- `python -m tools.ti_parser_cli --help`
+- `python tools/ti_save_parser.py --help`
 
 ## Rollback risks
 
@@ -42,12 +42,21 @@
 
 ## Progress
 
-- In progress.
+- Complete.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Real-save CP usage is asserted through its reported 0.7 multiplier rather than a fixed total,
+  because the user's active autosave changed while verification was running.
+- No local 2003 save was present, so installed 2003 templates were verified with a synthetic
+  canonical scenario state in addition to unit coverage.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- All 78 unit tests pass.
+- CLI help smoke test passes and phased-plan validation reports no errors or warnings.
+- A standard `2026Scenario` save selects one base template source, army cost 60, and CP multiplier 1.0.
+- The active `BrokenEarthScenario` save selects the BE overlay, army cost 40, CP multiplier 0.7,
+  and resolves `BSBE_ANewSpaceRace` as SpaceScience with cost 15000.
+- Installed 2003 templates resolve `MissionToSpace` at cost 1000 and the initial Influence
+  penalty at -0.25, rather than the base campaign's values.
