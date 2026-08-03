@@ -22,6 +22,7 @@ from ti_parser_core import (
     DEFAULT_CACHE_DIR,
     SAVE_GLOB,
     IndexedState,
+    TemplateSource,
     apply_effect_modifiers,
     as_float,
     build_index,
@@ -50,11 +51,14 @@ from ti_parser_core import (
     region_nation_summary,
     resolve_ref,
     resolve_save_path,
+    resolve_scenario_templates,
     resolve_templates_dir,
     save_fingerprint,
+    scenario_template_name,
     short_type,
     snapshot_fingerprint,
     state_value_by_id,
+    template_source_value,
     type_entries,
 )
 import ti_parser_snapshot as snapshot_layer
@@ -64,7 +68,7 @@ import ti_parser_org as org_layer
 from ti_parser_snapshot import SnapshotConfig
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DEFAULT_MAX_COUNCILOR_ATTRIBUTE = 25
 DAYS_PER_YEAR = 365.2422
 DEFAULT_GLOBAL_CONFIG = {
@@ -115,6 +119,23 @@ NATION_PRIORITY_ROWS = (
     ("BuildArmy", "군대 창설", "Military_BuildArmy", "Military_BuildArmy", 60),
     ("BuildNavy", "해군 건설", "Military_BuildNavy", "Military_BuildNavy", 100),
     ("BuildNuclearWeapons", "핵무기", "Military_BuildNuclearWeapons", "Military_BuildNuclearWeapons", 40),
+)
+
+
+@dataclass(frozen=True)
+class ScenarioRules:
+    build_army_priority_cost: float = 60.0
+    control_point_maintenance_multiplier: float = 1.0
+
+
+DEFAULT_SCENARIO_RULES = ScenarioRules()
+SCENARIO_RULE_OVERRIDES = MappingProxyType(
+    {
+        "BrokenEarthScenario": ScenarioRules(
+            build_army_priority_cost=40.0,
+            control_point_maintenance_multiplier=0.7,
+        ),
+    }
 )
 NATION_INACTIVE_PRIORITY_KEYS = (
     "Government",
@@ -628,8 +649,21 @@ def nation_boost_contribution_month(indexed: IndexedState, nation: dict[str, Any
     return income_layer.nation_boost_contribution_month(indexed, nation, faction_id)
 
 
-def nation_influence_contribution_month(indexed: IndexedState, nation: dict[str, Any], faction: dict[str, Any]) -> float:
-    return income_layer.nation_influence_contribution_month(indexed, nation, faction, INCOME_CONFIG)
+def nation_influence_contribution_month(
+    indexed: IndexedState,
+    nation: dict[str, Any],
+    faction: dict[str, Any],
+    effect_contexts: dict[str, list[str]] | None = None,
+    effect_templates: dict[str, dict[str, Any]] | None = None,
+) -> float:
+    base = income_layer.nation_influence_contribution_month(indexed, nation, faction, INCOME_CONFIG)
+    modifier = apply_effect_modifiers(
+        effect_contexts or {},
+        effect_templates or {},
+        "PublicOpinionInfluence",
+        1.0,
+    )
+    return base * modifier
 
 
 def nation_adviser_science_bonus(
@@ -3958,6 +3992,18 @@ def scenario_customizations(indexed: IndexedState) -> dict[str, Any]:
     return customizations if isinstance(customizations, dict) else {}
 
 
+def active_scenario_rules(indexed: IndexedState) -> ScenarioRules:
+    return SCENARIO_RULE_OVERRIDES.get(scenario_template_name(indexed), DEFAULT_SCENARIO_RULES)
+
+
+def national_ip_multiplier(indexed: IndexedState) -> float:
+    customizations = scenario_customizations(indexed)
+    if not customizations.get("usingCustomizations"):
+        return 1.0
+    value = as_float(customizations.get("nationalIPMultiplier"), 1.0)
+    return value if value > 0.0 else 1.0
+
+
 def scenario_float(indexed: IndexedState, key: str, default: float = 1.0) -> float:
     return as_float(scenario_customizations(indexed).get(key), default)
 
@@ -5148,7 +5194,7 @@ def calculate_research_plan(
         "questionSupported": "다음 글로벌 연구/프로젝트 연구는 어떤 기술이 좋아?",
         "mode": mode,
         "templateAvailability": {
-            "templatesDir": str(templates_dir) if templates_dir else None,
+            "templatesDir": template_source_value(templates_dir),
             "globalTechTemplates": len(tech_templates),
             "projectTemplates": len(project_templates),
             "warning": None if tech_templates and project_templates else "Template files are required for candidate collection.",
@@ -6302,7 +6348,7 @@ def calculate_ship_plan(
         "questionSupported": "What ship design should I build, and what non-combat physical and construction values do my saved designs have?",
         "requestedRole": role,
         "templateAvailability": {
-            "templatesDir": str(templates_dir) if templates_dir else None,
+            "templatesDir": template_source_value(templates_dir),
             "warning": None if hull_templates and drive_templates else "Local Terra Invicta ship templates are required.",
         },
         "currentState": {
@@ -6514,7 +6560,13 @@ def faction_yearly_income_from_nations(
         elif resource == "MissionControl":
             total_month += nation_mission_control_contribution(indexed, nation, faction_id)
         elif resource == "Influence":
-            total_month += nation_influence_contribution_month(indexed, nation, faction)
+            total_month += nation_influence_contribution_month(
+                indexed,
+                nation,
+                faction,
+                effect_contexts,
+                effect_templates,
+            )
     return total_month if resource == "MissionControl" else total_month * 12.0
 
 
@@ -6601,12 +6653,12 @@ def faction_excess_mission_control_yearly_income(
     return excess * DAYS_PER_YEAR * conversion
 
 
-def nation_control_point_maintenance_cost(nation: dict[str, Any]) -> float:
+def nation_control_point_maintenance_cost(nation: dict[str, Any], scenario_multiplier: float = 1.0) -> float:
     control_points = max(int(as_float(nation.get("numControlPoints"), 0.0)), 1)
     gdp_billions = as_float(nation.get("GDP"), 0.0) / 1_000_000_000.0
     if gdp_billions <= 0.0:
         return 0.0
-    return (gdp_billions ** DEFAULT_GLOBAL_CONFIG["controlPointCostScaling"]) / (
+    return scenario_multiplier * (gdp_billions ** DEFAULT_GLOBAL_CONFIG["controlPointCostScaling"]) / (
         DEFAULT_GLOBAL_CONFIG["controlPointMaintenanceDivisor"] * control_points
     )
 
@@ -6620,6 +6672,7 @@ def faction_control_point_maintenance(
     effect_contexts: dict[str, list[str]],
     effect_templates: dict[str, dict[str, Any]],
 ) -> dict[str, float]:
+    scenario_rules = active_scenario_rules(indexed)
     baseline = 0.0
     for cp_ref in faction.get("controlPoints") if isinstance(faction.get("controlPoints"), list) else []:
         cp = state_value_by_id(indexed, ref_id(cp_ref))
@@ -6627,7 +6680,10 @@ def faction_control_point_maintenance(
             continue
         nation = state_value_by_id(indexed, ref_id(cp.get("nation")))
         if isinstance(nation, dict):
-            baseline += nation_control_point_maintenance_cost(nation)
+            baseline += nation_control_point_maintenance_cost(
+                nation,
+                scenario_rules.control_point_maintenance_multiplier,
+            )
 
     global_state = first_value(indexed, "TIGlobalValuesState") or {}
     global_freebies = as_float(global_state.get("controlPointMaintenanceFreebies"), 125.0)
@@ -6657,6 +6713,7 @@ def faction_control_point_maintenance(
         "missionPenaltyRecent": (faction.get("history_CPCapOverageByDay") or [0.0])[0],
         "missionPenaltyCurrent": overage * DEFAULT_GLOBAL_CONFIG["TIMissionModifier_ControlPointOverage_Multiplier"],
         "components": {
+            "scenarioMultiplier": scenario_rules.control_point_maintenance_multiplier,
             "globalFreebies": global_freebies,
             "councilors": councilors,
             "habs": habs,
@@ -7398,6 +7455,8 @@ def first_control_point(indexed: IndexedState, nation: dict[str, Any]) -> dict[s
 
 
 def nation_priority_rows(indexed: IndexedState, nation: dict[str, Any]) -> list[dict[str, Any]]:
+    scenario_rules = active_scenario_rules(indexed)
+    ip_multiplier = national_ip_multiplier(indexed)
     control_points = nation_control_points(indexed, nation)
     representative = control_points[0] if control_points else {}
     priorities = representative.get("controlPointPriorities") if isinstance(representative.get("controlPointPriorities"), dict) else {}
@@ -7405,6 +7464,8 @@ def nation_priority_rows(indexed: IndexedState, nation: dict[str, Any]) -> list[
     total_weight = int(as_float(representative.get("totalWeightsForControlPoint"), 0.0))
     rows: list[dict[str, Any]] = []
     for key, label, priority_key, accumulated_key, cost in NATION_PRIORITY_ROWS:
+        base_cost = scenario_rules.build_army_priority_cost if key == "BuildArmy" else cost
+        required_cost = base_cost / ip_multiplier if ip_multiplier != 1.0 else base_cost
         weight = int(as_float(priorities.get(priority_key), 0.0))
         share_percent = int_round(weight / total_weight * 100.0) if total_weight > 0 else 0
         rows.append(
@@ -7415,7 +7476,7 @@ def nation_priority_rows(indexed: IndexedState, nation: dict[str, Any]) -> list[
                 "weightPerControlPoint": weight,
                 "sharePercent": share_percent,
                 "accumulated": as_float(accumulated.get(accumulated_key), 0.0),
-                "cost": cost,
+                "cost": required_cost,
             }
         )
     inactive_with_weights = {
@@ -7482,8 +7543,16 @@ def calculate_nation_ui(
     control_points = nation_control_points(indexed, nation)
     representative_cp = first_control_point(indexed, nation) or {}
     total_weight = int(as_float(representative_cp.get("totalWeightsForControlPoint"), 0.0))
+    scenario_name = scenario_template_name(indexed)
+    scenario_rules = active_scenario_rules(indexed)
 
     output = {
+        "scenario": {
+            "template": scenario_name,
+            "ruleProfile": scenario_name if scenario_name in SCENARIO_RULE_OVERRIDES else "default",
+            "nationalIPMultiplier": national_ip_multiplier(indexed),
+            "controlPointMaintenanceMultiplier": scenario_rules.control_point_maintenance_multiplier,
+        },
         "identity": {
             "id": nation_id,
             "template": nation.get("templateName"),

@@ -195,10 +195,11 @@ def main(api: ModuleType, argv: list[str] | None = None) -> int:
 
     try:
         save_path = api.resolve_save_path(args.save)
-        templates_dir = api.resolve_templates_dir(args.templates_dir)
+        base_templates_dir = api.resolve_templates_dir(args.templates_dir)
         if command == "raw":
             api.command_raw(save_path, args)
             return 0
+        templates_dir = api.resolve_scenario_templates(save_path, base_templates_dir)
         if command in RAW_COMMANDS:
             getattr(api, RAW_COMMANDS[command])(save_path, templates_dir, args)
             return 0

@@ -9,11 +9,11 @@ from typing import Any
 
 from ti_parser_core import (
     IndexedState,
+    TemplateSource,
     build_index,
     cache_key,
     campaign_code,
     clean_numbers,
-    file_fingerprint,
     first_value,
     load_save,
     load_trait_templates,
@@ -24,6 +24,7 @@ from ti_parser_core import (
     save_fingerprint,
     short_type,
     snapshot_fingerprint,
+    template_source_paths,
     type_entries,
 )
 
@@ -45,6 +46,8 @@ def time_summary(indexed: IndexedState) -> dict[str, Any]:
         "currentQuarterSinceStart": time_state.get("currentQuarterSinceStart"),
         "currentDateTime": current,
         "template": time_state.get("templateName"),
+        "masterMetaTemplateName": time_state.get("masterMetaTemplateName"),
+        "scenarioMetaTemplateName": time_state.get("scenarioMetaTemplateName"),
     }
 
 
@@ -571,7 +574,7 @@ def summarize_fleets(indexed: IndexedState) -> list[dict[str, Any]]:
 def build_snapshot(
     save_path: Path,
     data: dict[str, Any],
-    templates_dir: Path | None,
+    templates_dir: TemplateSource,
     config: SnapshotConfig,
 ) -> dict[str, Any]:
     indexed = build_index(data)
@@ -591,7 +594,7 @@ def build_snapshot(
         "schemaVersion": config.schema_version,
         "cacheFingerprint": snapshot_fingerprint(save_path, templates_dir),
         "source": save_fingerprint(save_path),
-        "templateSource": file_fingerprint(templates_dir / "TITraitTemplate.json" if templates_dir else None),
+        "templateSource": template_source_paths(templates_dir),
         "currentID": (data.get("currentID") or {}).get("value"),
         "time": time_summary(indexed),
         "metadata": metadata_summary(indexed),
@@ -607,7 +610,7 @@ def build_snapshot(
 def load_or_build_snapshot(
     save_path: Path,
     cache_dir: Path,
-    templates_dir: Path | None,
+    templates_dir: TemplateSource,
     config: SnapshotConfig,
     refresh: bool = False,
 ) -> tuple[dict[str, Any], Path, bool]:

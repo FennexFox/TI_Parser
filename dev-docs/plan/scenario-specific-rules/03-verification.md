@@ -42,7 +42,7 @@
 
 ## Progress
 
-- Not started.
+- In progress.
 
 ## Decision log
 

@@ -54,12 +54,20 @@
 
 ## Progress
 
-- Not started.
+- Complete.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Named templates are merged base-first and selected-scenario-second by `dataName`.
+- Known Dark Skies paths are fast-path hints; `TIMetaTemplate.json` discovery is the fallback.
+- Only values not already represented in saved calculated fields are overridden in parser math.
+- Cache schema version is 5 and records every selected template directory.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- The CLI resolves scenario template sources once from the save before dispatch.
+- Nation UI exposes the active scenario rule profile and applies BE army cost 40.
+- Topbar CP usage applies the BE 0.7 start-time multiplier and reports it in components.
+- Priority costs honor an enabled positive `nationalIPMultiplier`.
+- Public-opinion Influence now consumes the active saved effect names and selected scenario definitions.
+- Snapshot time metadata retains master and scenario template names.
