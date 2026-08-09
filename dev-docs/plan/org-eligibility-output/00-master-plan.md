@@ -40,3 +40,4 @@
 - `availableOrgs` remains the source of market-visible candidates; this change does not reimplement every market-generation restriction.
 - Some synthetic or older saves may lack resolvable home-region/nation references. Such candidates must be reported as ineligible with an explicit reason rather than silently accepted.
 - Eligibility diagnostics must not change the bounded planner's scoring or affordability behavior.
+- Alien Proxy access to the Alien Nation requires additional faction-ideology template reconstruction and remains explicitly outside the evaluated rule scope.

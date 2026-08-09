@@ -51,12 +51,17 @@
 
 ## Progress
 
-- In progress.
+- Complete.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Candidate source rows preserve their existing fields and add `requirements`, `factionEligibility`, `eligibleCouncilors`, and `ineligibleReasons`.
+- `factionEligibility.evaluatedRules` and `eligibilityScope` distinguish implemented nation/trait parity from detention, location, technology, and ideology checks that are not independently evaluated here.
+- Assignment search receives the selected faction and uses the same faction-wide nation-interest rule as candidate diagnostics.
+- Public assignment helpers recover omitted faction context from the councilor reference or faction roster.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Nation interest now accepts either a controlled control point in the org's current home nation or any faction councilor homeland in that nation.
+- Required and prohibited owner traits are reported per councilor, and invalid candidates are no longer silently omitted from the audit surface.
+- Owned inventory follows the same game UI nation-interest gate as market acquisition; source changes cost handling, not owner eligibility.

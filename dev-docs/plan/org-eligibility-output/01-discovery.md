@@ -24,7 +24,7 @@
 - Confirm `requiresNationality` maps to the org home region's nation.
 - Confirm nation interest is satisfied by a faction control point or any faction councilor home nation.
 - Confirm required/prohibited owner traits are evaluated per prospective councilor.
-- Define `requirements`, `factionEligibility`, `eligibleCouncilors`, and `ineligibleCouncilors` fields while preserving current candidate fields.
+- Define `requirements`, `factionEligibility`, `eligibleCouncilors`, and per-councilor `ineligibleReasons` fields while preserving current candidate fields.
 
 ## Acceptance criteria
 

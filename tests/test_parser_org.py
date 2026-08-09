@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -97,6 +98,7 @@ class ParserOrgParityTests(unittest.TestCase):
                             "templateName": "ResistCouncil",
                             "displayName": "Resistance",
                             "councilors": [ref(10)],
+                            "controlPoints": [ref(30)],
                             "availableOrgs": [ref(100)],
                             "unassignedOrgs": [],
                             "resources": {},
@@ -116,6 +118,7 @@ class ParserOrgParityTests(unittest.TestCase):
                                 **{attribute: 0 for attribute in ti.COUNCILOR_ATTRIBUTES},
                                 "Administration": 1,
                             },
+                            "homeRegion": ref(21),
                         },
                     )
                 ],
@@ -127,19 +130,40 @@ class ParserOrgParityTests(unittest.TestCase):
                             "displayName": "Org 100",
                             "tier": 1,
                             "science": 3,
+                            "homeRegion": ref(20),
                         },
                     )
                 ],
+                "TIRegionState": [
+                    save_state(20, {"nation": ref(40)}),
+                    save_state(21, {"nation": ref(41)}),
+                ],
+                "TINationState": [
+                    save_state(40, {"templateName": "NationA", "controlPoints": [ref(30)]}),
+                    save_state(41, {"templateName": "NationB", "controlPoints": []}),
+                ],
+                "TIControlPointState": [save_state(30, {"nation": ref(40)})],
             }
         }
         indexed = ti.build_index(data)
 
-        wrapper = ti.calculate_org_plan(indexed, None)
-        direct = org.calculate_org_plan(indexed, None)
+        with patch.object(
+            org,
+            "load_named_templates",
+            return_value={"Org100": {"requiresNationality": True}},
+        ):
+            wrapper = ti.calculate_org_plan(indexed, None)
+            direct = org.calculate_org_plan(indexed, None)
 
         self.assertEqual(wrapper, direct)
         self.assertEqual(wrapper["committeePlan"]["actions"][0]["candidate"]["id"], 100)
         self.assertEqual(wrapper["councilors"][0]["current"]["attributes"]["Administration"], 1)
+        candidate = wrapper["candidateSources"]["market"]["orgs"][0]
+        self.assertEqual(candidate["requirements"]["requiredOwnerTraits"], [])
+        self.assertTrue(candidate["requirements"]["requiresNationInterest"])
+        self.assertEqual(candidate["factionEligibility"]["nationInterest"]["satisfiedBy"], ["controlledNation"])
+        self.assertEqual(candidate["eligibleCouncilors"], [{"id": 10, "display": "Councilor 10"}])
+        self.assertEqual(candidate["ineligibleReasons"], [])
 
 
 if __name__ == "__main__":

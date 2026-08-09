@@ -16,6 +16,7 @@ from ti_parser_core import (
     load_named_templates,
     load_trait_templates,
     ref_id,
+    region_nation_summary,
     resolve_ref,
     state_value_by_id,
     type_entries,
@@ -461,11 +462,142 @@ def org_plan_region_nation_id(indexed: IndexedState | None, region_ref: Any) -> 
     return ref_id(found[2].get("nation"))
 
 
+def org_plan_controlled_nation_ids(
+    indexed: IndexedState | None,
+    faction: dict[str, Any] | None,
+) -> set[int]:
+    if indexed is None or not faction:
+        return set()
+    control_point_refs = faction.get("controlPoints") if isinstance(faction.get("controlPoints"), list) else []
+    control_point_ids = {
+        control_point_id
+        for control_point_id in (ref_id(value) for value in control_point_refs)
+        if control_point_id is not None
+    }
+    nation_ids: set[int] = set()
+    unresolved_control_point_ids: set[int] = set()
+    for control_point_id in control_point_ids:
+        control_point = state_value_by_id(indexed, control_point_id)
+        nation_id = ref_id(control_point.get("nation")) if control_point else None
+        if nation_id is None:
+            unresolved_control_point_ids.add(control_point_id)
+        else:
+            nation_ids.add(nation_id)
+
+    # Some older/synthetic saves omit TIControlPointState.nation. The owning
+    # TINationState still has the canonical control-point list.
+    if unresolved_control_point_ids:
+        for entry in type_entries(indexed, "TINationState"):
+            nation = entry.get("Value") if isinstance(entry.get("Value"), dict) else {}
+            nation_id = ref_id(entry.get("Key")) or ref_id(nation.get("ID"))
+            nation_control_points = nation.get("controlPoints") if isinstance(nation.get("controlPoints"), list) else []
+            if nation_id is not None and unresolved_control_point_ids.intersection(
+                control_point_id
+                for control_point_id in (ref_id(value) for value in nation_control_points)
+                if control_point_id is not None
+            ):
+                nation_ids.add(nation_id)
+    return nation_ids
+
+
+def org_plan_nation_interest(
+    indexed: IndexedState | None,
+    faction: dict[str, Any] | None,
+    org: dict[str, Any],
+    org_templates: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any]:
+    template = (org_templates or {}).get(str(org.get("templateName")), {})
+    required = parse_bool(template.get("requiresNationality")) is True
+    home_nation = region_nation_summary(indexed, org.get("homeRegion")) if indexed is not None else None
+    home_nation_id = home_nation.get("id") if isinstance(home_nation, dict) else None
+    controlled_nation_ids = org_plan_controlled_nation_ids(indexed, faction)
+    councilor_home_nation_ids = {
+        nation_id
+        for councilor_id in faction_councilor_ids(faction or {})
+        for councilor in [state_value_by_id(indexed, councilor_id) if indexed is not None else None]
+        for nation_id in [org_plan_region_nation_id(indexed, councilor.get("homeRegion")) if councilor else None]
+        if nation_id is not None
+    }
+    satisfied_by: list[str] = []
+    if home_nation_id in controlled_nation_ids:
+        satisfied_by.append("controlledNation")
+    if home_nation_id in councilor_home_nation_ids:
+        satisfied_by.append("councilorHomeNation")
+    met = not required or bool(satisfied_by)
+    return {
+        "required": required,
+        "met": met,
+        "homeNation": home_nation,
+        "satisfiedBy": satisfied_by,
+    }
+
+
+def org_plan_requirement_summary(
+    indexed: IndexedState | None,
+    org: dict[str, Any],
+    org_templates: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any]:
+    template = (org_templates or {}).get(str(org.get("templateName")), {})
+    required_traits = template.get("requiredOwnerTraits") if isinstance(template.get("requiredOwnerTraits"), list) else []
+    prohibited_traits = template.get("prohibitedOwnerTraits") if isinstance(template.get("prohibitedOwnerTraits"), list) else []
+    return {
+        "requiresNationInterest": parse_bool(template.get("requiresNationality")) is True,
+        "homeNation": region_nation_summary(indexed, org.get("homeRegion")) if indexed is not None else None,
+        "requiredOwnerTraits": list(required_traits),
+        "prohibitedOwnerTraits": list(prohibited_traits),
+    }
+
+
+def org_plan_faction_eligibility(
+    indexed: IndexedState | None,
+    faction: dict[str, Any] | None,
+    org: dict[str, Any],
+    org_templates: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any]:
+    nation_interest = org_plan_nation_interest(indexed, faction, org, org_templates)
+    reasons: list[str] = []
+    if nation_interest["required"] and faction is None:
+        reasons.append("faction context is required to evaluate nation interest")
+    elif nation_interest["required"] and nation_interest["homeNation"] is None:
+        reasons.append("nation interest requirement could not be resolved")
+    elif not nation_interest["met"]:
+        home_nation = nation_interest["homeNation"] or {}
+        nation_name = home_nation.get("display") or home_nation.get("template") or home_nation.get("id")
+        reasons.append(f"faction lacks interest in required nation: {nation_name}")
+    return {
+        "eligible": not reasons,
+        "evaluatedRules": ["nationInterest"],
+        "reasons": reasons,
+        "nationInterest": nation_interest,
+    }
+
+
+def org_plan_councilor_faction(
+    indexed: IndexedState | None,
+    councilor: dict[str, Any],
+    faction: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if faction is not None or indexed is None:
+        return faction
+    direct = resolve_ref(indexed, councilor.get("faction"))
+    if direct and direct[1].endswith("TIFactionState"):
+        return direct[2]
+    councilor_id = ref_id(councilor.get("ID"))
+    if councilor_id is None:
+        return None
+    for entry in type_entries(indexed, "TIFactionState"):
+        candidate = entry.get("Value") if isinstance(entry.get("Value"), dict) else {}
+        if councilor_id in faction_councilor_ids(candidate):
+            return candidate
+    return None
+
+
 def org_plan_owner_eligibility(
     indexed: IndexedState | None,
     councilor: dict[str, Any],
     org: dict[str, Any],
     org_templates: dict[str, dict[str, Any]] | None,
+    faction: dict[str, Any] | None = None,
 ) -> tuple[bool, list[str]]:
     template = (org_templates or {}).get(str(org.get("templateName")), {})
     traits = set(councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else [])
@@ -480,14 +612,56 @@ def org_plan_owner_eligibility(
     if blocked_traits:
         reasons.append(f"prohibited owner traits: {', '.join(str(value) for value in blocked_traits)}")
 
-    if template.get("requiresNationality"):
-        councilor_nation_id = org_plan_region_nation_id(indexed, councilor.get("homeRegion"))
-        org_nation_id = org_plan_region_nation_id(indexed, org.get("homeRegion"))
-        if councilor_nation_id is None or org_nation_id is None:
-            reasons.append("nationality requirement could not be resolved")
-        elif councilor_nation_id != org_nation_id:
-            reasons.append("nationality requirement does not match")
+    owner_faction = org_plan_councilor_faction(indexed, councilor, faction)
+    faction_eligibility = org_plan_faction_eligibility(indexed, owner_faction, org, org_templates)
+    reasons.extend(faction_eligibility["reasons"])
     return not reasons, reasons
+
+
+def org_plan_candidate_row(
+    indexed: IndexedState | None,
+    faction: dict[str, Any] | None,
+    profiles: dict[int, dict[str, Any]],
+    org: dict[str, Any],
+    source: str,
+    org_templates: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any]:
+    eligible_councilors: list[dict[str, Any]] = []
+    ineligible_reasons: list[dict[str, Any]] = []
+    for councilor_id, profile in profiles.items():
+        councilor = profile.get("councilor") if isinstance(profile.get("councilor"), dict) else {}
+        eligible, reasons = org_plan_owner_eligibility(
+            indexed,
+            councilor,
+            org,
+            org_templates,
+            faction=faction,
+        )
+        councilor_summary = {"id": councilor_id, "display": profile.get("display")}
+        if eligible:
+            eligible_councilors.append(councilor_summary)
+        else:
+            ineligible_reasons.append({**councilor_summary, "reasons": reasons})
+    return {
+        **org_plan_org_row(org, source),
+        "eligibilityScope": {
+            "evaluatedRules": ["nationInterest", "requiredOwnerTraits", "prohibitedOwnerTraits"],
+            "notEvaluated": [
+                "detention",
+                "earthSystemLocation",
+                "administrationCapacity",
+                "maximumOrgCount",
+                "affordability",
+                "marketTechnology",
+                "marketIdeology",
+                "alienProxyNationInterest",
+            ],
+        },
+        "requirements": org_plan_requirement_summary(indexed, org, org_templates),
+        "factionEligibility": org_plan_faction_eligibility(indexed, faction, org, org_templates),
+        "eligibleCouncilors": eligible_councilors,
+        "ineligibleReasons": ineligible_reasons,
+    }
 
 
 def org_plan_major_attributes(attributes: dict[str, Any], limit: int = 2) -> list[str]:
@@ -533,15 +707,19 @@ def org_plan_best_assignment(
     focus: str,
     indexed: IndexedState | None = None,
     org_templates: dict[str, dict[str, Any]] | None = None,
+    faction: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     candidate = org_by_id.get(candidate_id)
     if not candidate:
         return None
+    owner = profile.get("councilor") if isinstance(profile.get("councilor"), dict) else {}
+    owner_faction = org_plan_councilor_faction(indexed, owner, faction)
     eligible, eligibility_reasons = org_plan_owner_eligibility(
         indexed,
-        profile.get("councilor") if isinstance(profile.get("councilor"), dict) else {},
+        owner,
         candidate,
         org_templates,
+        faction=owner_faction,
     )
     if not eligible:
         return None
@@ -571,7 +749,16 @@ def org_plan_best_assignment(
                 "councilorId": profile.get("id"),
                 "councilor": profile.get("display"),
                 "source": source,
-                "candidate": org_plan_org_row(candidate, source),
+                "candidate": {
+                    **org_plan_org_row(candidate, source),
+                    "requirements": org_plan_requirement_summary(indexed, candidate, org_templates),
+                    "factionEligibility": org_plan_faction_eligibility(
+                        indexed,
+                        owner_faction,
+                        candidate,
+                        org_templates,
+                    ),
+                },
                 "cost": cost,
                 "affordableNow": affordable,
                 "eligible": True,
@@ -642,6 +829,7 @@ def search_org_committee_plan(
     beam_width: int = 8,
     indexed: IndexedState | None = None,
     org_templates: dict[str, dict[str, Any]] | None = None,
+    faction: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(profiles, dict):
         profiles = {
@@ -684,6 +872,7 @@ def search_org_committee_plan(
                         focus,
                         indexed=indexed,
                         org_templates=org_templates,
+                        faction=faction,
                     )
                     capacity_gain = as_float(action.get("freeCapacityAfter"), 0.0) - as_float(action.get("freeCapacityBefore"), 0.0) if action else 0.0
                     if (
@@ -848,6 +1037,7 @@ def calculate_org_plan(
                         view_focus,
                         indexed=indexed,
                         org_templates=org_templates,
+                        faction=faction,
                     )
                 ]
                 if action and as_float(action.get("objectiveGain"), 0.0) > 0.0
@@ -884,6 +1074,7 @@ def calculate_org_plan(
         beam_width=beam_width,
         indexed=indexed,
         org_templates=org_templates,
+        faction=faction,
     )
     return clean_numbers(
         {
@@ -894,7 +1085,14 @@ def calculate_org_plan(
                     "count": len(market_ids),
                     "orgs": [
                         {
-                            **org_plan_org_row(org_by_id[org_id], "market"),
+                            **org_plan_candidate_row(
+                                indexed,
+                                faction,
+                                profiles,
+                                org_by_id[org_id],
+                                "market",
+                                org_templates,
+                            ),
                             "affordableNow": org_plan_cost_affordable(resources, org_acquisition_cost(org_by_id[org_id])),
                         }
                         for org_id in market_ids
@@ -903,7 +1101,17 @@ def calculate_org_plan(
                 "ownedInventory": {
                     "included": include_unassigned,
                     "count": len(inventory_ids),
-                    "orgs": [org_plan_org_row(org_by_id[org_id], "ownedInventory") for org_id in inventory_ids],
+                    "orgs": [
+                        org_plan_candidate_row(
+                            indexed,
+                            faction,
+                            profiles,
+                            org_by_id[org_id],
+                            "ownedInventory",
+                            org_templates,
+                        )
+                        for org_id in inventory_ids
+                    ],
                 },
             },
             "councilors": councilor_rows,
@@ -915,6 +1123,9 @@ def calculate_org_plan(
             },
             "limitations": [
                 "The market candidate set comes from TIFactionState.availableOrgs, which is the save's faction-visible acquisition list.",
+                "For market rows, availableOrgs membership is treated as evidence that market, technology, and ideology gates passed at the last refresh. Those gates are not independently recomputed, and owned inventory is outside that evidence.",
+                "eligibleCouncilors reflects nation-interest and required/prohibited owner-trait rules. Immediate acquisition also requires a non-detained councilor in the Earth system, sufficient Administration capacity, and affordability.",
+                "Alien Proxy access to the Alien Nation is not independently reconstructed from faction ideology templates.",
                 "Owned unassigned orgs are included by default so the plan does not recommend spending resources before using existing inventory; pass --market-only to exclude them.",
                 "The committee plan is a bounded beam-search heuristic, not a proof of the mathematical global optimum.",
                 "The planner optimizes capped councilor stats and Administration capacity. Income, mining, tech-category bonuses, granted missions, and takeover defense remain visible on org states but are not folded into the score.",
