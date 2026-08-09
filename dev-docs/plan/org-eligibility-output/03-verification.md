@@ -46,12 +46,17 @@
 
 ## Progress
 
-- Not started.
+- Complete.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Synthetic tests cover both nation-interest satisfaction paths, missing nation interest, required/prohibited traits, and planner consistency.
+- The latest-save smoke test is read-only and does not add user save data to the repository.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- `python -m unittest discover -s tests -v`: 90 tests passed.
+- Latest Broken Earth save (`CooperateCouncil`) produced 14 market candidates at the final smoke-test save state: 6 with nation-interest requirements, 6 with owner-trait requirements, 8 with at least one eligible councilor, and 7 with explicit ineligible reasons.
+- `RandomNGO12` and `RandomResearch21` were accepted through `councilorHomeNation`, demonstrating the faction-wide homeland path on the live save.
+- Multiple nationality-gated candidates without faction interest were retained in candidate output with `faction lacks interest in required nation` reasons and excluded from recommendations.
+- Focused tests also cover direct `TIControlPointState.nation`, the nation-state fallback, unresolved home nations, public helper faction recovery, and full `calculate_org_plan` propagation.
