@@ -38,6 +38,7 @@ FACTION_IDEOLOGY_BY_TEMPLATE = MappingProxyType(
 )
 
 DEFAULT_MAX_COUNCILOR_ATTRIBUTE = 25
+MAX_ORGS_PER_COUNCILOR = 15
 COUNCILOR_ATTRIBUTES = (
     "Persuasion",
     "Investigation",
@@ -421,13 +422,22 @@ def org_plan_roster_summary(
     attributes = org_plan_final_attributes(profile, orgs)
     tier_total = sum(int(as_float(org.get("tier"), 0.0)) for org in orgs)
     administration = int(as_float(attributes.get("Administration"), 0.0))
+    org_count = len(ids)
+    valid_administration_capacity = tier_total <= administration
+    valid_org_count = org_count <= MAX_ORGS_PER_COUNCILOR
     return {
         "orgIds": list(ids),
         "attributes": attributes,
         "tierTotal": tier_total,
         "administration": administration,
         "freeCapacity": administration - tier_total,
-        "validCapacity": tier_total <= administration,
+        "validAdministrationCapacity": valid_administration_capacity,
+        "orgCount": org_count,
+        "maxOrgCount": MAX_ORGS_PER_COUNCILOR,
+        "freeOrgSlots": MAX_ORGS_PER_COUNCILOR - org_count,
+        "validOrgCount": valid_org_count,
+        "validCapacity": valid_administration_capacity,
+        "validRoster": valid_administration_capacity and valid_org_count,
     }
 
 
@@ -628,6 +638,8 @@ def org_plan_candidate_row(
 ) -> dict[str, Any]:
     eligible_councilors: list[dict[str, Any]] = []
     ineligible_reasons: list[dict[str, Any]] = []
+    org_count_capacity: list[dict[str, Any]] = []
+    candidate_id = ref_id(org.get("ID"))
     for councilor_id, profile in profiles.items():
         councilor = profile.get("councilor") if isinstance(profile.get("councilor"), dict) else {}
         eligible, reasons = org_plan_owner_eligibility(
@@ -642,15 +654,36 @@ def org_plan_candidate_row(
             eligible_councilors.append(councilor_summary)
         else:
             ineligible_reasons.append({**councilor_summary, "reasons": reasons})
+        assigned_org_ids = profile.get("assignedOrgIds") if isinstance(profile.get("assignedOrgIds"), list) else []
+        current_org_count = sum(1 for org_id in assigned_org_ids if org_id != candidate_id)
+        org_count_after_direct_assignment = current_org_count + 1
+        minimum_org_removals = max(0, org_count_after_direct_assignment - MAX_ORGS_PER_COUNCILOR)
+        org_count_capacity.append(
+            {
+                **councilor_summary,
+                "currentOrgCount": current_org_count,
+                "orgCountAfterDirectAssignment": org_count_after_direct_assignment,
+                "maxOrgCount": MAX_ORGS_PER_COUNCILOR,
+                "freeOrgSlotsBefore": MAX_ORGS_PER_COUNCILOR - current_org_count,
+                "freeOrgSlotsAfterDirectAssignment": MAX_ORGS_PER_COUNCILOR - org_count_after_direct_assignment,
+                "directAssignmentWithinLimit": minimum_org_removals == 0,
+                "requiresReplacement": minimum_org_removals > 0,
+                "minimumOrgRemovals": minimum_org_removals,
+            }
+        )
     return {
         **org_plan_org_row(org, source),
         "eligibilityScope": {
-            "evaluatedRules": ["nationInterest", "requiredOwnerTraits", "prohibitedOwnerTraits"],
+            "evaluatedRules": [
+                "nationInterest",
+                "requiredOwnerTraits",
+                "prohibitedOwnerTraits",
+                "maximumOrgCount",
+            ],
             "notEvaluated": [
                 "detention",
                 "earthSystemLocation",
                 "administrationCapacity",
-                "maximumOrgCount",
                 "affordability",
                 "marketTechnology",
                 "marketIdeology",
@@ -661,6 +694,10 @@ def org_plan_candidate_row(
         "factionEligibility": org_plan_faction_eligibility(indexed, faction, org, org_templates),
         "eligibleCouncilors": eligible_councilors,
         "ineligibleReasons": ineligible_reasons,
+        "orgCountCapacity": {
+            "maxOrgCount": MAX_ORGS_PER_COUNCILOR,
+            "councilors": org_count_capacity,
+        },
     }
 
 
@@ -729,18 +766,19 @@ def org_plan_best_assignment(
     cost = org_acquisition_cost(candidate) if source == "market" else {}
     affordable = org_plan_cost_affordable(resources, cost)
     candidate_tier = max(0, int(as_float(candidate.get("tier"), 0.0)))
-    # A valid current roster only needs to free at most the incoming org's tier.
-    # Enumerating larger removal sets adds exponential work and cannot improve a
-    # non-negative capped stat objective.
-    max_removed = min(len(current_ids), max(candidate_tier, 1))
+    # Administration capacity needs at most the incoming tier's worth of
+    # removals on a valid roster. Count overflow can require more removals in a
+    # corrupt/legacy roster, so include its exact minimum in the search bound.
+    minimum_count_removals = max(0, len(current_ids) + 1 - MAX_ORGS_PER_COUNCILOR)
+    max_removed = min(len(current_ids), max(candidate_tier, 1, minimum_count_removals))
     best: tuple[tuple[float, float, int, int], dict[str, Any]] | None = None
 
-    for remove_count in range(max_removed + 1):
+    for remove_count in range(minimum_count_removals, max_removed + 1):
         for removed_ids in combinations(current_ids, remove_count):
             removed = set(removed_ids)
             after_ids = tuple(org_id for org_id in current_ids if org_id not in removed) + (candidate_id,)
             after = org_plan_roster_summary(profile, org_by_id, after_ids)
-            if not after["validCapacity"]:
+            if not after["validRoster"]:
                 continue
             gain = org_plan_objective_score(after["attributes"], focus) - org_plan_objective_score(before["attributes"], focus)
             balanced_gain = org_plan_objective_score(after["attributes"]) - org_plan_objective_score(before["attributes"])
@@ -775,6 +813,17 @@ def org_plan_best_assignment(
                 "tierTotalAfter": after["tierTotal"],
                 "freeCapacityBefore": before["freeCapacity"],
                 "freeCapacityAfter": after["freeCapacity"],
+                "validAdministrationCapacityBefore": before["validAdministrationCapacity"],
+                "validAdministrationCapacityAfter": after["validAdministrationCapacity"],
+                "orgCountBefore": before["orgCount"],
+                "orgCountAfter": after["orgCount"],
+                "maxOrgCount": after["maxOrgCount"],
+                "freeOrgSlotsBefore": before["freeOrgSlots"],
+                "freeOrgSlotsAfter": after["freeOrgSlots"],
+                "validOrgCountBefore": before["validOrgCount"],
+                "validOrgCountAfter": after["validOrgCount"],
+                "validRosterBefore": before["validRoster"],
+                "validRosterAfter": after["validRoster"],
                 "objective": focus,
                 "objectiveScoreBefore": org_plan_objective_score(before["attributes"], focus),
                 "objectiveScoreAfter": org_plan_objective_score(after["attributes"], focus),
@@ -1124,7 +1173,8 @@ def calculate_org_plan(
             "limitations": [
                 "The market candidate set comes from TIFactionState.availableOrgs, which is the save's faction-visible acquisition list.",
                 "For market rows, availableOrgs membership is treated as evidence that market, technology, and ideology gates passed at the last refresh. Those gates are not independently recomputed, and owned inventory is outside that evidence.",
-                "eligibleCouncilors reflects nation-interest and required/prohibited owner-trait rules. Immediate acquisition also requires a non-detained councilor in the Earth system, sufficient Administration capacity, and affordability.",
+                "eligibleCouncilors reflects nation-interest and required/prohibited owner-trait rules. orgCountCapacity separately reports whether direct assignment or replacement is needed; all recommended actions enforce the 15-org maximum and Administration capacity.",
+                "Immediate acquisition also requires a non-detained councilor in the Earth system and affordability.",
                 "Alien Proxy access to the Alien Nation is not independently reconstructed from faction ideology templates.",
                 "Owned unassigned orgs are included by default so the plan does not recommend spending resources before using existing inventory; pass --market-only to exclude them.",
                 "The committee plan is a bounded beam-search heuristic, not a proof of the mathematical global optimum.",

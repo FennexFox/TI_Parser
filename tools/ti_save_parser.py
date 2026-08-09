@@ -527,6 +527,7 @@ org_plan_normalize_focus = org_layer.org_plan_normalize_focus
 org_plan_objective_score = org_layer.org_plan_objective_score
 org_plan_final_attributes = org_layer.org_plan_final_attributes
 org_plan_roster_summary = org_layer.org_plan_roster_summary
+MAX_ORGS_PER_COUNCILOR = org_layer.MAX_ORGS_PER_COUNCILOR
 org_plan_attribute_delta = org_layer.org_plan_attribute_delta
 org_plan_org_row = org_layer.org_plan_org_row
 org_plan_region_nation_id = org_layer.org_plan_region_nation_id

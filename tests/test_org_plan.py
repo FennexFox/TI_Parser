@@ -117,6 +117,91 @@ def eligibility_fixture(*, controlled=False, matching_homeland=False, traits_by_
 
 
 class OrgPlanTests(unittest.TestCase):
+    def test_roster_summary_enforces_fifteen_org_maximum_separately_from_administration(self):
+        orgs = {org_id: org(org_id, tier=1) for org_id in range(1, 17)}
+        councilor = profile(10, 25)
+
+        at_limit = ti.org_plan_roster_summary(councilor, orgs, range(1, 16))
+        over_limit = ti.org_plan_roster_summary(councilor, orgs, range(1, 17))
+
+        self.assertEqual(at_limit["orgCount"], 15)
+        self.assertEqual(at_limit["freeOrgSlots"], 0)
+        self.assertTrue(at_limit["validAdministrationCapacity"])
+        self.assertTrue(at_limit["validOrgCount"])
+        self.assertTrue(at_limit["validCapacity"])
+        self.assertTrue(at_limit["validRoster"])
+        self.assertEqual(over_limit["orgCount"], 16)
+        self.assertEqual(over_limit["freeOrgSlots"], -1)
+        self.assertTrue(over_limit["validAdministrationCapacity"])
+        self.assertFalse(over_limit["validOrgCount"])
+        self.assertTrue(over_limit["validCapacity"])
+        self.assertFalse(over_limit["validRoster"])
+
+    def test_fourteenth_org_can_receive_fifteenth_without_replacement(self):
+        orgs = {org_id: org(org_id, tier=1) for org_id in range(1, 16)}
+        orgs[15]["science"] = 3
+        councilor = profile(10, 25, range(1, 15))
+
+        action = ti.org_plan_best_assignment(
+            councilor,
+            orgs,
+            councilor["assignedOrgIds"],
+            15,
+            "market",
+            {},
+            "science",
+        )
+
+        self.assertIsNotNone(action)
+        self.assertEqual(action["removedOrgs"], [])
+        self.assertEqual(action["orgCountBefore"], 14)
+        self.assertEqual(action["orgCountAfter"], 15)
+        self.assertEqual(action["freeOrgSlotsAfter"], 0)
+        self.assertTrue(action["validOrgCountAfter"])
+
+    def test_full_roster_replaces_one_org_instead_of_assigning_sixteenth(self):
+        orgs = {org_id: org(org_id, tier=1) for org_id in range(1, 17)}
+        orgs[16]["science"] = 3
+        councilor = profile(10, 25, range(1, 16))
+
+        action = ti.org_plan_best_assignment(
+            councilor,
+            orgs,
+            councilor["assignedOrgIds"],
+            16,
+            "market",
+            {},
+            "science",
+        )
+
+        self.assertIsNotNone(action)
+        self.assertEqual(len(action["removedOrgs"]), 1)
+        self.assertEqual(action["orgCountBefore"], 15)
+        self.assertEqual(action["orgCountAfter"], 15)
+        self.assertTrue(action["validOrgCountAfter"])
+        self.assertTrue(action["validRosterAfter"])
+
+    def test_overfull_roster_removes_enough_orgs_to_return_to_limit(self):
+        orgs = {org_id: org(org_id, tier=1) for org_id in range(1, 18)}
+        orgs[17]["science"] = 3
+        councilor = profile(10, 25, range(1, 17))
+
+        action = ti.org_plan_best_assignment(
+            councilor,
+            orgs,
+            councilor["assignedOrgIds"],
+            17,
+            "market",
+            {},
+            "science",
+        )
+
+        self.assertIsNotNone(action)
+        self.assertEqual(len(action["removedOrgs"]), 2)
+        self.assertEqual(action["orgCountBefore"], 16)
+        self.assertEqual(action["orgCountAfter"], 15)
+        self.assertTrue(action["validOrgCountAfter"])
+
     def test_administration_bonus_can_fund_incoming_org_tier(self):
         orgs = {1: org(1, tier=2, administration=2)}
 
@@ -177,6 +262,28 @@ class OrgPlanTests(unittest.TestCase):
         self.assertEqual(plan["actions"][0]["councilorId"], 10)
         self.assertEqual(plan["marketAcquisitions"], 1)
         self.assertNotIn(1, plan["remainingMarketOrgIds"])
+
+    def test_committee_search_never_exceeds_org_limit_across_multiple_actions(self):
+        orgs = {org_id: org(org_id, tier=1) for org_id in range(1, 18)}
+        orgs[16]["science"] = 3
+        orgs[17]["command"] = 3
+        councilor = profile(10, 25, range(1, 16))
+
+        plan = ti.search_org_committee_plan(
+            [councilor],
+            orgs,
+            market_ids=[16, 17],
+            inventory_ids=[],
+            resources={},
+            focus="balanced",
+            max_actions=2,
+            beam_width=4,
+        )
+
+        self.assertEqual(len(plan["actions"]), 2)
+        self.assertTrue(all(action["orgCountAfter"] <= 15 for action in plan["actions"]))
+        self.assertEqual(plan["finalRoster"][0]["orgCount"], 15)
+        self.assertTrue(plan["finalRoster"][0]["validOrgCount"])
 
     def test_committee_search_excludes_unaffordable_market_org(self):
         orgs = {1: org(1, tier=1, science=10, costMoney=100)}
@@ -337,6 +444,7 @@ class OrgPlanTests(unittest.TestCase):
             controlled=True,
             traits_by_id={10: ("Government",), 11: ("Criminal",)},
         )
+        profiles[11]["assignedOrgIds"] = list(range(1000, 1015))
         candidate = org(1, tier=1, templateName="GovernmentOrg", homeRegion=ref(120))
         templates = {
             "GovernmentOrg": {
@@ -369,6 +477,32 @@ class OrgPlanTests(unittest.TestCase):
             row["ineligibleReasons"][0]["reasons"],
             ["missing required owner traits: Government", "prohibited owner traits: Criminal"],
         )
+        criminal_capacity = next(
+            item
+            for item in row["orgCountCapacity"]["councilors"]
+            if item["id"] == row["ineligibleReasons"][0]["id"]
+        )
+        self.assertTrue(criminal_capacity["requiresReplacement"])
+        self.assertEqual(criminal_capacity["minimumOrgRemovals"], 1)
+
+    def test_candidate_row_reports_when_org_count_requires_replacement(self):
+        indexed, faction, profiles = eligibility_fixture()
+        profiles[10]["assignedOrgIds"] = list(range(1000, 1015))
+        profiles[11]["assignedOrgIds"] = list(range(2000, 2014))
+        candidate = org(1, tier=1)
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", {})
+
+        capacity_by_id = {
+            item["id"]: item
+            for item in row["orgCountCapacity"]["councilors"]
+        }
+        self.assertEqual(row["orgCountCapacity"]["maxOrgCount"], 15)
+        self.assertTrue(capacity_by_id[10]["requiresReplacement"])
+        self.assertEqual(capacity_by_id[10]["minimumOrgRemovals"], 1)
+        self.assertFalse(capacity_by_id[10]["directAssignmentWithinLimit"])
+        self.assertFalse(capacity_by_id[11]["requiresReplacement"])
+        self.assertEqual(capacity_by_id[11]["freeOrgSlotsAfterDirectAssignment"], 0)
 
     def test_committee_search_uses_faction_wide_councilor_homeland_interest(self):
         indexed, faction, profiles = eligibility_fixture(matching_homeland=True)

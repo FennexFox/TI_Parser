@@ -164,6 +164,9 @@ class ParserOrgParityTests(unittest.TestCase):
         self.assertEqual(candidate["factionEligibility"]["nationInterest"]["satisfiedBy"], ["controlledNation"])
         self.assertEqual(candidate["eligibleCouncilors"], [{"id": 10, "display": "Councilor 10"}])
         self.assertEqual(candidate["ineligibleReasons"], [])
+        self.assertEqual(candidate["orgCountCapacity"]["maxOrgCount"], 15)
+        self.assertEqual(candidate["orgCountCapacity"]["councilors"][0]["currentOrgCount"], 0)
+        self.assertEqual(wrapper["committeePlan"]["finalRoster"][0]["maxOrgCount"], 15)
 
 
 if __name__ == "__main__":
