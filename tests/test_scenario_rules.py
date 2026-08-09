@@ -16,7 +16,18 @@ class ScenarioRuleTests(unittest.TestCase):
         *,
         using_customizations: bool = False,
         national_ip_multiplier: float = 1.0,
+        cp_maintenance_gdp_scale: float | None = None,
     ) -> core.IndexedState:
+        global_values = {
+            "ID": {"value": 2},
+            "controlPointMaintenanceFreebies": 0,
+            "scenarioCustomizations": {
+                "usingCustomizations": using_customizations,
+                "nationalIPMultiplier": national_ip_multiplier,
+            },
+        }
+        if cp_maintenance_gdp_scale is not None:
+            global_values["fixedPCGDPToRaiseBaseCPMaintenanceCostBy1"] = cp_maintenance_gdp_scale
         return core.build_index(
             {
                 "gamestates": {
@@ -32,14 +43,7 @@ class ScenarioRuleTests(unittest.TestCase):
                     "TIGlobalValuesState": [
                         {
                             "Key": {"value": 2},
-                            "Value": {
-                                "ID": {"value": 2},
-                                "controlPointMaintenanceFreebies": 0,
-                                "scenarioCustomizations": {
-                                    "usingCustomizations": using_customizations,
-                                    "nationalIPMultiplier": national_ip_multiplier,
-                                },
-                            },
+                            "Value": global_values,
                         }
                     ],
                     "TIFactionState": [
@@ -143,6 +147,47 @@ class ScenarioRuleTests(unittest.TestCase):
 
         self.assertAlmostEqual(broken_earth_result["usage"], standard_result["usage"] * 0.7)
         self.assertEqual(broken_earth_result["components"]["scenarioMultiplier"], 0.7)
+        self.assertEqual(
+            broken_earth_result["components"]["gdpScale"],
+            ti.DEFAULT_CP_MAINTENANCE_GDP_SCALE,
+        )
+
+    def test_control_point_usage_uses_saved_campaign_start_gdp_scale(self):
+        gdp_scale = 500_000_000.0
+        indexed = self._build_indexed(
+            "BrokenEarthScenario",
+            cp_maintenance_gdp_scale=gdp_scale,
+        )
+        faction = core.state_value_by_id(indexed, 10)
+        assert faction is not None
+
+        result = ti.faction_control_point_maintenance(indexed, None, 10, faction, {}, {}, {})
+        expected = 0.7 * ((100_000_000_000.0 / gdp_scale) ** 0.6) / (2.0 * 2)
+
+        self.assertAlmostEqual(result["usage"], expected)
+        self.assertEqual(result["components"]["gdpScale"], gdp_scale)
+
+    def test_control_point_gdp_scale_derives_from_campaign_start_gdp(self):
+        indexed = self._build_indexed("BrokenEarthScenario")
+        global_state = core.first_value(indexed, "TIGlobalValuesState")
+        assert global_state is not None
+        global_state["globalGDP_CampaignStart"] = 50_000_000_000_000.0
+
+        self.assertEqual(
+            ti.control_point_maintenance_gdp_scale(indexed),
+            50_000_000_000_000.0 * ti.CP_MAINTENANCE_CAMPAIGN_START_GDP_FACTOR,
+        )
+
+    def test_control_point_gdp_scale_falls_back_for_uninitialized_save_value(self):
+        indexed = self._build_indexed(
+            "BrokenEarthScenario",
+            cp_maintenance_gdp_scale=-1.0,
+        )
+
+        self.assertEqual(
+            ti.control_point_maintenance_gdp_scale(indexed),
+            ti.DEFAULT_CP_MAINTENANCE_GDP_SCALE,
+        )
 
     def test_public_opinion_influence_effect_scales_nation_income(self):
         indexed = self._build_indexed("2003Scenario")

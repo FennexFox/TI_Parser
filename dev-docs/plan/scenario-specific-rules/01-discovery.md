@@ -59,6 +59,10 @@
 
 - Current Broken Earth output reports army cost 60 instead of 40 and CP usage about
   60.986339 instead of 42.690437.
+- Follow-up correction: the earlier CP comparison isolated the scenario multiplier but
+  missed `TIGlobalValuesState.PCGDPToRaiseBaseCPMaintenanceCostBy1`. On the current BE
+  save, using a fixed 1-billion GDP divisor reports 173.907334; the saved campaign-start
+  divisor 323,869,500 reconstructs 342.054941, displayed by the game as 342.
 - Current Broken Earth research output resolves active DLC tech/project cost and category as
   zero/unknown because only base templates are loaded.
 - 2003 permanent research, CP-maintenance, and Influence effects are likewise absent from the

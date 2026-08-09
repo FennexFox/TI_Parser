@@ -96,6 +96,8 @@ DEFAULT_GLOBAL_CONFIG = {
     "baselineMaxHumanCombatAcceleration_g": 3.0,
     "smallShipyardPenaltyPowerPerTier": 1.5,
 }
+DEFAULT_CP_MAINTENANCE_GDP_SCALE = 1_000_000_000.0
+CP_MAINTENANCE_CAMPAIGN_START_GDP_FACTOR = 6.26e-06
 MIN_POPULATION_FOR_FIRST_ARMY_MILLIONS = 5.0
 MIN_POPULATION_FOR_ADDITIONAL_ARMIES_PER_MILLIONS = 25.0
 MIN_CONTROL_POINTS_FOR_NAVY = 4
@@ -6653,12 +6655,29 @@ def faction_excess_mission_control_yearly_income(
     return excess * DAYS_PER_YEAR * conversion
 
 
-def nation_control_point_maintenance_cost(nation: dict[str, Any], scenario_multiplier: float = 1.0) -> float:
+def control_point_maintenance_gdp_scale(indexed: IndexedState) -> float:
+    global_state = first_value(indexed, "TIGlobalValuesState") or {}
+    fixed_scale = as_float(global_state.get("fixedPCGDPToRaiseBaseCPMaintenanceCostBy1"), 0.0)
+    if fixed_scale > 0.0:
+        return fixed_scale
+    campaign_start_gdp = as_float(global_state.get("globalGDP_CampaignStart"), 0.0)
+    if campaign_start_gdp > 0.0:
+        return campaign_start_gdp * CP_MAINTENANCE_CAMPAIGN_START_GDP_FACTOR
+    return DEFAULT_CP_MAINTENANCE_GDP_SCALE
+
+
+def nation_control_point_maintenance_cost(
+    nation: dict[str, Any],
+    scenario_multiplier: float = 1.0,
+    gdp_scale: float = DEFAULT_CP_MAINTENANCE_GDP_SCALE,
+) -> float:
     control_points = max(int(as_float(nation.get("numControlPoints"), 0.0)), 1)
-    gdp_billions = as_float(nation.get("GDP"), 0.0) / 1_000_000_000.0
-    if gdp_billions <= 0.0:
+    gdp = as_float(nation.get("GDP"), 0.0)
+    if gdp <= 0.0:
         return 0.0
-    return scenario_multiplier * (gdp_billions ** DEFAULT_GLOBAL_CONFIG["controlPointCostScaling"]) / (
+    resolved_gdp_scale = gdp_scale if gdp_scale > 0.0 else DEFAULT_CP_MAINTENANCE_GDP_SCALE
+    scaled_gdp = gdp / resolved_gdp_scale
+    return scenario_multiplier * (scaled_gdp ** DEFAULT_GLOBAL_CONFIG["controlPointCostScaling"]) / (
         DEFAULT_GLOBAL_CONFIG["controlPointMaintenanceDivisor"] * control_points
     )
 
@@ -6673,6 +6692,7 @@ def faction_control_point_maintenance(
     effect_templates: dict[str, dict[str, Any]],
 ) -> dict[str, float]:
     scenario_rules = active_scenario_rules(indexed)
+    gdp_scale = control_point_maintenance_gdp_scale(indexed)
     baseline = 0.0
     for cp_ref in faction.get("controlPoints") if isinstance(faction.get("controlPoints"), list) else []:
         cp = state_value_by_id(indexed, ref_id(cp_ref))
@@ -6683,6 +6703,7 @@ def faction_control_point_maintenance(
             baseline += nation_control_point_maintenance_cost(
                 nation,
                 scenario_rules.control_point_maintenance_multiplier,
+                gdp_scale,
             )
 
     global_state = first_value(indexed, "TIGlobalValuesState") or {}
@@ -6714,6 +6735,7 @@ def faction_control_point_maintenance(
         "missionPenaltyCurrent": overage * DEFAULT_GLOBAL_CONFIG["TIMissionModifier_ControlPointOverage_Multiplier"],
         "components": {
             "scenarioMultiplier": scenario_rules.control_point_maintenance_multiplier,
+            "gdpScale": gdp_scale,
             "globalFreebies": global_freebies,
             "councilors": councilors,
             "habs": habs,

@@ -48,6 +48,9 @@
 
 - Real-save CP usage is asserted through its reported 0.7 multiplier rather than a fixed total,
   because the user's active autosave changed while verification was running.
+- Follow-up correction: multiplier-only verification was insufficient because the game also
+  scales CP maintenance against campaign-start GDP; phase 4 adds a fixed-formula regression
+  and verifies the current save's rounded 341/342 cap/usage values.
 - No local 2003 save was present, so installed 2003 templates were verified with a synthetic
   canonical scenario state in addition to unit coverage.
 

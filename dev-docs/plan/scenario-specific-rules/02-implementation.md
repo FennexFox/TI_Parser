@@ -36,7 +36,8 @@
 
 - Standard and 2003 army costs remain 60; Broken Earth is 40.
 - Custom national IP multiplier scales all priority costs exactly once.
-- Broken Earth CP usage is multiplied by 0.7 before cap/overage calculations.
+- Broken Earth CP usage uses the save's campaign-start GDP scale and is then multiplied
+  by 0.7 before cap/overage calculations.
 - Scenario-only tech/project/effect templates resolve from the active DLC overlay.
 - 2003/BE public-opinion Influence modifiers affect nation income.
 
@@ -67,7 +68,8 @@
 
 - The CLI resolves scenario template sources once from the save before dispatch.
 - Nation UI exposes the active scenario rule profile and applies BE army cost 40.
-- Topbar CP usage applies the BE 0.7 start-time multiplier and reports it in components.
+- Topbar CP usage applies the BE 0.7 start-time multiplier. Phase 4 corrects the missing
+  campaign-start GDP scale in the same calculation.
 - Priority costs honor an enabled positive `nationalIPMultiplier`.
 - Public-opinion Influence now consumes the active saved effect names and selected scenario definitions.
 - Snapshot time metadata retains master and scenario template names.
