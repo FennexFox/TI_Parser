@@ -5,25 +5,28 @@
 - Issue target: User request: complete org acquisition and assignment eligibility output
 - Title: Org Eligibility Output
 - Source plan: None
-- Scope: Correct org nation-interest eligibility and expose candidate requirements plus per-councilor eligibility diagnostics in `org-plan` output.
+- Scope: Correct org nation-interest and owner eligibility, expose diagnostics, and enforce all supported assignment-capacity rules including the 15-org maximum.
 
 ## Strategy
 
 - Treat nationality-gated orgs as a faction-level nation-interest requirement, matching the game: the faction must control a control point in the org's home nation or have a councilor whose home region is in that nation.
 - Keep required and prohibited owner traits as councilor-level assignment rules.
 - Enrich candidate rows without removing existing fields, then protect the contract with focused tests and a latest-save smoke test.
+- Model Administration tier capacity and the hard per-councilor org-count ceiling as separate roster constraints used by both individual and committee recommendations.
 
 ## Phase Order
 
 1. [Confirm authoritative nation-interest and owner-trait rules](01-discovery.md)
 2. [Expose candidate requirements and per-councilor eligibility](02-implementation.md)
 3. [Add regression coverage and validate the latest Broken Earth save](03-verification.md)
+4. [Enforce the per-councilor 15-org assignment limit](04-org-count-limit.md)
 
 ## Phase Dependencies
 
 - Phase 1 has no phase dependency beyond resolved issue context.
 - Phase 2 depends on completion and validation of phase 1.
 - Phase 3 depends on completion and validation of phase 2.
+- Phase 4 extends the completed eligibility work and depends on phases 2 and 3.
 
 ## Source Of Truth Decisions
 
@@ -41,3 +44,4 @@
 - Some synthetic or older saves may lack resolvable home-region/nation references. Such candidates must be reported as ineligible with an explicit reason rather than silently accepted.
 - Eligibility diagnostics must not change the bounded planner's scoring or affordability behavior.
 - Alien Proxy access to the Alien Nation requires additional faction-ideology template reconstruction and remains explicitly outside the evaluated rule scope.
+- Candidate owner eligibility and immediate assignment capacity remain separate concepts; an owner may satisfy nation/trait rules while requiring an org replacement to satisfy capacity.
