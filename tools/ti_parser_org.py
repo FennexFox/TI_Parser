@@ -547,13 +547,22 @@ def org_plan_requirement_summary(
     org: dict[str, Any],
     org_templates: dict[str, dict[str, Any]] | None,
 ) -> dict[str, Any]:
-    template = (org_templates or {}).get(str(org.get("templateName")), {})
+    template_name = str(org.get("templateName") or "")
+    template_value = (org_templates or {}).get(template_name)
+    template = template_value if isinstance(template_value, dict) else {}
+    template_catalog_available = bool(org_templates)
+    template_resolved = isinstance(template_value, dict)
     required_traits = template.get("requiredOwnerTraits") if isinstance(template.get("requiredOwnerTraits"), list) else []
     prohibited_traits = template.get("prohibitedOwnerTraits") if isinstance(template.get("prohibitedOwnerTraits"), list) else []
     restricted_ideologies = template.get("restricted") if isinstance(template.get("restricted"), list) else []
     faction_affinities = template.get("affinities") if isinstance(template.get("affinities"), list) else []
     faction_org = str(template.get("orgType") or "").casefold() == "faction"
     return {
+        "templateResolution": {
+            "catalogAvailable": template_catalog_available,
+            "templateName": template_name or None,
+            "resolved": template_resolved,
+        },
         "requiresNationInterest": parse_bool(template.get("requiresNationality")) is True,
         "homeNation": region_nation_summary(indexed, org.get("homeRegion")) if indexed is not None else None,
         "requiredOwnerTraits": list(required_traits),
@@ -569,7 +578,11 @@ def org_plan_faction_eligibility(
     org: dict[str, Any],
     org_templates: dict[str, dict[str, Any]] | None,
 ) -> dict[str, Any]:
-    template = (org_templates or {}).get(str(org.get("templateName")), {})
+    template_name = str(org.get("templateName") or "")
+    template_value = (org_templates or {}).get(template_name)
+    template = template_value if isinstance(template_value, dict) else {}
+    template_catalog_available = bool(org_templates)
+    template_resolved = isinstance(template_value, dict)
     nation_interest = org_plan_nation_interest(indexed, faction, org, org_templates)
     restricted_ideologies = template.get("restricted") if isinstance(template.get("restricted"), list) else []
     faction_affinities = template.get("affinities") if isinstance(template.get("affinities"), list) else []
@@ -587,6 +600,9 @@ def org_plan_faction_eligibility(
         if isinstance(value, str) and value
     }
     reasons: list[str] = []
+
+    if template_catalog_available and not template_resolved:
+        reasons.append(f"org template could not be resolved: {template_name or '<missing>'}")
 
     ideology_context_required = bool(normalized_restricted) or faction_org
     if ideology_context_required and faction is None:
@@ -608,8 +624,13 @@ def org_plan_faction_eligibility(
         reasons.append(f"faction lacks interest in required nation: {nation_name}")
     return {
         "eligible": not reasons,
-        "evaluatedRules": ["nationInterest", "factionIdeologyRestriction", "factionOrgAffinity"],
+        "evaluatedRules": ["templateResolution", "nationInterest", "factionIdeologyRestriction", "factionOrgAffinity"],
         "reasons": reasons,
+        "templateResolution": {
+            "catalogAvailable": template_catalog_available,
+            "templateName": template_name or None,
+            "resolved": template_resolved,
+        },
         "ideology": {
             "faction": ideology,
             "restricted": list(restricted_ideologies),
@@ -719,6 +740,7 @@ def org_plan_candidate_row(
         **org_plan_org_row(org, source),
         "eligibilityScope": {
             "evaluatedRules": [
+                "templateResolution",
                 "nationInterest",
                 "factionIdeologyRestriction",
                 "factionOrgAffinity",
@@ -738,6 +760,12 @@ def org_plan_candidate_row(
         "requirements": org_plan_requirement_summary(indexed, org, org_templates),
         "factionEligibility": org_plan_faction_eligibility(indexed, faction, org, org_templates),
         "eligibleCouncilors": eligible_councilors,
+        "recommendationEligibility": {
+            "eligible": bool(eligible_councilors),
+            "basis": "eligibleCouncilors",
+            "eligibleCouncilorCount": len(eligible_councilors),
+            "eligibleCouncilorIds": [row["id"] for row in eligible_councilors],
+        },
         "ineligibleReasons": ineligible_reasons,
         "orgCountCapacity": {
             "maxOrgCount": MAX_ORGS_PER_COUNCILOR,
@@ -1080,6 +1108,10 @@ def calculate_org_plan(
 ) -> dict[str, Any]:
     trait_templates = load_trait_templates(templates_dir)
     org_templates = load_named_templates(templates_dir, "TIOrgTemplate.json")
+    if not org_templates:
+        raise FileNotFoundError(
+            "TIOrgTemplate.json could not be loaded; org eligibility cannot be evaluated safely"
+        )
     faction_id, faction = find_faction_state(indexed, faction_name)
     profiles = {
         councilor_id: councilor_org_plan_profile(indexed, councilor_id, councilor, trait_templates)
@@ -1095,16 +1127,33 @@ def calculate_org_plan(
         if org_id is not None
     }
     market_refs = faction.get("availableOrgs") if isinstance(faction.get("availableOrgs"), list) else []
-    inventory_refs = faction.get("unassignedOrgs") if include_unassigned and isinstance(faction.get("unassignedOrgs"), list) else []
+    owned_inventory_refs = faction.get("unassignedOrgs") if isinstance(faction.get("unassignedOrgs"), list) else []
+
+    def unique_ref_ids(refs: Iterable[Any]) -> list[int]:
+        seen: set[int] = set()
+        result: list[int] = []
+        for value in refs:
+            org_id = ref_id(value)
+            if org_id is not None and org_id not in seen:
+                seen.add(org_id)
+                result.append(org_id)
+        return result
+
+    raw_market_ids = unique_ref_ids(market_refs)
+    raw_owned_inventory_ids = unique_ref_ids(owned_inventory_refs)
+    owned_inventory_id_set = set(raw_owned_inventory_ids)
+    overlapping_ids = sorted(set(raw_market_ids).intersection(owned_inventory_id_set))
+    unresolved_market_ids = sorted(org_id for org_id in raw_market_ids if org_id not in org_by_id)
+    unresolved_inventory_ids = sorted(org_id for org_id in raw_owned_inventory_ids if org_id not in org_by_id)
     market_ids = [
         org_id
-        for org_id in (ref_id(value) for value in market_refs)
-        if org_id is not None and org_id in org_by_id
+        for org_id in raw_market_ids
+        if org_id in org_by_id and org_id not in owned_inventory_id_set
     ]
     inventory_ids = [
         org_id
-        for org_id in (ref_id(value) for value in inventory_refs)
-        if org_id is not None and org_id in org_by_id
+        for org_id in raw_owned_inventory_ids
+        if include_unassigned and org_id in org_by_id
     ]
     resources = faction.get("resources") if isinstance(faction.get("resources"), dict) else {}
     source_by_id = {org_id: "market" for org_id in market_ids}
@@ -1170,6 +1219,42 @@ def calculate_org_plan(
         org_templates=org_templates,
         faction=faction,
     )
+    market_rows = [
+        {
+            **org_plan_candidate_row(
+                indexed,
+                faction,
+                profiles,
+                org_by_id[org_id],
+                "market",
+                org_templates,
+            ),
+            "affordableNow": org_plan_cost_affordable(resources, org_acquisition_cost(org_by_id[org_id])),
+        }
+        for org_id in market_ids
+    ]
+    inventory_rows = [
+        org_plan_candidate_row(
+            indexed,
+            faction,
+            profiles,
+            org_by_id[org_id],
+            "ownedInventory",
+            org_templates,
+        )
+        for org_id in inventory_ids
+    ]
+
+    def recommendation_eligible_org_ids(rows: Iterable[dict[str, Any]]) -> list[int]:
+        return [
+            org_id
+            for row in rows
+            for org_id in [row.get("id")]
+            if isinstance(org_id, int) and (row.get("recommendationEligibility") or {}).get("eligible") is True
+        ]
+
+    market_recommendation_ids = recommendation_eligible_org_ids(market_rows)
+    inventory_recommendation_ids = recommendation_eligible_org_ids(inventory_rows)
     return clean_numbers(
         {
             "faction": faction_brief(faction_id, faction),
@@ -1177,35 +1262,22 @@ def calculate_org_plan(
             "candidateSources": {
                 "market": {
                     "count": len(market_ids),
-                    "orgs": [
-                        {
-                            **org_plan_candidate_row(
-                                indexed,
-                                faction,
-                                profiles,
-                                org_by_id[org_id],
-                                "market",
-                                org_templates,
-                            ),
-                            "affordableNow": org_plan_cost_affordable(resources, org_acquisition_cost(org_by_id[org_id])),
-                        }
-                        for org_id in market_ids
-                    ],
+                    "recommendationEligibleCount": len(market_recommendation_ids),
+                    "recommendationEligibleOrgIds": market_recommendation_ids,
+                    "orgs": market_rows,
                 },
                 "ownedInventory": {
                     "included": include_unassigned,
                     "count": len(inventory_ids),
-                    "orgs": [
-                        org_plan_candidate_row(
-                            indexed,
-                            faction,
-                            profiles,
-                            org_by_id[org_id],
-                            "ownedInventory",
-                            org_templates,
-                        )
-                        for org_id in inventory_ids
-                    ],
+                    "recommendationEligibleCount": len(inventory_recommendation_ids),
+                    "recommendationEligibleOrgIds": inventory_recommendation_ids,
+                    "orgs": inventory_rows,
+                },
+                "normalization": {
+                    "ownedInventoryPrecedence": True,
+                    "overlappingOrgIds": overlapping_ids,
+                    "unresolvedMarketOrgIds": unresolved_market_ids,
+                    "unresolvedOwnedInventoryOrgIds": unresolved_inventory_ids,
                 },
             },
             "councilors": councilor_rows,
@@ -1216,9 +1288,10 @@ def calculate_org_plan(
                 "majorAttributes": "Each councilor's two highest current non-Administration mission stats; use the matching goalViews for specialization.",
             },
             "limitations": [
-                "The market candidate set comes from TIFactionState.availableOrgs, which is the save's faction-visible acquisition list.",
-                "For market rows, availableOrgs membership is treated as evidence that market, technology, and ideology gates passed at the last refresh. Those gates are not independently recomputed, and owned inventory is outside that evidence.",
-                "eligibleCouncilors reflects nation-interest and required/prohibited owner-trait rules. orgCountCapacity separately reports whether direct assignment or replacement is needed; all recommended actions enforce the 15-org maximum and Administration capacity.",
+                "candidateSources is a diagnostic inventory, not a recommendation list. recommendationEligibility is derived directly from eligibleCouncilors; actionable stat views are under councilors.goalViews and committeePlan.",
+                "The market candidate set comes from TIFactionState.availableOrgs, which is the save's faction-visible acquisition list. Duplicate references are removed and owned inventory takes precedence over market acquisition.",
+                "For market rows, availableOrgs membership is treated as evidence that allowedOnMarket and technology gates passed at the last refresh. Faction ideology restrictions are independently recomputed for market and owned inventory.",
+                "eligibleCouncilors reflects resolved-template, nation-interest, faction-ideology, and required/prohibited owner-trait rules. orgCountCapacity separately reports whether direct assignment or replacement is needed; all recommended actions enforce the 15-org maximum and Administration capacity.",
                 "Immediate acquisition also requires a non-detained councilor in the Earth system and affordability.",
                 "Alien Proxy access to the Alien Nation is not independently reconstructed from faction ideology templates.",
                 "Owned unassigned orgs are included by default so the plan does not recommend spending resources before using existing inventory; pass --market-only to exclude them.",

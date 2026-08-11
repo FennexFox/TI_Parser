@@ -459,6 +459,11 @@ class OrgPlanTests(unittest.TestCase):
         self.assertEqual(
             row["requirements"],
             {
+                "templateResolution": {
+                    "catalogAvailable": True,
+                    "templateName": "GovernmentOrg",
+                    "resolved": True,
+                },
                 "requiresNationInterest": True,
                 "homeNation": {
                     "id": 21,
@@ -633,6 +638,40 @@ class OrgPlanTests(unittest.TestCase):
 
         self.assertEqual([action["candidate"]["id"] for action in plan["actions"]], [2])
         self.assertEqual(plan["remainingMarketOrgIds"], [1])
+
+    def test_missing_template_is_not_recommendation_eligible_when_catalog_is_loaded(self):
+        indexed, faction, profiles = eligibility_fixture()
+        candidate = org(1, tier=1, templateName="MissingOrg", science=10)
+        templates = {"KnownOrg": {}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+        action = ti.org_plan_best_assignment(
+            profiles[10],
+            {1: candidate},
+            [],
+            1,
+            "market",
+            {},
+            "science",
+            indexed=indexed,
+            org_templates=templates,
+            faction=faction,
+        )
+
+        reason = "org template could not be resolved: MissingOrg"
+        self.assertFalse(row["factionEligibility"]["eligible"])
+        self.assertEqual(row["factionEligibility"]["reasons"], [reason])
+        self.assertEqual(row["eligibleCouncilors"], [])
+        self.assertEqual(
+            row["recommendationEligibility"],
+            {
+                "eligible": False,
+                "basis": "eligibleCouncilors",
+                "eligibleCouncilorCount": 0,
+                "eligibleCouncilorIds": [],
+            },
+        )
+        self.assertIsNone(action)
 
 
 if __name__ == "__main__":

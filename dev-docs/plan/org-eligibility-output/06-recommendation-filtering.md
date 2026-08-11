@@ -54,13 +54,20 @@
 
 ## Progress
 
-- Pending.
+- Complete.
 
 ## Decision log
 
 - Raw candidate lists remain complete diagnostic inventories; recommendation readiness is a separate derived contract.
 - Owned inventory takes precedence over market because assigning an already-owned org should not be modeled as a purchase.
+- Low-level eligibility helpers remain usable without a catalog for isolated callers, but a loaded non-empty catalog fails individual missing templates closed and the full planner refuses to run without `TIOrgTemplate.json`.
+- `--market-only` excludes any org referenced by `unassignedOrgs`, even if a stale/malformed save also lists it in `availableOrgs`; the command explicitly excludes already-owned inventory rather than reclassifying it as an acquisition.
 
 ## Outcomes / Retrospective
 
-- Pending.
+- Candidate rows now expose `recommendationEligibility` with a direct `eligibleCouncilors` basis, count, and IDs; each source group exposes the corresponding eligible org count and IDs.
+- `candidateSources.normalization` reports overlaps and unresolved references, and deterministic source pools remove duplicates with owned inventory precedence.
+- The `RandomCriminal13` full-plan regression proves that numerically superior trait-only and faction-restricted orgs stay in diagnostics but are absent from the source eligibility summary, all goal views, and committee actions.
+- Focused validation: 36 org tests passed. Full validation: 105 tests passed. `python -m compileall -q tools tests` also passed.
+- Latest-save smoke test checked 28 source candidates and 113 emitted action rows. Recommendation/`eligibleCouncilors` contract violations, summary mismatches, and unresolved templates were all zero.
+- The live `RandomCriminal13` candidate (`The Carina Organization`) had zero eligible councilors; all six councilors reported `missing required owner traits: Criminal`, so it remained diagnostic-only.
