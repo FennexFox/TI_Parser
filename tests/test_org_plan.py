@@ -469,6 +469,8 @@ class OrgPlanTests(unittest.TestCase):
                 },
                 "requiredOwnerTraits": ["Government"],
                 "prohibitedOwnerTraits": ["Criminal"],
+                "restrictedFactionIdeologies": [],
+                "requiredFactionAffinities": [],
             },
         )
         self.assertEqual(row["eligibleCouncilors"], [{"id": 10, "display": "Councilor 10"}])
@@ -547,6 +549,89 @@ class OrgPlanTests(unittest.TestCase):
         )
 
         self.assertEqual(plan["actions"], [])
+        self.assertEqual(plan["remainingMarketOrgIds"], [1])
+
+    def test_restricted_faction_ideology_blocks_every_councilor(self):
+        indexed, faction, profiles = eligibility_fixture()
+        faction["templateName"] = "CooperateCouncil"
+        candidate = org(1, tier=1, templateName="RestrictedOrg", science=5)
+        templates = {"RestrictedOrg": {"restricted": ["Cooperate"]}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+
+        reason = "faction ideology is restricted: Cooperate"
+        self.assertFalse(row["factionEligibility"]["eligible"])
+        self.assertEqual(row["factionEligibility"]["reasons"], [reason])
+        self.assertEqual(row["eligibleCouncilors"], [])
+        self.assertEqual([item["reasons"] for item in row["ineligibleReasons"]], [[reason], [reason]])
+        self.assertEqual(row["requirements"]["restrictedFactionIdeologies"], ["Cooperate"])
+
+    def test_restricted_faction_ideology_allows_other_factions(self):
+        indexed, faction, profiles = eligibility_fixture()
+        candidate = org(1, tier=1, templateName="RestrictedOrg")
+        templates = {"RestrictedOrg": {"restricted": ["Cooperate"]}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+
+        self.assertTrue(row["factionEligibility"]["eligible"])
+        self.assertEqual(row["factionEligibility"]["ideology"]["faction"], "Resist")
+        self.assertEqual([item["id"] for item in row["eligibleCouncilors"]], [10, 11])
+
+    def test_normal_org_affinity_is_not_a_hard_faction_requirement(self):
+        indexed, faction, profiles = eligibility_fixture()
+        candidate = org(1, tier=1, templateName="AffinityOrg")
+        templates = {"AffinityOrg": {"orgType": "Security", "affinities": ["Exploit"]}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+
+        self.assertTrue(row["factionEligibility"]["eligible"])
+        self.assertEqual(row["requirements"]["requiredFactionAffinities"], [])
+
+    def test_faction_org_requires_matching_affinity(self):
+        indexed, faction, profiles = eligibility_fixture()
+        candidate = org(1, tier=1, templateName="FactionOrg")
+        templates = {"FactionOrg": {"orgType": "Faction", "affinities": ["Cooperate"]}}
+
+        blocked = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "ownedInventory", templates)
+        faction["templateName"] = "CooperateCouncil"
+        eligible = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "ownedInventory", templates)
+
+        self.assertFalse(blocked["factionEligibility"]["eligible"])
+        self.assertEqual(blocked["eligibleCouncilors"], [])
+        self.assertEqual(
+            blocked["factionEligibility"]["reasons"],
+            ["faction org does not support faction ideology: Resist"],
+        )
+        self.assertTrue(eligible["factionEligibility"]["eligible"])
+        self.assertEqual(eligible["requirements"]["requiredFactionAffinities"], ["Cooperate"])
+
+    def test_committee_search_skips_higher_stat_ideology_restricted_org(self):
+        indexed, faction, profiles = eligibility_fixture()
+        faction["templateName"] = "CooperateCouncil"
+        candidates = {
+            1: org(1, tier=1, templateName="RestrictedOrg", science=10),
+            2: org(2, tier=1, templateName="AllowedOrg", science=2),
+        }
+        templates = {
+            "RestrictedOrg": {"restricted": ["Cooperate"]},
+            "AllowedOrg": {},
+        }
+
+        plan = ti.search_org_committee_plan(
+            profiles,
+            candidates,
+            market_ids=[1, 2],
+            inventory_ids=[],
+            resources={},
+            focus="science",
+            max_actions=1,
+            beam_width=4,
+            indexed=indexed,
+            org_templates=templates,
+            faction=faction,
+        )
+
+        self.assertEqual([action["candidate"]["id"] for action in plan["actions"]], [2])
         self.assertEqual(plan["remainingMarketOrgIds"], [1])
 
 

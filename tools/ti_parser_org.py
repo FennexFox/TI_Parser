@@ -550,11 +550,16 @@ def org_plan_requirement_summary(
     template = (org_templates or {}).get(str(org.get("templateName")), {})
     required_traits = template.get("requiredOwnerTraits") if isinstance(template.get("requiredOwnerTraits"), list) else []
     prohibited_traits = template.get("prohibitedOwnerTraits") if isinstance(template.get("prohibitedOwnerTraits"), list) else []
+    restricted_ideologies = template.get("restricted") if isinstance(template.get("restricted"), list) else []
+    faction_affinities = template.get("affinities") if isinstance(template.get("affinities"), list) else []
+    faction_org = str(template.get("orgType") or "").casefold() == "faction"
     return {
         "requiresNationInterest": parse_bool(template.get("requiresNationality")) is True,
         "homeNation": region_nation_summary(indexed, org.get("homeRegion")) if indexed is not None else None,
         "requiredOwnerTraits": list(required_traits),
         "prohibitedOwnerTraits": list(prohibited_traits),
+        "restrictedFactionIdeologies": list(restricted_ideologies),
+        "requiredFactionAffinities": list(faction_affinities) if faction_org else [],
     }
 
 
@@ -564,8 +569,35 @@ def org_plan_faction_eligibility(
     org: dict[str, Any],
     org_templates: dict[str, dict[str, Any]] | None,
 ) -> dict[str, Any]:
+    template = (org_templates or {}).get(str(org.get("templateName")), {})
     nation_interest = org_plan_nation_interest(indexed, faction, org, org_templates)
+    restricted_ideologies = template.get("restricted") if isinstance(template.get("restricted"), list) else []
+    faction_affinities = template.get("affinities") if isinstance(template.get("affinities"), list) else []
+    faction_org = str(template.get("orgType") or "").casefold() == "faction"
+    ideology = faction_ideology_key(faction or {})
+    normalized_ideology = ideology.casefold() if isinstance(ideology, str) else None
+    normalized_restricted = {
+        str(value).casefold()
+        for value in restricted_ideologies
+        if isinstance(value, str) and value
+    }
+    normalized_affinities = {
+        str(value).casefold()
+        for value in faction_affinities
+        if isinstance(value, str) and value
+    }
     reasons: list[str] = []
+
+    ideology_context_required = bool(normalized_restricted) or faction_org
+    if ideology_context_required and faction is None:
+        reasons.append("faction context is required to evaluate ideology restrictions")
+    elif ideology_context_required and normalized_ideology is None:
+        reasons.append("faction ideology could not be resolved")
+    elif normalized_ideology in normalized_restricted:
+        reasons.append(f"faction ideology is restricted: {ideology}")
+    elif faction_org and normalized_ideology not in normalized_affinities:
+        reasons.append(f"faction org does not support faction ideology: {ideology}")
+
     if nation_interest["required"] and faction is None:
         reasons.append("faction context is required to evaluate nation interest")
     elif nation_interest["required"] and nation_interest["homeNation"] is None:
@@ -576,8 +608,20 @@ def org_plan_faction_eligibility(
         reasons.append(f"faction lacks interest in required nation: {nation_name}")
     return {
         "eligible": not reasons,
-        "evaluatedRules": ["nationInterest"],
+        "evaluatedRules": ["nationInterest", "factionIdeologyRestriction", "factionOrgAffinity"],
         "reasons": reasons,
+        "ideology": {
+            "faction": ideology,
+            "restricted": list(restricted_ideologies),
+            "factionOrg": faction_org,
+            "requiredAffinities": list(faction_affinities) if faction_org else [],
+            "met": not any(
+                reason.startswith("faction ideology")
+                or reason.startswith("faction org")
+                or reason.startswith("faction context is required to evaluate ideology")
+                for reason in reasons
+            ),
+        },
         "nationInterest": nation_interest,
     }
 
@@ -676,6 +720,8 @@ def org_plan_candidate_row(
         "eligibilityScope": {
             "evaluatedRules": [
                 "nationInterest",
+                "factionIdeologyRestriction",
+                "factionOrgAffinity",
                 "requiredOwnerTraits",
                 "prohibitedOwnerTraits",
                 "maximumOrgCount",
@@ -686,7 +732,6 @@ def org_plan_candidate_row(
                 "administrationCapacity",
                 "affordability",
                 "marketTechnology",
-                "marketIdeology",
                 "alienProxyNationInterest",
             ],
         },

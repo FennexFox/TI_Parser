@@ -5,7 +5,7 @@
 - Issue target: User request: complete org acquisition and assignment eligibility output
 - Title: Org Eligibility Output
 - Source plan: None
-- Scope: Correct org nation-interest and owner eligibility, expose diagnostics, and enforce all supported assignment-capacity rules including the 15-org maximum.
+- Scope: Correct org nation-interest, owner-trait, and faction-ideology eligibility; expose diagnostics; make recommendation filtering explicit; and enforce all supported assignment-capacity rules including the 15-org maximum.
 
 ## Strategy
 
@@ -13,6 +13,9 @@
 - Keep required and prohibited owner traits as councilor-level assignment rules.
 - Enrich candidate rows without removing existing fields, then protect the contract with focused tests and a latest-save smoke test.
 - Model Administration tier capacity and the hard per-councilor org-count ceiling as separate roster constraints used by both individual and committee recommendations.
+- Mirror the installed game's strict `TIOrgTemplate.restricted` rule and the faction-org affinity rule instead of treating market membership as sufficient faction eligibility.
+- Treat `eligibleCouncilors` as the canonical owner-eligibility result for recommendation readiness, while keeping raw candidate rows available for diagnostics.
+- Fail closed in the full planner when org template data is unavailable or a save candidate cannot be resolved to a template.
 
 ## Phase Order
 
@@ -20,6 +23,8 @@
 2. [Expose candidate requirements and per-councilor eligibility](02-implementation.md)
 3. [Add regression coverage and validate the latest Broken Earth save](03-verification.md)
 4. [Enforce the per-councilor 15-org assignment limit](04-org-count-limit.md)
+5. [Enforce faction ideology restrictions](05-faction-ideology.md)
+6. [Harden recommendation eligibility and end-to-end coverage](06-recommendation-filtering.md)
 
 ## Phase Dependencies
 
@@ -27,6 +32,8 @@
 - Phase 2 depends on completion and validation of phase 1.
 - Phase 3 depends on completion and validation of phase 2.
 - Phase 4 extends the completed eligibility work and depends on phases 2 and 3.
+- Phase 5 extends the same canonical owner-eligibility helper and depends on phase 2.
+- Phase 6 depends on phase 5 so its full-plan regression covers the complete trait, faction, and template-resolution contract.
 
 ## Source Of Truth Decisions
 
@@ -45,3 +52,5 @@
 - Eligibility diagnostics must not change the bounded planner's scoring or affordability behavior.
 - Alien Proxy access to the Alien Nation requires additional faction-ideology template reconstruction and remains explicitly outside the evaluated rule scope.
 - Candidate owner eligibility and immediate assignment capacity remain separate concepts; an owner may satisfy nation/trait rules while requiring an org replacement to satisfy capacity.
+- `affinities` is only a strict faction requirement for `OrgType.Faction`; for ordinary orgs it is an availability weight and must not be treated as a restriction.
+- Market technology and `allowedOnMarket` gates remain evidenced by `TIFactionState.availableOrgs`; this phase independently reconstructs the faction ideology restriction that also applies to owned inventory and transfers.
