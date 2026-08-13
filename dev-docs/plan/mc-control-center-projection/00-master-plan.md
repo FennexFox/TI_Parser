@@ -5,14 +5,15 @@
 - Issue target: MC control-center omission
 - Title: Include queued control centers in projected mission control
 - Source plan: None
-- Scope: Preserve the current mission-control capacity calculation while adding a
-  projection for modules already in the hab construction queue, then use that
-  projection for habitat planning constraints.
+- Scope: Count a completed prior Operations Center while its Command Center
+  upgrade is underway, preserve current-state MC semantics for new construction,
+  and add a current-queue projection for habitat planning constraints.
 
 ## Strategy
 
 - Keep `calculate_topbar()`'s current `capacity`, `usage`, and `available` fields
-  tied to functional modules only.
+  tied to operating modules, including completed prior modules that remain in
+  service during an upgrade.
 - Calculate queued hab-module capacity and usage deltas against each module's
   prior template so new construction and upgrades share one rule.
 - Expose the queue projection in the MissionControl topbar row and use its
@@ -41,6 +42,8 @@
   `projectedAfterCurrentQueue`.
 - Hab module template `missionControl` is a signed headroom value: positive
   values add capacity and negative values add usage.
+- `TIHabModuleState.priorModuleCompleted` identifies a prior module that remains
+  the current MC source while its replacement is under construction.
 
 ## Global Validation Expectations
 

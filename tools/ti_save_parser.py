@@ -781,6 +781,14 @@ def hab_module_active_record(record: dict[str, Any]) -> bool:
     return hab_layer.hab_module_active_record(record)
 
 
+def hab_module_current_mission_control(record: dict[str, Any]) -> int:
+    return hab_layer.hab_module_current_mission_control(record)
+
+
+def hab_module_projected_mission_control(record: dict[str, Any]) -> int:
+    return hab_layer.hab_module_projected_mission_control(record)
+
+
 def hab_core_module_record(records: list[dict[str, Any]]) -> dict[str, Any] | None:
     return hab_layer.hab_core_module_record(records)
 
@@ -2711,8 +2719,7 @@ def hab_plan_row(
         body_templates=body_templates,
         orbit_templates=orbit_templates,
     )
-    topbar_mc = topbar.get("resources", {}).get("MissionControl", {}) if isinstance(topbar.get("resources"), dict) else {}
-    mc_available = as_float(topbar_mc.get("available"), 0.0)
+    mc_available = mission_control_available_for_planning(topbar)
     candidates = hab_module_candidate_rows(
         indexed,
         templates_dir,
@@ -3221,8 +3228,7 @@ def prospective_module_unlocks_for_project(
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     mining_rate = faction_mining_rate(indexed, faction)
     scarcity_weights = resource_scarcity_weights(topbar)
-    topbar_mc = topbar.get("resources", {}).get("MissionControl", {}) if isinstance(topbar.get("resources"), dict) else {}
-    mc_available = as_float(topbar_mc.get("available"), 0.0)
+    mc_available = mission_control_available_for_planning(topbar)
     faction_with_project = project_finished_faction_view(faction, project_name)
     habs = [(hab_id, hab) for hab_id, hab in faction_hab_states(indexed, faction) if ref_id(hab.get("faction")) == faction_id]
 
@@ -3767,6 +3773,7 @@ def hab_research_and_mc(
     for hab_id, sectors in sectors_by_hab.items():
         hab = state_value_by_id(indexed, hab_id) or {}
         active_modules = active_modules_in_sectors(indexed, sectors)
+        records = hab_module_records(indexed, hab, hab_module_templates)
         raw_research_month = 0.0
         admin_modifier = 1.0
         module_counts: dict[str, int] = {}
@@ -3775,17 +3782,16 @@ def hab_research_and_mc(
             template = hab_module_templates.get(template_name, {})
             module_counts[str(template_name)] = module_counts.get(str(template_name), 0) + 1
             raw_research_month += as_float(template.get("incomeResearch_month"), 0.0)
-            mission_control = int(as_float(template.get("missionControl"), 0.0))
-            if mission_control > 0:
-                total_mission_control += mission_control
             special_rules = template.get("specialRules") if isinstance(template.get("specialRules"), list) else []
             if "Efficiency" in special_rules:
                 admin_modifier *= 1.0 + as_float(template.get("specialRulesValue"), 0.0)
 
+        hab_mission_control = sum(max(hab_module_current_mission_control(record), 0) for record in records)
+        total_mission_control += hab_mission_control
         adviser_bonus = nation_adviser_science_bonus(hab, councilor_by_id)
         research_month = raw_research_month * (1.0 + adviser_bonus) * admin_modifier
         total_research_month += research_month
-        if research_month:
+        if research_month or hab_mission_control:
             details.append(
                 {
                     "id": hab_id,
@@ -3795,6 +3801,7 @@ def hab_research_and_mc(
                     "adviserBonus": adviser_bonus,
                     "researchMonth": research_month,
                     "researchDay": research_month * 12.0 / DAYS_PER_YEAR,
+                    "missionControl": hab_mission_control,
                     "moduleCounts": module_counts,
                 }
             )
@@ -6619,18 +6626,18 @@ def faction_max_mission_control_components(
     councilor_by_id: dict[int, dict[str, Any]],
     effect_contexts: dict[str, list[str]],
     effect_templates: dict[str, dict[str, Any]],
+    hab_module_templates: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, float]:
     base_incomes = faction.get("baseIncomes_year") if isinstance(faction.get("baseIncomes_year"), dict) else {}
     hq = as_float(base_incomes.get("MissionControl"), 0.0) + scenario_float(indexed, "missionControlBonus", 0.0)
     councilors = faction_yearly_income_from_councilors(indexed, faction, trait_templates, councilor_by_id, "MissionControl")
     nations = faction_yearly_income_from_nations(indexed, faction_id, faction, councilor_by_id, effect_contexts, effect_templates, "MissionControl")
     habs = 0.0
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = hab_module_templates if hab_module_templates is not None else load_named_templates(templates_dir, "TIHabModuleTemplate.json")
     for _, hab in faction_hab_states(indexed, faction):
         for record in hab_module_records(indexed, hab, hab_module_templates):
-            template = record.get("template") if isinstance(record.get("template"), dict) else {}
-            value = int(as_float(template.get("missionControl"), 0.0))
-            if hab_module_active_record(record) and value > 0:
+            value = hab_module_current_mission_control(record)
+            if value > 0:
                 habs += value
     pre_effect = hq + councilors + nations + habs
     total = apply_effect_modifiers(effect_contexts, effect_templates, "MissionControlDisruption_PCT", pre_effect)
@@ -6642,6 +6649,65 @@ def faction_max_mission_control_components(
         "effects": total - pre_effect,
         "total": total,
     }
+
+
+def faction_queued_mission_control_changes(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    capacity_change = 0
+    usage_change = 0
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for _, hab in faction_hab_states(indexed, faction):
+        for record in hab_module_records(indexed, hab, hab_module_templates):
+            if record.get("completed") or not hab_module_okay(record):
+                continue
+            current = hab_module_current_mission_control(record)
+            projected = hab_module_projected_mission_control(record)
+            record_capacity_change = max(projected, 0) - max(current, 0)
+            record_usage_change = max(-projected, 0) - max(-current, 0)
+            if record_capacity_change == 0 and record_usage_change == 0:
+                continue
+            template_name = str(record.get("templateName") or "")
+            prior_template_name = str(record.get("priorTemplateName") or "")
+            row = grouped.setdefault(
+                (template_name, prior_template_name),
+                {
+                    "template": template_name,
+                    "priorTemplate": prior_template_name or None,
+                    "count": 0,
+                    "capacityChange": 0,
+                    "usageChange": 0,
+                    "headroomChange": 0,
+                },
+            )
+            row["count"] += 1
+            row["capacityChange"] += record_capacity_change
+            row["usageChange"] += record_usage_change
+            row["headroomChange"] += record_capacity_change - record_usage_change
+            capacity_change += record_capacity_change
+            usage_change += record_usage_change
+    return {
+        "capacityChange": capacity_change,
+        "usageChange": usage_change,
+        "headroomChange": capacity_change - usage_change,
+        "moduleChanges": sorted(
+            grouped.values(),
+            key=lambda row: (str(row.get("template") or ""), str(row.get("priorTemplate") or "")),
+        ),
+    }
+
+
+def mission_control_available_for_planning(topbar: dict[str, Any]) -> float:
+    resources = topbar.get("resources") if isinstance(topbar.get("resources"), dict) else {}
+    mission_control = resources.get("MissionControl") if isinstance(resources.get("MissionControl"), dict) else {}
+    projected = (
+        mission_control.get("projectedAfterCurrentQueue")
+        if isinstance(mission_control.get("projectedAfterCurrentQueue"), dict)
+        else {}
+    )
+    return as_float(projected.get("available", mission_control.get("available")), 0.0)
 
 
 def faction_excess_mission_control_yearly_income(
@@ -6791,6 +6857,7 @@ def calculate_topbar(
 ) -> dict[str, Any]:
     trait_templates = research_templates.traits if research_templates else load_trait_templates(templates_dir)
     effect_templates = research_templates.effects if research_templates else load_named_templates(templates_dir, "TIEffectTemplate.json")
+    hab_module_templates = research_templates.hab_modules if research_templates else load_named_templates(templates_dir, "TIHabModuleTemplate.json")
     faction_id, faction = find_faction_state(indexed, faction_name)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
@@ -6803,7 +6870,9 @@ def calculate_topbar(
         councilor_by_id,
         effect_contexts,
         effect_templates,
+        hab_module_templates,
     )
+    queued_mc = faction_queued_mission_control_changes(indexed, faction, hab_module_templates)
     cp_maintenance = faction_control_point_maintenance(
         indexed,
         templates_dir,
@@ -6818,11 +6887,27 @@ def calculate_topbar(
     rows: dict[str, Any] = {}
     for resource in TOPBAR_RESOURCES:
         if resource == "MissionControl":
+            usage = as_float(faction.get("missionControlUsage"), 0.0)
+            capacity = as_float(mc_components.get("total"), 0.0)
+            projected_capacity = capacity + as_float(queued_mc.get("capacityChange"), 0.0)
+            projected_usage = usage + as_float(queued_mc.get("usageChange"), 0.0)
+            projected = {
+                "capacity": projected_capacity,
+                "usage": projected_usage,
+                "available": max(projected_capacity - projected_usage, 0.0),
+                "capacityChange": queued_mc.get("capacityChange", 0),
+                "usageChange": queued_mc.get("usageChange", 0),
+                "headroomChange": queued_mc.get("headroomChange", 0),
+                "moduleChanges": queued_mc.get("moduleChanges", []) if include_details else None,
+            }
+            if not include_details:
+                projected.pop("moduleChanges")
             rows[resource] = clean_numbers(
                 {
-                    "usage": as_float(faction.get("missionControlUsage"), 0.0),
-                    "capacity": mc_components["total"],
-                    "available": max(mc_components["total"] - as_float(faction.get("missionControlUsage"), 0.0), 0.0),
+                    "usage": usage,
+                    "capacity": capacity,
+                    "available": max(capacity - usage, 0.0),
+                    "projectedAfterCurrentQueue": projected,
                     "components": mc_components if include_details else None,
                 },
                 6,

@@ -65,3 +65,7 @@
   four unfinished Research Campuses (+4 usage), for a net projected MC headroom
   change of +56. `hab-plan` currently uses only current availability, so it
   omits the entire queued change.
+- Historical save `Resistsave00604_2038-6-16.gz` has three Command Center
+  upgrades whose completed prior Operations Centers remain active. The old
+  calculation reports 152 hab MC instead of 164, reproducing a direct 12 MC
+  current-capacity omission.

@@ -96,7 +96,11 @@ LLM can make the value judgment explicitly.
 
 The `topbar` command reconstructs the top resource bar from the save, including
 current stockpiles, monthly/yearly net resource income, research distribution,
-mission-control usage/capacity, and control-point maintenance usage/cap.
+mission-control usage/capacity, and control-point maintenance usage/cap. Its
+MissionControl row keeps current values separate from
+`projectedAfterCurrentQueue`; habitat and project planning use that queued
+projection while current research and excess-MC calculations use only operating
+sources.
 
 The module catalog generator reads hab module templates from the local Terra
 Invicta install and writes `data/module_catalog.json` plus

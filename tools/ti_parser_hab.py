@@ -164,6 +164,30 @@ def hab_module_active_record(record: dict[str, Any]) -> bool:
     return hab_module_functional(record) and bool(record.get("powered"))
 
 
+def hab_module_current_mission_control(record: dict[str, Any]) -> int:
+    template = record.get("template") if isinstance(record.get("template"), dict) else {}
+    if hab_module_active_record(record):
+        return int(as_float(template.get("missionControl"), 0.0))
+
+    state = record.get("state") if isinstance(record.get("state"), dict) else {}
+    prior_template = record.get("priorTemplate") if isinstance(record.get("priorTemplate"), dict) else {}
+    if (
+        not record.get("completed")
+        and not record.get("destroyed")
+        and not record.get("decommissioning")
+        and state.get("priorModuleCompleted")
+    ):
+        return int(as_float(prior_template.get("missionControl"), 0.0))
+    return 0
+
+
+def hab_module_projected_mission_control(record: dict[str, Any]) -> int:
+    if hab_module_okay(record) and not record.get("completed"):
+        template = record.get("template") if isinstance(record.get("template"), dict) else {}
+        return int(as_float(template.get("missionControl"), 0.0))
+    return hab_module_current_mission_control(record)
+
+
 def hab_core_module_record(records: list[dict[str, Any]]) -> dict[str, Any] | None:
     for record in records:
         template = record.get("template") if isinstance(record.get("template"), dict) else {}

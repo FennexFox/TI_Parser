@@ -8,6 +8,7 @@
 ## Scope
 
 - Add a helper that aggregates unfinished hab-module deltas for the faction.
+- Treat a completed prior template as the current MC source during an upgrade.
 - Add `projectedAfterCurrentQueue` to the MissionControl topbar row.
 - Use projected queue availability for candidate feasibility and suggested fill.
 
@@ -20,13 +21,16 @@
 ## Affected files
 
 - `tools/ti_save_parser.py`
+- `tools/ti_parser_hab.py`
 - `tests/test_hab_plan.py`
 - `tests/test_research_ui.py`
+- `README.md`
 
 ## Implementation steps
 
 - Compute target and prior positive capacity and negative usage per unfinished
   record, then sum their deltas.
+- Reuse the same current/prior MC rule in topbar and research-breakdown paths.
 - Derive projected capacity, usage, and non-negative available headroom from the
   current topbar values.
 - Preserve the current fields and add the projection as a nested diagnostic.
@@ -37,6 +41,8 @@
 
 - An unfinished Operations Center contributes +4 projected capacity, not current
   capacity.
+- A completed Operations Center being upgraded contributes its current +4 until
+  the Command Center replaces it.
 - An unfinished Research Campus contributes +1 projected usage.
 - Completed, destroyed, and decommissioning records do not enter the queue
   projection.
@@ -58,13 +64,18 @@
 
 ## Progress
 
-- Not started.
+- Completed implementation and focused regression tests.
 
 ## Decision log
 
 - The projection is split into capacity and usage deltas rather than exposing
   only a signed net, so the result remains auditable.
+- Current MC chooses the target template only when it is active; otherwise an
+  unfinished upgrade with `priorModuleCompleted` uses the prior template.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Topbar current MC now restores upgrading Operations Centers, exposes queued
+  capacity/usage/headroom changes, and supplies the projected available value to
+  habitat and prospective-project planning. Research details now include MC-only
+  habs and their current MC.

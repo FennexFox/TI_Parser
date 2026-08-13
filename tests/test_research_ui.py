@@ -73,7 +73,192 @@ def build_research_fixture(*, docked=False):
     return indexed, faction
 
 
+def build_mission_control_fixture():
+    gamestates = {}
+    faction = add_state(
+        gamestates,
+        "TIFactionState",
+        1,
+        {
+            "templateName": "ResistCouncil",
+            "displayName": "Resistance",
+            "baseIncomes_year": {"MissionControl": 2.0},
+            "missionControlUsage": 5.0,
+            "habSectors": [ref(11)],
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabState",
+        10,
+        {
+            "displayName": "Mission Control Test Hab",
+            "faction": ref(1),
+            "sectors": [ref(11)],
+            "anyCoreCompleted": True,
+        },
+    )
+    add_state(
+        gamestates,
+        "TISectorState",
+        11,
+        {
+            "faction": ref(1),
+            "hab": ref(10),
+            "habModules": [ref(20), ref(21), ref(22), ref(23), ref(24)],
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabModuleState",
+        20,
+        {
+            "templateName": "CommandCenter",
+            "priorModuleTemplateName": "OperationsCenter",
+            "priorModuleCompleted": True,
+            "constructionCompleted": False,
+            "powered": False,
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabModuleState",
+        21,
+        {
+            "templateName": "OperationsCenter",
+            "constructionCompleted": False,
+            "powered": False,
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabModuleState",
+        22,
+        {
+            "templateName": "ResearchCampus",
+            "constructionCompleted": False,
+            "powered": False,
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabModuleState",
+        23,
+        {
+            "templateName": "OperationsCenter",
+            "constructionCompleted": False,
+            "powered": False,
+            "destroyed": True,
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabModuleState",
+        24,
+        {
+            "templateName": "OperationsCenter",
+            "constructionCompleted": True,
+            "powered": True,
+        },
+    )
+    templates = {
+        "OperationsCenter": {"dataName": "OperationsCenter", "missionControl": 4},
+        "CommandCenter": {"dataName": "CommandCenter", "missionControl": 10},
+        "ResearchCampus": {"dataName": "ResearchCampus", "missionControl": -1},
+    }
+    return ti.build_index({"gamestates": gamestates}), faction, templates
+
+
 class ResearchUiTests(unittest.TestCase):
+    def test_topbar_counts_upgrading_operations_center_and_projects_queue(self):
+        indexed, _, hab_templates = build_mission_control_fixture()
+        templates = ti.ResearchTemplates({}, {}, {}, hab_templates, {}, {}, {})
+
+        with (
+            patch.object(ti, "TOPBAR_RESOURCES", ("MissionControl",)),
+            patch.object(ti, "faction_control_point_maintenance", return_value={}),
+        ):
+            result = ti.calculate_topbar(indexed, None, include_details=True, research_templates=templates)
+
+        mission_control = result["resources"]["MissionControl"]
+        self.assertEqual(mission_control["capacity"], 10.0)
+        self.assertEqual(mission_control["usage"], 5.0)
+        self.assertEqual(mission_control["available"], 5.0)
+        self.assertEqual(mission_control["components"]["habs"], 8.0)
+        self.assertEqual(
+            mission_control["projectedAfterCurrentQueue"],
+            {
+                "capacity": 20.0,
+                "usage": 6.0,
+                "available": 14.0,
+                "capacityChange": 10,
+                "usageChange": 1,
+                "headroomChange": 9,
+                "moduleChanges": [
+                    {
+                        "template": "CommandCenter",
+                        "priorTemplate": "OperationsCenter",
+                        "count": 1,
+                        "capacityChange": 6,
+                        "usageChange": 0,
+                        "headroomChange": 6,
+                    },
+                    {
+                        "template": "OperationsCenter",
+                        "priorTemplate": None,
+                        "count": 1,
+                        "capacityChange": 4,
+                        "usageChange": 0,
+                        "headroomChange": 4,
+                    },
+                    {
+                        "template": "ResearchCampus",
+                        "priorTemplate": None,
+                        "count": 1,
+                        "capacityChange": 0,
+                        "usageChange": 1,
+                        "headroomChange": -1,
+                    },
+                ],
+            },
+        )
+
+    def test_research_breakdown_mc_keeps_prior_operations_center_visible(self):
+        indexed, faction, hab_templates = build_mission_control_fixture()
+
+        research_month, mission_control, details = ti.hab_research_and_mc(
+            indexed,
+            faction,
+            hab_templates,
+            {},
+        )
+
+        self.assertEqual(research_month, 0.0)
+        self.assertEqual(mission_control, 8)
+        self.assertEqual(len(details), 1)
+        self.assertEqual(details[0]["missionControl"], 8)
+
+    def test_planning_prefers_current_queue_mission_control_projection(self):
+        self.assertEqual(
+            ti.mission_control_available_for_planning(
+                {
+                    "resources": {
+                        "MissionControl": {
+                            "available": 5,
+                            "projectedAfterCurrentQueue": {"available": 14},
+                        }
+                    }
+                }
+            ),
+            14.0,
+        )
+        self.assertEqual(
+            ti.mission_control_available_for_planning(
+                {"resources": {"MissionControl": {"available": 5}}}
+            ),
+            5.0,
+        )
+
     def test_topbar_records_before_distribution_research_in_shared_cache(self):
         indexed = ti.build_index({"gamestates": {}})
         faction = {"ID": ref(7), "templateName": "ResistCouncil", "resources": {"Research": 4.0}}
