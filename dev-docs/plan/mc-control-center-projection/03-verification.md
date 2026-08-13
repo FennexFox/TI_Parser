@@ -54,12 +54,32 @@
 
 ## Progress
 
-- Not started.
+- Complete.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Current and projected MC are verified separately: unfinished new construction
+  never inflates current capacity, while a completed prior module remains current
+  during an upgrade.
+- Both multiplicative and `SetToFixedValue` MC effects are regression-tested
+  because adding a raw queue delta after effects would produce incorrect planning
+  headroom.
+- Live autosave values are recorded as a point-in-time smoke test because the
+  game may update `Autosave.gz` while verification is running.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- All 112 tests pass, including 13 focused research/topbar MC tests; Python
+  compilation, diff checks, and phased-plan validation also pass.
+- At verification time the latest autosave reports current MC 100 capacity / 99
+  usage / 1 available in both topbar and research. Its current queue projects 160
+  capacity / 103 usage / 57 available: 15 Operations Centers add 60 capacity and
+  queued consuming modules add 4 usage, for +56 headroom.
+- Historical save `Resistsave00604_2038-6-16.gz` now counts the three completed
+  Operations Centers that remain active during Command Center upgrades. Hab MC
+  rises from the old calculation's 152 to 164, restoring the missing 12 current
+  MC; the projected upgrade delta is then +18 rather than double-counting +30.
+- Topbar and research agree on the historical save's current 446 capacity / 432
+  usage / 14 available.
+- Independent review findings for MC effects and foreign-sector ownership were
+  resolved and covered by deterministic tests.
