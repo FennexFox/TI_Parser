@@ -165,6 +165,8 @@ def hab_module_active_record(record: dict[str, Any]) -> bool:
 
 
 def hab_module_current_mission_control(record: dict[str, Any]) -> int:
+    if record.get("sectorOwnedByHabFaction") is False:
+        return 0
     template = record.get("template") if isinstance(record.get("template"), dict) else {}
     if hab_module_active_record(record):
         return int(as_float(template.get("missionControl"), 0.0))
@@ -182,6 +184,8 @@ def hab_module_current_mission_control(record: dict[str, Any]) -> int:
 
 
 def hab_module_projected_mission_control(record: dict[str, Any]) -> int:
+    if record.get("sectorOwnedByHabFaction") is False:
+        return 0
     if hab_module_okay(record) and not record.get("completed"):
         template = record.get("template") if isinstance(record.get("template"), dict) else {}
         return int(as_float(template.get("missionControl"), 0.0))

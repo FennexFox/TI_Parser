@@ -31,6 +31,9 @@
 - Compute target and prior positive capacity and negative usage per unfinished
   record, then sum their deltas.
 - Reuse the same current/prior MC rule in topbar and research-breakdown paths.
+- Reapply `MissionControlDisruption_PCT` to the full projected pre-effect
+  capacity instead of adding raw queue capacity after effects.
+- Ignore module records on sectors explicitly not owned by the hab faction.
 - Derive projected capacity, usage, and non-negative available headroom from the
   current topbar values.
 - Preserve the current fields and add the projection as a nested diagnostic.
@@ -72,6 +75,10 @@
   only a signed net, so the result remains auditable.
 - Current MC chooses the target template only when it is active; otherwise an
   unfinished upgrade with `priorModuleCompleted` uses the prior template.
+- The projection exposes both raw `habCapacityChange` and effective
+  `capacityChange`, with `effectsChange` explaining the difference.
+- Review found and closed effect-consistency gaps for multiplicative and fixed MC
+  effects in both topbar projection and research/excess-MC calculation.
 
 ## Outcomes / Retrospective
 

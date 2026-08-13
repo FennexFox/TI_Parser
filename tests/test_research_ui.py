@@ -191,9 +191,11 @@ class ResearchUiTests(unittest.TestCase):
                 "capacity": 20.0,
                 "usage": 6.0,
                 "available": 14.0,
-                "capacityChange": 10,
+                "capacityChange": 10.0,
+                "habCapacityChange": 10.0,
+                "effectsChange": 0.0,
                 "usageChange": 1,
-                "headroomChange": 9,
+                "headroomChange": 9.0,
                 "moduleChanges": [
                     {
                         "template": "CommandCenter",
@@ -222,6 +224,118 @@ class ResearchUiTests(unittest.TestCase):
                 ],
             },
         )
+
+    def test_queue_projection_applies_mission_control_disruption(self):
+        indexed, _, hab_templates = build_mission_control_fixture()
+        templates = ti.ResearchTemplates(
+            {},
+            {"DisruptMC": {"operation": "Multiplicative", "value": 0.5}},
+            {},
+            hab_templates,
+            {},
+            {},
+            {},
+        )
+
+        with (
+            patch.object(ti, "TOPBAR_RESOURCES", ("MissionControl",)),
+            patch.object(
+                ti,
+                "faction_effect_contexts",
+                return_value={"MissionControlDisruption_PCT": ["DisruptMC"]},
+            ),
+            patch.object(ti, "faction_control_point_maintenance", return_value={}),
+        ):
+            result = ti.calculate_topbar(indexed, None, include_details=True, research_templates=templates)
+
+        mission_control = result["resources"]["MissionControl"]
+        projected = mission_control["projectedAfterCurrentQueue"]
+        self.assertEqual(mission_control["capacity"], 5.0)
+        self.assertEqual(projected["capacity"], 10.0)
+        self.assertEqual(projected["capacityChange"], 5.0)
+        self.assertEqual(projected["habCapacityChange"], 10.0)
+        self.assertEqual(projected["effectsChange"], -5.0)
+        self.assertEqual(projected["usage"], 6.0)
+        self.assertEqual(projected["available"], 4.0)
+        self.assertEqual(projected["headroomChange"], 4.0)
+
+    def test_queue_projection_reapplies_fixed_mission_control_effect(self):
+        indexed, _, hab_templates = build_mission_control_fixture()
+        templates = ti.ResearchTemplates(
+            {},
+            {"FixedMC": {"operation": "SetToFixedValue", "value": 7.0}},
+            {},
+            hab_templates,
+            {},
+            {},
+            {},
+        )
+
+        with (
+            patch.object(ti, "TOPBAR_RESOURCES", ("MissionControl",)),
+            patch.object(
+                ti,
+                "faction_effect_contexts",
+                return_value={"MissionControlDisruption_PCT": ["FixedMC"]},
+            ),
+            patch.object(ti, "faction_control_point_maintenance", return_value={}),
+        ):
+            result = ti.calculate_topbar(indexed, None, include_details=True, research_templates=templates)
+
+        mission_control = result["resources"]["MissionControl"]
+        projected = mission_control["projectedAfterCurrentQueue"]
+        self.assertEqual(mission_control["capacity"], 7.0)
+        self.assertEqual(projected["capacity"], 7.0)
+        self.assertEqual(projected["capacityChange"], 0.0)
+        self.assertEqual(projected["habCapacityChange"], 10.0)
+        self.assertEqual(projected["effectsChange"], -10.0)
+        self.assertEqual(projected["available"], 1.0)
+        self.assertEqual(projected["headroomChange"], -1.0)
+
+    def test_research_breakdown_applies_mc_effect_to_upgrading_operations_center(self):
+        indexed, _, hab_templates = build_mission_control_fixture()
+        templates = ti.ResearchTemplates(
+            {},
+            {"DisruptMC": {"operation": "Multiplicative", "value": 0.5}},
+            {},
+            hab_templates,
+            {},
+            {},
+            {},
+        )
+
+        with patch.object(
+            ti,
+            "faction_effect_contexts",
+            return_value={"MissionControlDisruption_PCT": ["DisruptMC"]},
+        ):
+            result = ti.calculate_research_breakdown(
+                indexed,
+                None,
+                include_details=True,
+                templates=templates,
+            )
+
+        mission_control = result["missionControl"]
+        self.assertEqual(mission_control["max"], 5.0)
+        self.assertEqual(mission_control["available"], 0.0)
+        self.assertEqual(mission_control["excessUsedForResearch"], 0.0)
+        self.assertEqual(mission_control["components"]["habs"], 8)
+        self.assertEqual(mission_control["components"]["effects"], -5.0)
+
+    def test_foreign_sector_module_does_not_contribute_mission_control(self):
+        record = {
+            "templateName": "OperationsCenter",
+            "template": {"missionControl": 4},
+            "completed": True,
+            "powered": True,
+            "destroyed": False,
+            "decommissioning": False,
+            "sectorOwnedByHabFaction": False,
+        }
+
+        self.assertEqual(ti.hab_module_current_mission_control(record), 0)
+        self.assertEqual(ti.hab_module_projected_mission_control(record), 0)
 
     def test_research_breakdown_mc_keeps_prior_operations_center_visible(self):
         indexed, faction, hab_templates = build_mission_control_fixture()

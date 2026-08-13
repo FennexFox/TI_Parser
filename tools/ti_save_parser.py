@@ -3864,7 +3864,11 @@ def calculate_research_breakdown(
 
     base_incomes = faction.get("baseIncomes_year") if isinstance(faction.get("baseIncomes_year"), dict) else {}
     hq_daily = as_float(base_incomes.get("Research"), 0.0) / DAYS_PER_YEAR
-    hq_mission_control = int(as_float(base_incomes.get("MissionControl"), 0.0))
+    hq_mission_control = as_float(base_incomes.get("MissionControl"), 0.0) + scenario_float(
+        indexed,
+        "missionControlBonus",
+        0.0,
+    )
 
     councilor_daily, councilor_mc, councilor_details = councilor_research_and_mc(
         indexed,
@@ -3921,7 +3925,13 @@ def calculate_research_breakdown(
     habs_daily = hab_research_year / DAYS_PER_YEAR
 
     max_buildable_mc = councilor_mc + nation_mc + hab_mc
-    max_mc = hq_mission_control + max_buildable_mc
+    pre_effect_mc = hq_mission_control + max_buildable_mc
+    max_mc = apply_effect_modifiers(
+        effect_contexts,
+        effect_templates,
+        "MissionControlDisruption_PCT",
+        pre_effect_mc,
+    )
     usage_mc = int(as_float(faction.get("missionControlUsage"), 0.0))
     available_mc = max(max_mc - usage_mc, 0)
     excess_mc_used = min(max_buildable_mc, available_mc)
@@ -3974,6 +3984,7 @@ def calculate_research_breakdown(
                 "councilorOrgs": councilor_mc,
                 "nations": nation_mc,
                 "habs": hab_mc,
+                "effects": max_mc - pre_effect_mc,
                 "buildableSources": max_buildable_mc,
             },
         },
@@ -6889,15 +6900,25 @@ def calculate_topbar(
         if resource == "MissionControl":
             usage = as_float(faction.get("missionControlUsage"), 0.0)
             capacity = as_float(mc_components.get("total"), 0.0)
-            projected_capacity = capacity + as_float(queued_mc.get("capacityChange"), 0.0)
+            hab_capacity_change = as_float(queued_mc.get("capacityChange"), 0.0)
+            pre_effect_capacity = capacity - as_float(mc_components.get("effects"), 0.0)
+            projected_capacity = apply_effect_modifiers(
+                effect_contexts,
+                effect_templates,
+                "MissionControlDisruption_PCT",
+                pre_effect_capacity + hab_capacity_change,
+            )
             projected_usage = usage + as_float(queued_mc.get("usageChange"), 0.0)
+            effective_capacity_change = projected_capacity - capacity
             projected = {
                 "capacity": projected_capacity,
                 "usage": projected_usage,
                 "available": max(projected_capacity - projected_usage, 0.0),
-                "capacityChange": queued_mc.get("capacityChange", 0),
+                "capacityChange": effective_capacity_change,
+                "habCapacityChange": hab_capacity_change,
+                "effectsChange": effective_capacity_change - hab_capacity_change,
                 "usageChange": queued_mc.get("usageChange", 0),
-                "headroomChange": queued_mc.get("headroomChange", 0),
+                "headroomChange": effective_capacity_change - as_float(queued_mc.get("usageChange"), 0.0),
                 "moduleChanges": queued_mc.get("moduleChanges", []) if include_details else None,
             }
             if not include_details:
