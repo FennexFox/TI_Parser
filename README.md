@@ -58,10 +58,14 @@ Conditional trait modifiers are not mixed into `finalAttributes`; use
 The `org-plan` command evaluates the faction's currently acquirable
 `availableOrgs` against every councilor. It reports per-councilor views for
 balanced stats and each individual stat, applies the Administration capacity
-limit, checks acquisition costs and owner eligibility, and recommends a
-committee-wide assignment sequence. Already-owned unassigned orgs are included
-by default so useful inventory is assigned before spending resources; pass
-`--market-only` to evaluate acquisitions only. The committee plan uses a
+limit, checks acquisition costs, required/prohibited owner traits, nation
+interest, and faction ideology restrictions, and recommends a committee-wide
+assignment sequence. `candidateSources` is a diagnostic inventory rather than
+a recommendation list; each row's `recommendationEligibility` is derived from
+its actual `eligibleCouncilors`, while actionable stat views are emitted under
+`councilors.goalViews` and `committeePlan`. Already-owned unassigned orgs are
+included by default so useful inventory is assigned before spending resources;
+pass `--market-only` to evaluate acquisitions only. The committee plan uses a
 bounded beam search with practical defaults; increase `--max-actions` or
 `--beam-width` when a slower, broader search is useful.
 
@@ -92,7 +96,11 @@ LLM can make the value judgment explicitly.
 
 The `topbar` command reconstructs the top resource bar from the save, including
 current stockpiles, monthly/yearly net resource income, research distribution,
-mission-control usage/capacity, and control-point maintenance usage/cap.
+mission-control usage/capacity, and control-point maintenance usage/cap. Its
+MissionControl row keeps current values separate from
+`projectedAfterCurrentQueue`; habitat and project planning use that queued
+projection while current research and excess-MC calculations use only operating
+sources.
 
 The module catalog generator reads hab module templates from the local Terra
 Invicta install and writes `data/module_catalog.json` plus

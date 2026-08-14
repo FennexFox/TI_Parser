@@ -14,6 +14,11 @@ from typing import Any, Iterable
 
 DEFAULT_CACHE_DIR = ".ti_cache"
 SAVE_GLOB = "*.gz"
+TemplateSource = Path | tuple[Path, ...] | list[Path] | None
+SCENARIO_DLC_TEMPLATE_HINTS = {
+    "2003Scenario": Path("DLC_Content/DarkSkies/2003_Scenario/Templates"),
+    "BrokenEarthScenario": Path("DLC_Content/DarkSkies/Broken_Earth_Scenario/Templates"),
+}
 
 
 @dataclass(frozen=True)
@@ -143,6 +148,76 @@ def load_save(save_path: Path) -> dict[str, Any]:
     return data
 
 
+def scenario_template_name(indexed: IndexedState) -> str | None:
+    time_state = first_value(indexed, "TITimeState") or {}
+    value = time_state.get("scenarioMetaTemplateName")
+    return str(value) if value else None
+
+
+def template_directories(templates: TemplateSource) -> tuple[Path, ...]:
+    if templates is None:
+        return ()
+    if isinstance(templates, Path):
+        return (templates,)
+    return tuple(Path(path) for path in templates)
+
+
+def template_source_paths(templates: TemplateSource) -> list[str]:
+    return [str(directory.resolve()) for directory in template_directories(templates)]
+
+
+def template_source_value(templates: TemplateSource) -> str | list[str] | None:
+    sources = template_source_paths(templates)
+    if not sources:
+        return None
+    return sources[0] if len(sources) == 1 else sources
+
+
+def game_root_from_templates_dir(templates_dir: Path) -> Path | None:
+    resolved = templates_dir.resolve()
+    if (
+        resolved.name == "Templates"
+        and resolved.parent.name == "StreamingAssets"
+        and resolved.parent.parent.name == "TerraInvicta_Data"
+    ):
+        return resolved.parent.parent.parent
+    return None
+
+
+def scenario_template_sources(indexed: IndexedState, base_templates_dir: Path | None) -> tuple[Path, ...] | None:
+    if base_templates_dir is None:
+        return None
+    sources = [base_templates_dir]
+    scenario_name = scenario_template_name(indexed)
+    game_root = game_root_from_templates_dir(base_templates_dir)
+    if not scenario_name or game_root is None:
+        return tuple(sources)
+
+    hinted = SCENARIO_DLC_TEMPLATE_HINTS.get(scenario_name)
+    if hinted is not None:
+        candidate = game_root / hinted
+        if candidate.is_dir():
+            sources.append(candidate)
+            return tuple(sources)
+
+    dlc_dir = game_root / "DLC_Content"
+    if not dlc_dir.is_dir():
+        return tuple(sources)
+    for meta_path in sorted(dlc_dir.rglob("TIMetaTemplate.json")):
+        candidate = meta_path.parent
+        try:
+            meta_templates = load_named_templates(candidate, meta_path.name)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if scenario_name in meta_templates and candidate not in sources:
+            sources.append(candidate)
+    return tuple(sources)
+
+
+def resolve_scenario_templates(save_path: Path, base_templates_dir: Path | None) -> tuple[Path, ...] | None:
+    return scenario_template_sources(build_index(load_save(save_path)), base_templates_dir)
+
+
 def file_fingerprint(path: Path | None) -> dict[str, Any] | None:
     if path is None or not path.is_file():
         return None
@@ -150,25 +225,41 @@ def file_fingerprint(path: Path | None) -> dict[str, Any] | None:
     return {"path": str(path), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
 
 
-def snapshot_fingerprint(save_path: Path, templates_dir: Path | None) -> dict[str, Any]:
+def template_file_fingerprints(templates: TemplateSource, filename: str) -> list[dict[str, Any]]:
+    return [
+        fingerprint
+        for directory in template_directories(templates)
+        if (fingerprint := file_fingerprint(directory / filename)) is not None
+    ]
+
+
+def snapshot_fingerprint(save_path: Path, templates_dir: TemplateSource) -> dict[str, Any]:
     return {
         "save": save_fingerprint(save_path),
-        "traitTemplate": file_fingerprint(templates_dir / "TITraitTemplate.json" if templates_dir else None),
+        "templateSources": template_source_paths(templates_dir),
+        "traitTemplates": template_file_fingerprints(templates_dir, "TITraitTemplate.json"),
     }
 
 
-def load_trait_templates(templates_dir: Path | None) -> dict[str, dict[str, Any]]:
+def load_trait_templates(templates_dir: TemplateSource) -> dict[str, dict[str, Any]]:
     return load_named_templates(templates_dir, "TITraitTemplate.json")
 
 
-def load_named_templates(templates_dir: Path | None, filename: str) -> dict[str, dict[str, Any]]:
-    if templates_dir is None:
+def load_named_templates(templates_dir: TemplateSource, filename: str) -> dict[str, dict[str, Any]]:
+    paths = [directory / filename for directory in template_directories(templates_dir)]
+    paths = [path for path in paths if path.is_file()]
+    if not paths:
         return {}
-    path = templates_dir / filename
-    if not path.is_file():
-        return {}
-    stat = path.stat()
-    return _load_named_templates_cached(str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+    if len(paths) == 1:
+        path = paths[0]
+        stat = path.stat()
+        return _load_named_templates_cached(str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+
+    merged: dict[str, dict[str, Any]] = {}
+    for path in paths:
+        stat = path.stat()
+        merged.update(_load_named_templates_cached(str(path.resolve()), stat.st_size, stat.st_mtime_ns))
+    return merged
 
 
 @lru_cache(maxsize=None)
