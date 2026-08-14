@@ -1,0 +1,227 @@
+{
+  "data/module_catalog.json": {
+    "mtime": 1780005566.581352,
+    "ast_hash": "8bf5d41ca551f5be69b93797f02be1fb",
+    "semantic_hash": "8bf5d41ca551f5be69b93797f02be1fb"
+  },
+  "data/research_catalog.json": {
+    "mtime": 1780189068.624138,
+    "ast_hash": "237955acd80cad43e0dc28193d6f7fcd",
+    "semantic_hash": "237955acd80cad43e0dc28193d6f7fcd"
+  },
+  "tests/test_catalog_generators.py": {
+    "mtime": 1780436318.4115324,
+    "ast_hash": "b8c0645ca4203d1e1f70dc074fd4ff2c",
+    "semantic_hash": "b8c0645ca4203d1e1f70dc074fd4ff2c"
+  },
+  "tests/test_hab_plan.py": {
+    "mtime": 1785721832.8927345,
+    "ast_hash": "b62db423c67cbd2674c69e766873fc27",
+    "semantic_hash": "b62db423c67cbd2674c69e766873fc27"
+  },
+  "tests/test_hab_power.py": {
+    "mtime": 1780436322.5887773,
+    "ast_hash": "e8b204b9c71de2e4490872633c7b2adf",
+    "semantic_hash": "e8b204b9c71de2e4490872633c7b2adf"
+  },
+  "tests/test_hab_slots.py": {
+    "mtime": 1780021285.699516,
+    "ast_hash": "af27fe214ac18e40a29ecde871f4bc74",
+    "semantic_hash": "af27fe214ac18e40a29ecde871f4bc74"
+  },
+  "tests/test_org_plan.py": {
+    "mtime": 1780119168.1687667,
+    "ast_hash": "d6214dd628ab082ed00cf47fe61d0e6b",
+    "semantic_hash": "d6214dd628ab082ed00cf47fe61d0e6b"
+  },
+  "tests/test_parser_core.py": {
+    "mtime": 1785722354.1928349,
+    "ast_hash": "17a63720aa6b414a9b6d7418c3566178",
+    "semantic_hash": "17a63720aa6b414a9b6d7418c3566178"
+  },
+  "tests/test_parser_hab.py": {
+    "mtime": 1780436318.4125352,
+    "ast_hash": "4d29c3f113f6d36ac80bc590939c2689",
+    "semantic_hash": "4d29c3f113f6d36ac80bc590939c2689"
+  },
+  "tests/test_parser_income.py": {
+    "mtime": 1780436318.4125352,
+    "ast_hash": "ad9c55756dc53b170df33b4785a97d06",
+    "semantic_hash": "ad9c55756dc53b170df33b4785a97d06"
+  },
+  "tests/test_parser_org.py": {
+    "mtime": 1780436318.4135342,
+    "ast_hash": "2639384c35a69df133398783c12d2fd3",
+    "semantic_hash": "2639384c35a69df133398783c12d2fd3"
+  },
+  "tests/test_parser_snapshot.py": {
+    "mtime": 1785722354.1943457,
+    "ast_hash": "1e4dafe812a9e0138e8e144fecaa014f",
+    "semantic_hash": "1e4dafe812a9e0138e8e144fecaa014f"
+  },
+  "tests/test_project_analysis.py": {
+    "mtime": 1780189068.6256497,
+    "ast_hash": "460070dfaf9248945355bedf835a62af",
+    "semantic_hash": "460070dfaf9248945355bedf835a62af"
+  },
+  "tests/test_research_catalog.py": {
+    "mtime": 1780189068.6266575,
+    "ast_hash": "2dfd38ca6c564ebb5b2f4d273a92fe23",
+    "semantic_hash": "2dfd38ca6c564ebb5b2f4d273a92fe23"
+  },
+  "tests/test_research_plan.py": {
+    "mtime": 1780028702.2338145,
+    "ast_hash": "0cdf17746f07666e00deb078cd76e743",
+    "semantic_hash": "0cdf17746f07666e00deb078cd76e743"
+  },
+  "tests/test_research_ui.py": {
+    "mtime": 1780436318.414534,
+    "ast_hash": "536bfcf20490baf49962037a531e5214",
+    "semantic_hash": "536bfcf20490baf49962037a531e5214"
+  },
+  "tests/test_ship_plan.py": {
+    "mtime": 1780436322.5887773,
+    "ast_hash": "812499d9ddf7cbd99226944107e05bc7",
+    "semantic_hash": "812499d9ddf7cbd99226944107e05bc7"
+  },
+  "tools/build_module_catalog.py": {
+    "mtime": 1780436318.414534,
+    "ast_hash": "70b681ddd4f80dd3a1b4b9bd5f460cf5",
+    "semantic_hash": "70b681ddd4f80dd3a1b4b9bd5f460cf5"
+  },
+  "tools/build_research_catalog.py": {
+    "mtime": 1780436318.415535,
+    "ast_hash": "a7e3083dfbd5d1e1814eea692f3acd4b",
+    "semantic_hash": "a7e3083dfbd5d1e1814eea692f3acd4b"
+  },
+  "tools/catalog_utils.py": {
+    "mtime": 1780436318.415535,
+    "ast_hash": "b5db8900f351ea9056568232329d65e0",
+    "semantic_hash": "b5db8900f351ea9056568232329d65e0"
+  },
+  "tools/ti_parser_cli.py": {
+    "mtime": 1785722095.9740784,
+    "ast_hash": "5d796b6568fe432d05ea878780d8ceb9",
+    "semantic_hash": "5d796b6568fe432d05ea878780d8ceb9"
+  },
+  "tools/ti_parser_core.py": {
+    "mtime": 1785722466.0137658,
+    "ast_hash": "c6ae0275900f0c5824ec3f589c829ac2",
+    "semantic_hash": "c6ae0275900f0c5824ec3f589c829ac2"
+  },
+  "tools/ti_parser_hab.py": {
+    "mtime": 1780436318.4165356,
+    "ast_hash": "a963b68e76a769f7685d30a0b9fd0cea",
+    "semantic_hash": "a963b68e76a769f7685d30a0b9fd0cea"
+  },
+  "tools/ti_parser_income.py": {
+    "mtime": 1780436318.417534,
+    "ast_hash": "c032bc9028172f0dafab7b4a07019265",
+    "semantic_hash": "c032bc9028172f0dafab7b4a07019265"
+  },
+  "tools/ti_parser_org.py": {
+    "mtime": 1780436318.4185336,
+    "ast_hash": "d884c287fa8d2ccf5936b169a6223010",
+    "semantic_hash": "d884c287fa8d2ccf5936b169a6223010"
+  },
+  "tools/ti_parser_snapshot.py": {
+    "mtime": 1785722292.258534,
+    "ast_hash": "2507a5742d54925ef02d3624085db59f",
+    "semantic_hash": "2507a5742d54925ef02d3624085db59f"
+  },
+  "tools/ti_save_parser.py": {
+    "mtime": 1785722466.0162768,
+    "ast_hash": "55a7f98de1fb41c922fca05efe6262b7",
+    "semantic_hash": "55a7f98de1fb41c922fca05efe6262b7"
+  },
+  ".serena/memories/memory_maintenance.md": {
+    "mtime": 1782034376.027285,
+    "ast_hash": "17877e37a829c58bb20c04228b985ab8",
+    "semantic_hash": "17877e37a829c58bb20c04228b985ab8"
+  },
+  ".serena/project.yml": {
+    "mtime": 1782034328.7214146,
+    "ast_hash": "90ee88189b616b462ca676775be7e126",
+    "semantic_hash": "90ee88189b616b462ca676775be7e126"
+  },
+  "README.md": {
+    "mtime": 1780436580.1446824,
+    "ast_hash": "a5af1ce24dbb6c22751142be0a17b642",
+    "semantic_hash": "a5af1ce24dbb6c22751142be0a17b642"
+  },
+  "docs/module_catalog.md": {
+    "mtime": 1780005566.583199,
+    "ast_hash": "ba56218feed7eb1e038dcad39a93856d",
+    "semantic_hash": "ba56218feed7eb1e038dcad39a93856d"
+  },
+  "docs/research_catalog.md": {
+    "mtime": 1780189068.624643,
+    "ast_hash": "af0c203dedff91553742de49e75afefa",
+    "semantic_hash": "af0c203dedff91553742de49e75afefa"
+  },
+  "tests/test_scenario_rules.py": {
+    "mtime": 1785722354.1943457,
+    "ast_hash": "74afe91b61e5f3abaf7333ca2208ab4d",
+    "semantic_hash": "74afe91b61e5f3abaf7333ca2208ab4d"
+  },
+  "dev-docs/plan/scenario-specific-rules/00-master-plan.md": {
+    "mtime": 1785722028.684084,
+    "ast_hash": "e6c8803290ade1664352957f30bc7866",
+    "semantic_hash": "e6c8803290ade1664352957f30bc7866"
+  },
+  "dev-docs/plan/scenario-specific-rules/01-discovery.md": {
+    "mtime": 1785722028.6864312,
+    "ast_hash": "502bd38155266d48556b442cb52f0a58",
+    "semantic_hash": "502bd38155266d48556b442cb52f0a58"
+  },
+  "dev-docs/plan/scenario-specific-rules/02-implementation.md": {
+    "mtime": 1785722516.8075635,
+    "ast_hash": "c5e369866f1793acde80b230cc2bb449",
+    "semantic_hash": "c5e369866f1793acde80b230cc2bb449"
+  },
+  "dev-docs/plan/scenario-specific-rules/03-verification.md": {
+    "mtime": 1785722623.6475408,
+    "ast_hash": "5cc0d22a26447dc3da08d2b9da1e19a1",
+    "semantic_hash": "5cc0d22a26447dc3da08d2b9da1e19a1"
+  },
+  "graphify-out/memory/query_20260717_071607_noble_metal\uc744_\uc4f8\ub370\uc5c6\uc774_\ub9ce\uc774_\uc18c\ubaa8\ud558\ub294_\uc694\uc18c\ub098__\uc9c0\uae08_\uc811\uadfc_\uac00\ub2a5\ud55c_\uc9c0\uc810_\uc911_nobl.md": {
+    "mtime": 1784272567.082634,
+    "ast_hash": "dbcfc1313d5f8b148215524656120a55",
+    "semantic_hash": "dbcfc1313d5f8b148215524656120a55"
+  },
+  "graphify-out/memory/query_20260721_094549_\ucd5c\uc2e0_combat_save\uc5d0\uc11c_\uc804\ud22c\ub97c_\uac78\uc5b4\uc624\ub294_\uc801_\uc22b\uc790\ub97c_\uc904\uc778\ub2e4\ub358\uac00_\ud574\uc11c_\uc2b9\ub9ac\ub85c_\ubc14\uafd4\uc904_\uc218.md": {
+    "mtime": 1784627149.6988156,
+    "ast_hash": "e4e1bd15cf09b83e40f014784c9dc898",
+    "semantic_hash": "e4e1bd15cf09b83e40f014784c9dc898"
+  },
+  "graphify-out/memory/query_20260803_020417_2003__be_\uc2dc\ub098\ub9ac\uc624_\ucd94\uac00\uc5d0_\ub530\ub978_\uc2dc\ub098\ub9ac\uc624\ubcc4_\uaddc\uce59\uc774_\ud30c\uc11c\uc5d0_\ud544\uc694\ud55c\uc9c0_\ud310\ub2e8\ud558\uace0_\uc801\uc6a9.md": {
+    "mtime": 1785722657.6173515,
+    "ast_hash": "cea8f03392832deb1f4c14c063e9b9cd",
+    "semantic_hash": "cea8f03392832deb1f4c14c063e9b9cd"
+  },
+  "graphify-out/memory/query_20260803_021741_\ucd5c\uc2e0_\uc138\uc774\ube0c\ub97c_\ub300\uc0c1\uc73c\ub85c_\ub0b4\uac00_\uc9c0\uae08_\ud1b5\uc81c\ud558\uace0_\uc788\ub294_\uad6d\uac00\uc758_\uc6b0\uc120\uc21c\uc704_\uc124\uc815__\ucd5c\uc6b0\uc120\uc801\uc73c\ub85c_\ucd94\uac00.md": {
+    "mtime": 1785723461.6423826,
+    "ast_hash": "90b17b62eb55e9f848ead1c88da69ba2",
+    "semantic_hash": "90b17b62eb55e9f848ead1c88da69ba2"
+  },
+  "graphify-out/memory/query_20260803_024645_\uc11c\ud638\uc8fc\ub294_\ud638\uc8fc\uc640_\uc804\uc7c1\uc911\uc778\ub370__\uad70\uc0ac\ub825_\uc218\uc900\uc740_\ub192\uc544\ub3c4_\ubb3c\ub7c9\uc774_\uc801\uc5b4__\ud638\uc8fc\uac38_\uad70\uc0ac\ub825\uc5d0_\ud22c\uc790\ud558\ub294\ub9cc.md": {
+    "mtime": 1785725205.7330928,
+    "ast_hash": "7ebff1afcaf904d1ff1888936bfaad1f",
+    "semantic_hash": "7ebff1afcaf904d1ff1888936bfaad1f"
+  },
+  "graphify-out/memory/query_20260803_025720_\uadf8\ub9ac\uace0_\uc9c0\uc2dd\uc774_\uc815\ubd80\ubcf4\ub2e4_\uc120\ud589\ub418\uc5b4\uc57c_\ud55c\ub2e4\ub294_\uac74_\uc54c\uaca0\ub294\ub370__\uc815\ubd80_\ud22c\uc790\ub97c_\uc9c0\uc2dd_8_5\ubd80\ud130_\uc2dc\uc791\ud558.md": {
+    "mtime": 1785725840.2481546,
+    "ast_hash": "20016790751f1425199981fbf6923666",
+    "semantic_hash": "20016790751f1425199981fbf6923666"
+  },
+  "graphify-out/memory/query_20260803_032043_\ud638\uc8fc\ub97c_\ub0b4\uac00_\ud1b5\uc81c\ud558\uace0_\uc788\ub2e4\uba74_\uac15\uc81c\ub85c_\ud3c9\ud654\ud611\uc815\uc744_\ub9fa\uc744_\uc218_\uc788\uc744\ud150\ub370__\uadf8\ub807\uc9c0_\ubabb\ud558\ub2e4\uba74_\ud3c9\ud654\ud611\uc815.md": {
+    "mtime": 1785727243.102712,
+    "ast_hash": "318af5dc17bb766f9d18ef1c790bdeef",
+    "semantic_hash": "318af5dc17bb766f9d18ef1c790bdeef"
+  },
+  "graphify-out/memory/query_20260803_033819_be_\uc2dc\ub098\ub9ac\uc624\uc5d0\uc11c\ub294_ip\uac00_\uc99d\uac00\ud558\ub294_\uc0b0\uc2dd\uc774_\ub2ec\ub77c\uc838\uc11c_\ud569\uc0b0_ip\uac00_\uc801\uc5b4\uc9c0\ub294_\ud6a8\uacfc\ub97c_\uc778\uad6c\uac00_\ub298.md": {
+    "mtime": 1785728299.3199074,
+    "ast_hash": "5adf5ce215eb1101048f6483a9b61a50",
+    "semantic_hash": "5adf5ce215eb1101048f6483a9b61a50"
+  }
+}
