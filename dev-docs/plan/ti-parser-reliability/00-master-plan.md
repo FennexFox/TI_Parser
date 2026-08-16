@@ -6,7 +6,8 @@
 - Title: TI Parser reliability and provenance
 - Source plan: None
 - Scope: Human-player resolution, packaged module-catalog runtime loading, CP-cap provenance,
-  shared hab state interpretation, mining diagnostics, completion-event forecasts, and fail-closed tests.
+  shared hab state interpretation, mining diagnostics, completion-event forecasts, location-aware
+  solar-power validation, and fail-closed tests.
 
 ## Strategy
 
@@ -16,6 +17,7 @@
   distinctions between target crew upkeep, active production/power, and prior-module MC.
 - Keep CP effect values template-driven and expose a summing breakdown plus effect provenance.
 - Simulate future hab resource balances at each saved completion date and surface power uncertainty.
+- Reject nominal solar output when required body/orbit template context cannot be resolved.
 - Verify synthetic cases and the installed `ExitSave(3).gz` fixture.
 
 ## Phase Order
@@ -24,6 +26,7 @@
 2. [Unified hab module effective-state calculations](02-effective-state.md)
 3. [CP capacity and event-based resource forecast](03-cp-forecast.md)
 4. [Diagnostics and ExitSave regression verification](04-verification.md)
+5. [Fail-closed location-aware solar power](05-solar-power-fail-closed.md)
 
 ## Phase Dependencies
 
@@ -31,6 +34,7 @@
 - Phase 2 depends on completion and validation of phase 1.
 - Phase 3 depends on completion and validation of phase 2.
 - Phase 4 depends on completion and validation of phase 3.
+- Phase 5 is a reliability follow-up and depends on the effective-state and forecast work from phases 2-4.
 
 ## Source Of Truth Decisions
 
@@ -45,7 +49,7 @@
 ## Known Risks And Assumptions
 
 - Installed raw effect/body/orbit templates remain necessary for dynamic effects and location-adjusted
-  solar power; missing calculation-relevant effects fail closed.
+  solar power; missing calculation-relevant effects and solar location templates fail closed.
 - Decompiled installed game code confirms construction crew uses the target template, while direct
   support/production/power require active completion. `priorModuleCompleted` remains relevant to MC.
 - Forecast power management priority cannot be reconstructed exactly from a static save, so negative
