@@ -102,11 +102,27 @@ MissionControl row keeps current values separate from
 projection while current research and excess-MC calculations use only operating
 sources.
 
-The module catalog generator reads hab module templates from the local Terra
-Invicta install and writes `data/module_catalog.json` plus
-`docs/module_catalog.md`. Use the JSON for optimizer inputs; the Markdown is a
-human-readable reference for module income, upkeep, crew, power, MC, CP cap,
-build cost, requirements, and derived tags.
+Factioned commands resolve the human player from `TIPlayerState.isAI == false`
+and cross-check `TIMetadataState.playerFactionName`. They fail closed when the
+player is missing, ambiguous, or conflicting; an explicit faction argument or
+`--faction` remains an override. Faction identity output includes display name,
+internal template, and `player` status.
+
+`topbar --diagnostics` adds catalog/effect provenance, mining formula samples,
+and explicit calculation assumptions. `topbar --forecast-resource Volatiles`
+recalculates faction-hab production and support after each module completion,
+reports the completing modules and resulting hab power balance, and identifies
+the first sustained positive event. A projected negative-power hab marks the
+forecast `incomplete` instead of silently treating every completed module as
+operational.
+
+The packaged `data/module_catalog.json` is the runtime source of truth for hab
+module income, upkeep, crew, power, MC, CP cap, build cost, requirements, and
+bonuses. Missing catalogs or referenced templates are fatal calculation-data
+errors, never zero-valued modules. The catalog generator reads raw templates
+from the local Terra Invicta install and refreshes that JSON plus the
+human-readable `docs/module_catalog.md`; raw module templates are generator
+inputs, not an implicit runtime fallback.
 
 The research catalog generator reads global tech and faction project templates
 from the local Terra Invicta install and writes `data/research_catalog.json`

@@ -14,6 +14,7 @@ from typing import Any, Iterable
 
 DEFAULT_CACHE_DIR = ".ti_cache"
 SAVE_GLOB = "*.gz"
+DEFAULT_MODULE_CATALOG = Path(__file__).resolve().parents[1] / "data" / "module_catalog.json"
 TemplateSource = Path | tuple[Path, ...] | list[Path] | None
 SCENARIO_DLC_TEMPLATE_HINTS = {
     "2003Scenario": Path("DLC_Content/DarkSkies/2003_Scenario/Templates"),
@@ -26,6 +27,10 @@ class IndexedState:
     data: dict[str, Any]
     gamestates: dict[str, list[dict[str, Any]]]
     id_index: dict[int, tuple[str, str, dict[str, Any]]]
+
+
+class ModuleCatalogError(RuntimeError):
+    """Raised when authoritative hab-module data cannot be loaded safely."""
 
 
 def json_default(value: Any) -> Any:
@@ -245,6 +250,132 @@ def load_trait_templates(templates_dir: TemplateSource) -> dict[str, dict[str, A
     return load_named_templates(templates_dir, "TITraitTemplate.json")
 
 
+def module_catalog_diagnostics(catalog_path: Path = DEFAULT_MODULE_CATALOG) -> dict[str, Any]:
+    resolved = catalog_path.resolve()
+    if not resolved.is_file():
+        raise ModuleCatalogError(f"Required module catalog not found: {resolved}")
+    stat = resolved.stat()
+    with resolved.open("r", encoding="utf-8-sig") as handle:
+        raw = json.load(handle)
+    if not isinstance(raw, dict) or not isinstance(raw.get("modules"), list):
+        raise ModuleCatalogError(f"Invalid module catalog structure: {resolved}")
+    return {
+        "path": str(resolved),
+        "schemaVersion": raw.get("schemaVersion"),
+        "moduleCount": len(raw["modules"]),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "source": raw.get("source"),
+    }
+
+
+def _catalog_module_to_template(module: dict[str, Any]) -> dict[str, Any]:
+    """Rehydrate the normalized catalog row into the parser's template shape."""
+
+    result: dict[str, Any] = {
+        "dataName": module.get("dataName"),
+        "friendlyName": module.get("friendlyName"),
+        "tier": module.get("tier", 0),
+        "habType": module.get("habType") or "Any",
+    }
+    for group in ("flags", "requirements", "construction", "operation"):
+        values = module.get(group)
+        if isinstance(values, dict):
+            result.update(values)
+
+    income_fields = {
+        "Money": "incomeMoney_month",
+        "Influence": "incomeInfluence_month",
+        "Operations": "incomeOps_month",
+        "Research": "incomeResearch_month",
+        "Projects": "incomeProjects",
+        "Boost": "incomeBoost_month",
+        "MissionControl": "missionControl",
+        "Water": "incomeWater_month",
+        "Volatiles": "incomeVolatiles_month",
+        "Metals": "incomeMetals_month",
+        "NobleMetals": "incomeNobles_month",
+        "Fissiles": "incomeFissiles_month",
+        "Antimatter": "incomeAntimatter_month",
+        "Exotics": "incomeExotics_month",
+    }
+    for resource, value in (module.get("monthlyIncome") or {}).items():
+        field = income_fields.get(str(resource))
+        if field:
+            result[field] = value
+
+    support_fields = {
+        "Money": "money",
+        "Boost": "boost",
+        "Water": "water",
+        "Volatiles": "volatiles",
+        "Metals": "metals",
+        "NobleMetals": "nobleMetals",
+        "Fissiles": "fissiles",
+        "Antimatter": "antimatter",
+        "Exotics": "exotics",
+    }
+    without_crew = ((module.get("monthlySupport") or {}).get("withoutCrew") or {})
+    result["supportMaterials_month"] = {
+        field: without_crew[resource]
+        for resource, field in support_fields.items()
+        if resource in without_crew
+    }
+
+    bonuses = module.get("bonuses") if isinstance(module.get("bonuses"), dict) else {}
+    result["specialRules"] = list(bonuses.get("specialRules") or [])
+    result["specialRulesValue"] = bonuses.get("specialRulesValue", 0)
+    tech = bonuses.get("tech") if isinstance(bonuses.get("tech"), dict) else {}
+    result["techBonuses"] = [
+        {"category": category, "bonus": value}
+        for category, value in tech.items()
+    ]
+    return result
+
+
+def load_hab_module_catalog(catalog_path: Path = DEFAULT_MODULE_CATALOG) -> dict[str, dict[str, Any]]:
+    """Load packaged normalized hab modules; absence or corruption is fatal."""
+
+    resolved = catalog_path.resolve()
+    if not resolved.is_file():
+        raise ModuleCatalogError(f"Required module catalog not found: {resolved}")
+    stat = resolved.stat()
+    return _load_hab_module_catalog_cached(str(resolved), stat.st_size, stat.st_mtime_ns)
+
+
+@lru_cache(maxsize=None)
+def _load_hab_module_catalog_cached(path_value: str, size: int, mtime_ns: int) -> dict[str, dict[str, Any]]:
+    del size, mtime_ns
+    path = Path(path_value)
+    with path.open("r", encoding="utf-8-sig") as handle:
+        raw = json.load(handle)
+    modules = raw.get("modules") if isinstance(raw, dict) else None
+    if not isinstance(modules, list) or not modules:
+        raise ModuleCatalogError(f"Invalid or empty module catalog: {path}")
+    templates: dict[str, dict[str, Any]] = {}
+    required_operation_fields = {
+        "crew",
+        "power",
+        "missionControl",
+        "controlPointCapacity",
+        "constructionTimeModifier",
+        "miningModifier",
+    }
+    for module in modules:
+        if not isinstance(module, dict) or not module.get("dataName"):
+            raise ModuleCatalogError(f"Invalid module row in catalog: {path}")
+        operation = module.get("operation")
+        missing_operation_fields = required_operation_fields - set(operation if isinstance(operation, dict) else {})
+        if missing_operation_fields:
+            raise ModuleCatalogError(
+                f"Module {module.get('dataName')} is missing required operation fields "
+                f"{sorted(missing_operation_fields)} in catalog: {path}"
+            )
+        template = _catalog_module_to_template(module)
+        templates[str(template["dataName"])] = template
+    return templates
+
+
 def load_named_templates(templates_dir: TemplateSource, filename: str) -> dict[str, dict[str, Any]]:
     paths = [directory / filename for directory in template_directories(templates_dir)]
     paths = [path for path in paths if path.is_file()]
@@ -323,38 +454,71 @@ def state_value_by_id(indexed: IndexedState, state_id: int | None) -> dict[str, 
 
 def find_faction_state(indexed: IndexedState, name: str | None = None) -> tuple[int, dict[str, Any]]:
     if name:
-        found = match_raw_state(indexed, "TIFactionState", name)
-        if found and found[0] is not None:
-            return found[0], found[1]
+        needle = name.casefold()
+        exact: list[tuple[int, dict[str, Any]]] = []
+        partial: list[tuple[int, dict[str, Any]]] = []
+        for entry in type_entries(indexed, "TIFactionState"):
+            faction = entry.get("Value") or {}
+            state_id = raw_state_id(entry)
+            if state_id is None or not isinstance(faction, dict):
+                continue
+            names = raw_name_values(faction)
+            if any(value.casefold() == needle for value in names):
+                exact.append((state_id, faction))
+            elif any(needle in value.casefold() for value in names):
+                partial.append((state_id, faction))
+        matches = exact or partial
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            labels = ", ".join(str(faction.get("templateName")) for _, faction in matches)
+            raise SystemExit(f"Faction override is ambiguous ({name}): {labels}")
         raise SystemExit(f"Faction not found: {name}")
+
+    player_candidates: dict[int, dict[str, Any]] = {}
+    for entry in type_entries(indexed, "TIPlayerState"):
+        player = entry.get("Value") or {}
+        if not isinstance(player, dict) or player.get("isAI") is not False:
+            continue
+        faction_id = ref_id(player.get("faction"))
+        faction = state_value_by_id(indexed, faction_id)
+        if faction_id is not None and isinstance(faction, dict):
+            player_candidates[faction_id] = faction
 
     metadata = first_value(indexed, "TIMetadataState") or {}
     player_faction_name = metadata.get("playerFactionName")
+    metadata_candidates: dict[int, dict[str, Any]] = {}
     if player_faction_name:
-        found = match_raw_state(indexed, "TIFactionState", str(player_faction_name))
-        if found and found[0] is not None:
-            return found[0], found[1]
+        needle = str(player_faction_name).casefold()
+        for entry in type_entries(indexed, "TIFactionState"):
+            faction = entry.get("Value") or {}
+            state_id = raw_state_id(entry)
+            if state_id is None or not isinstance(faction, dict):
+                continue
+            if any(value.casefold() == needle for value in raw_name_values(faction)):
+                metadata_candidates[state_id] = faction
 
-    resist_candidate: tuple[int, dict[str, Any]] | None = None
-    for entry in type_entries(indexed, "TIFactionState"):
-        faction = entry.get("Value") or {}
-        state_id = raw_state_id(entry)
-        if state_id is None:
-            continue
-        player = resolve_ref(indexed, faction.get("player"))
-        if player and player[2].get("templateName") == "ResistPlayer":
-            return state_id, faction
-        if faction.get("templateName") == "ResistCouncil":
-            resist_candidate = (state_id, faction)
-    if resist_candidate:
-        return resist_candidate
+    if len(player_candidates) > 1:
+        labels = ", ".join(str(value.get("templateName")) for value in player_candidates.values())
+        raise SystemExit(f"Multiple human player factions found in TIPlayerState: {labels}")
+    if len(metadata_candidates) > 1:
+        labels = ", ".join(str(value.get("templateName")) for value in metadata_candidates.values())
+        raise SystemExit(f"Metadata playerFactionName is ambiguous: {labels}")
+    if player_candidates and metadata_candidates and player_candidates.keys() != metadata_candidates.keys():
+        raise SystemExit("Human player faction metadata conflicts with TIPlayerState.")
+    candidates = player_candidates or metadata_candidates
+    if len(candidates) == 1:
+        return next(iter(candidates.items()))
+    if player_faction_name and not metadata_candidates:
+        raise SystemExit(f"Metadata player faction could not be resolved: {player_faction_name}")
+    raise SystemExit("Human player faction could not be resolved from save metadata/player state.")
 
-    for entry in type_entries(indexed, "TIFactionState"):
-        faction = entry.get("Value") or {}
-        state_id = raw_state_id(entry)
-        if state_id is not None:
-            return state_id, faction
-    raise SystemExit("No faction states found.")
+
+def faction_is_human_player(indexed: IndexedState, faction: dict[str, Any]) -> bool:
+    """Return whether faction is the uniquely resolved human player faction."""
+
+    player_id, _ = find_faction_state(indexed)
+    return player_id == ref_id(faction.get("ID"))
 
 
 def faction_effect_contexts(indexed: IndexedState, faction_id: int) -> dict[str, list[str]]:
@@ -446,13 +610,16 @@ def ref_summary(indexed: IndexedState, value: Any) -> dict[str, Any] | None:
     if not found:
         return {"id": state_id}
     _, type_name, state = found
-    return {
+    summary = {
         "id": state_id,
         "type": type_name,
         "template": state.get("templateName"),
         "code": campaign_code(state.get("templateName")),
         "display": state.get("displayName"),
     }
+    if "isAI" in state:
+        summary["isAI"] = state.get("isAI")
+    return summary
 
 
 def region_nation_summary(indexed: IndexedState, value: Any) -> dict[str, Any] | None:

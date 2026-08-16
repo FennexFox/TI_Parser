@@ -107,6 +107,12 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     topbar = subparsers.add_parser("topbar", help="Reconstruct the top resource bar values for a faction.")
     topbar.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
     topbar.add_argument("--details", action="store_true", help="Include yearly source components for each resource.")
+    topbar.add_argument("--diagnostics", action="store_true", help="Include calculation provenance and assumptions.")
+    topbar.add_argument(
+        "--forecast-resource",
+        choices=api.HAB_MONTHLY_RESOURCES,
+        help="Simulate faction hab income after each queued module completion.",
+    )
     add_compact_flag(topbar)
 
     advise = subparsers.add_parser("advise", help="Estimate research change from assigning a councilor to Advise a nation.")

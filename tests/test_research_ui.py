@@ -20,6 +20,17 @@ def add_state(gamestates, type_name, state_id, value):
     return value
 
 
+def add_human_player(gamestates, faction, faction_id=1, player_id=2):
+    faction["player"] = ref(player_id)
+    add_state(
+        gamestates,
+        "TIPlayerState",
+        player_id,
+        {"templateName": "TestPlayer", "isAI": False, "faction": ref(faction_id)},
+    )
+    add_state(gamestates, "TIMetadataState", player_id + 1000, {"playerFactionName": faction["displayName"]})
+
+
 def build_research_fixture(*, docked=False):
     gamestates = {}
     faction = add_state(
@@ -47,6 +58,7 @@ def build_research_fixture(*, docked=False):
             ],
         },
     )
+    add_human_player(gamestates, faction)
     add_state(
         gamestates,
         "TIGlobalResearchState",
@@ -87,6 +99,7 @@ def build_mission_control_fixture():
             "habSectors": [ref(11)],
         },
     )
+    add_human_player(gamestates, faction)
     add_state(
         gamestates,
         "TIHabState",
@@ -392,6 +405,7 @@ class ResearchUiTests(unittest.TestCase):
             patch.object(ti, "faction_max_mission_control_components", return_value={"total": 0.0}),
             patch.object(ti, "faction_control_point_maintenance", return_value={}),
             patch.object(ti, "calculate_research_breakdown", return_value=research),
+            patch.object(ti, "faction_is_player", return_value=True),
         ):
             result = ti.calculate_topbar(indexed, None, research_templates=templates, base_daily_cache=cache)
 

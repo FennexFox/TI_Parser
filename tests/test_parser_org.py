@@ -152,8 +152,8 @@ class ParserOrgParityTests(unittest.TestCase):
             "load_named_templates",
             return_value={"Org100": {"requiresNationality": True}},
         ):
-            wrapper = ti.calculate_org_plan(indexed, None)
-            direct = org.calculate_org_plan(indexed, None)
+            wrapper = ti.calculate_org_plan(indexed, None, "ResistCouncil")
+            direct = org.calculate_org_plan(indexed, None, "ResistCouncil")
 
         self.assertEqual(wrapper, direct)
         self.assertEqual(wrapper["committeePlan"]["actions"][0]["candidate"]["id"], 100)
@@ -241,7 +241,7 @@ class ParserOrgParityTests(unittest.TestCase):
         }
 
         with patch.object(org, "load_named_templates", return_value=templates):
-            plan = org.calculate_org_plan(indexed, None, focus="science", max_actions=1)
+            plan = org.calculate_org_plan(indexed, None, "CooperateCouncil", focus="science", max_actions=1)
 
         candidates = {
             row["template"]: row
@@ -324,10 +324,11 @@ class ParserOrgParityTests(unittest.TestCase):
         indexed = ti.build_index(data)
 
         with patch.object(org, "load_named_templates", return_value={"Org100": {}}):
-            plan = org.calculate_org_plan(indexed, None, focus="science", max_actions=1)
+            plan = org.calculate_org_plan(indexed, None, "ResistCouncil", focus="science", max_actions=1)
             market_only_plan = org.calculate_org_plan(
                 indexed,
                 None,
+                "ResistCouncil",
                 focus="science",
                 max_actions=1,
                 include_unassigned=False,

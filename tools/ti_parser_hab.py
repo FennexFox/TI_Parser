@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Mapping
 
 from ti_parser_core import (
     IndexedState,
+    ModuleCatalogError,
     apply_effect_modifiers,
     as_float,
     ref_id,
@@ -90,6 +92,16 @@ def hab_module_records(
             template = hab_module_templates.get(template_name, {}) if template_name else {}
             prior_template_name = module.get("priorModuleTemplateName")
             prior_template = hab_module_templates.get(prior_template_name, {}) if prior_template_name else {}
+            if template_name and not template:
+                raise ModuleCatalogError(
+                    f"Hab module template missing from authoritative catalog: {template_name} "
+                    f"(module state {ref_id(module.get('ID'))})"
+                )
+            if prior_template_name and module.get("priorModuleCompleted") and not prior_template:
+                raise ModuleCatalogError(
+                    f"Prior hab module template missing from authoritative catalog: {prior_template_name} "
+                    f"(module state {ref_id(module.get('ID'))})"
+                )
             records.append(
                 {
                     "id": ref_id(module.get("ID")),
@@ -156,30 +168,112 @@ def hab_module_okay(record: dict[str, Any]) -> bool:
     )
 
 
+def _module_completion_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.rstrip("Z"))
+    except ValueError:
+        return None
+
+
+def get_effective_module_state(
+    record: dict[str, Any],
+    at_date: datetime | None = None,
+) -> dict[str, Any]:
+    """Resolve one authoritative current/future module state for all subsystems.
+
+    Game code charges crew from the target module while it is under construction.
+    A completed prior upgrade template is retained only for current mission
+    control; ordinary production, direct support, power, and bonuses require the
+    target module to complete and become active.
+    """
+
+    state = record.get("state") if isinstance(record.get("state"), dict) else {}
+    current_template = record.get("template") if isinstance(record.get("template"), dict) else {}
+    prior_template = record.get("priorTemplate") if isinstance(record.get("priorTemplate"), dict) else {}
+    template_name = record.get("templateName")
+    completed = bool(record.get("completed"))
+    projected_completion = False
+    if not completed and at_date is not None:
+        completion = _module_completion_datetime(state.get("completionDate"))
+        projected_completion = completion is not None and at_date >= completion
+        completed = projected_completion
+
+    destroyed = bool(record.get("destroyed"))
+    decommissioning = bool(record.get("decommissioning"))
+    disabled = bool(state.get("disabled"))
+    damaged = bool(state.get("damaged"))
+    owned = record.get("sectorOwnedByHabFaction") is not False
+    unavailable = not template_name or destroyed or decommissioning or disabled or damaged or not owned
+
+    operational_template: dict[str, Any] | None = None
+    mission_control_template: dict[str, Any] | None = None
+    crew_template: dict[str, Any] | None = None
+    effective_template_name: str | None = None
+    status = "empty" if not template_name else "underConstruction"
+    powered = bool(record.get("powered"))
+
+    if unavailable:
+        if destroyed:
+            status = "destroyed"
+        elif decommissioning:
+            status = "decommissioning"
+        elif disabled:
+            status = "disabled"
+        elif damaged:
+            status = "damaged"
+        elif not owned:
+            status = "foreignSector"
+    elif completed:
+        crew_template = current_template
+        effective_template_name = str(template_name)
+        if powered or projected_completion:
+            operational_template = current_template
+            mission_control_template = current_template
+            status = "completedActive"
+            powered = True
+        else:
+            status = "completedUnpowered"
+    elif state.get("priorModuleCompleted") and prior_template:
+        mission_control_template = prior_template
+        crew_template = current_template
+        effective_template_name = str(record.get("priorTemplateName") or "") or None
+        status = "upgradingPriorMissionControl"
+    else:
+        crew_template = current_template
+
+    return {
+        "status": status,
+        "templateName": effective_template_name,
+        "operationalTemplate": operational_template,
+        "missionControlTemplate": mission_control_template,
+        "crewTemplate": crew_template,
+        "operational": operational_template is not None,
+        "completed": completed,
+        "powered": powered,
+        "projectedCompletion": projected_completion,
+    }
+
+
 def hab_module_functional(record: dict[str, Any]) -> bool:
-    return bool(record.get("completed")) and not record.get("destroyed") and not record.get("decommissioning")
+    return bool(get_effective_module_state(record).get("completed")) and hab_module_okay(record)
 
 
 def hab_module_active_record(record: dict[str, Any]) -> bool:
-    return hab_module_functional(record) and bool(record.get("powered"))
+    return bool(get_effective_module_state(record).get("operational"))
 
 
 def hab_module_current_mission_control(record: dict[str, Any]) -> int:
     if record.get("sectorOwnedByHabFaction") is False:
         return 0
-    template = record.get("template") if isinstance(record.get("template"), dict) else {}
-    if hab_module_active_record(record):
+    effective = get_effective_module_state(record)
+    template = effective.get("missionControlTemplate")
+    if isinstance(template, dict):
         return int(as_float(template.get("missionControl"), 0.0))
-
-    state = record.get("state") if isinstance(record.get("state"), dict) else {}
-    prior_template = record.get("priorTemplate") if isinstance(record.get("priorTemplate"), dict) else {}
-    if (
-        not record.get("completed")
-        and not record.get("destroyed")
-        and not record.get("decommissioning")
-        and state.get("priorModuleCompleted")
-    ):
-        return int(as_float(prior_template.get("missionControl"), 0.0))
+    current = record.get("template") if isinstance(record.get("template"), dict) else {}
+    if effective.get("status") == "completedUnpowered" and "ConsumesMCWhenUnpowered" in hab_template_special_rules(current):
+        return int(as_float(current.get("missionControl"), 0.0))
     return 0
 
 
@@ -210,10 +304,14 @@ def hab_site_daily_production(
     *,
     config: HabConfig,
 ) -> float:
-    if not hab_site:
+    if hab_site is None:
         return 0.0
     field = config.hab_site_production_fields.get(resource)
-    return as_float(hab_site.get(field), 0.0) if field else 0.0
+    if not field:
+        raise RuntimeError(f"No authoritative hab-site yield field is configured for resource {resource}")
+    if field not in hab_site:
+        raise RuntimeError(f"Hab site is missing authoritative yield field {field} for resource {resource}")
+    return as_float(hab_site[field], 0.0)
 
 
 def faction_active_org_mining_bonus(
@@ -272,13 +370,9 @@ def hab_template_income(
         return 0.0
     field = config.hab_income_fields.get(resource)
     income = as_float(template.get(field), 0.0) if field else 0.0
-    if (
-        resource in config.basic_space_resources
-        and template.get("mine")
-        and indexed is not None
-        and faction is not None
-        and hab_site is not None
-    ):
+    if resource in config.basic_space_resources and template.get("mine") and indexed is not None and faction is not None:
+        if hab_site is None:
+            raise RuntimeError(f"Active mining module has no resolvable hab site for resource {resource}")
         mining_multiplier = faction_mining_multiplier(
             indexed,
             faction,
@@ -354,15 +448,21 @@ def hab_template_support(
     return total
 
 
-def hab_crew(records: list[dict[str, Any]]) -> int:
-    return int(sum(as_float(record.get("template", {}).get("crew"), 0.0) for record in records if hab_module_okay(record)))
+def hab_crew(records: list[dict[str, Any]], at_date: datetime | None = None) -> int:
+    total = 0.0
+    for record in records:
+        template = get_effective_module_state(record, at_date).get("crewTemplate")
+        if isinstance(template, dict):
+            total += as_float(template.get("crew"), 0.0)
+    return int(total)
 
 
-def hab_administration_modifier(records: list[dict[str, Any]]) -> float:
+def hab_administration_modifier(records: list[dict[str, Any]], at_date: datetime | None = None) -> float:
     modifier = 1.0
     for record in records:
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
-        if hab_module_active_record(record) and "Efficiency" in hab_template_special_rules(template):
+        effective = get_effective_module_state(record, at_date)
+        template = effective.get("operationalTemplate") if isinstance(effective.get("operationalTemplate"), dict) else {}
+        if effective.get("operational") and "Efficiency" in hab_template_special_rules(template):
             modifier *= 1.0 + as_float(template.get("specialRulesValue"), 0.0)
     return modifier
 
@@ -392,6 +492,7 @@ def hab_monthly_resource_income(
     effect_contexts: dict[str, list[str]] | None = None,
     effect_templates: dict[str, dict[str, Any]] | None = None,
     mining_rate: float = 1.0,
+    at_date: datetime | None = None,
     *,
     config: HabConfig,
     faction_councilor_ids: Callable[[dict[str, Any]], list[int]],
@@ -399,22 +500,31 @@ def hab_monthly_resource_income(
     income = 0.0
     support = 0.0
     farm_discount = 0
-    crew = hab_crew(records)
-    any_core_completed = bool(hab.get("anyCoreCompleted"))
+    crew = hab_crew(records, at_date)
     core_record = hab_core_module_record(records)
     core_id = core_record.get("id") if core_record else None
-    has_construction = any(hab_module_okay(record) and not record.get("completed") for record in records)
+    any_core_completed = bool(hab.get("anyCoreCompleted")) or bool(
+        core_record and get_effective_module_state(core_record, at_date).get("operational")
+    )
+    has_construction = any(
+        hab_module_okay(record) and not get_effective_module_state(record, at_date).get("completed")
+        for record in records
+    )
     hab_site = state_value_by_id(indexed, ref_id(hab.get("habSite"))) if indexed is not None else None
 
     for record in records:
         if not hab_module_okay(record):
             continue
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
+        effective = get_effective_module_state(record, at_date)
+        template = effective.get("operationalTemplate") if isinstance(effective.get("operationalTemplate"), dict) else {}
+        crew_template = effective.get("crewTemplate") if isinstance(effective.get("crewTemplate"), dict) else {}
         include_income_and_support = (
-            (any_core_completed and hab_module_active_record(record))
+            (any_core_completed and bool(effective.get("operational")))
             or (resource == "MissionControl" and record.get("id") == core_id)
         )
         if include_income_and_support:
+            if not template:
+                template = record.get("template") if isinstance(record.get("template"), dict) else {}
             income += hab_template_income(
                 resource,
                 template,
@@ -432,7 +542,7 @@ def hab_monthly_resource_income(
             if "Farm" in hab_template_special_rules(template):
                 farm_discount += int(as_float(template.get("specialRulesValue"), 0.0))
         else:
-            support += hab_template_crew_support(resource, template, config=config)
+            support += hab_template_crew_support(resource, crew_template, config=config)
 
     if resource == "Water":
         covered_crew = min(farm_discount, crew)
@@ -468,9 +578,11 @@ def hab_power_summary(records: list[dict[str, Any]]) -> dict[str, int]:
     generated = 0
     consumed = 0
     for record in records:
-        if not hab_module_active_record(record):
+        effective = get_effective_module_state(record)
+        if not effective.get("operational"):
             continue
-        power = int(as_float(record.get("template", {}).get("power"), 0.0))
+        template = effective.get("operationalTemplate") if isinstance(effective.get("operationalTemplate"), dict) else {}
+        power = int(as_float(template.get("power"), 0.0))
         if power > 0:
             generated += power
         elif power < 0:
@@ -481,9 +593,10 @@ def hab_power_summary(records: list[dict[str, Any]]) -> dict[str, int]:
 def hab_tech_bonuses(records: list[dict[str, Any]]) -> dict[str, float]:
     bonuses: dict[str, float] = {}
     for record in records:
-        if not hab_module_active_record(record):
+        effective = get_effective_module_state(record)
+        if not effective.get("operational"):
             continue
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
+        template = effective.get("operationalTemplate") if isinstance(effective.get("operationalTemplate"), dict) else {}
         for bonus in template.get("techBonuses") if isinstance(template.get("techBonuses"), list) else []:
             if not isinstance(bonus, dict):
                 continue
@@ -502,9 +615,10 @@ def hab_leo_priority_bonuses(
         return {}
     bonuses: dict[str, float] = {}
     for record in records:
-        if not hab_module_active_record(record):
+        effective = get_effective_module_state(record)
+        if not effective.get("operational"):
             continue
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
+        template = effective.get("operationalTemplate") if isinstance(effective.get("operationalTemplate"), dict) else {}
         rules = hab_template_special_rules(template)
         for rule, priority in config.hab_leo_priority_rules.items():
             if rule in rules:
@@ -515,9 +629,10 @@ def hab_leo_priority_bonuses(
 def hab_control_point_capacity(hab: dict[str, Any], records: list[dict[str, Any]]) -> int:
     total = 0
     for record in records:
-        if not hab_module_active_record(record):
+        effective = get_effective_module_state(record)
+        if not effective.get("operational"):
             continue
-        template = record.get("template") if isinstance(record.get("template"), dict) else {}
+        template = effective.get("operationalTemplate") if isinstance(effective.get("operationalTemplate"), dict) else {}
         if not hab.get("inEarthLEO") and "LEOControlPointCapacity" in hab_template_special_rules(template):
             continue
         total += int(as_float(template.get("controlPointCapacity"), 0.0))

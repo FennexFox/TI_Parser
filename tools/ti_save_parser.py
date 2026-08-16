@@ -35,11 +35,13 @@ from ti_parser_core import (
     effect_modifier_delta,
     faction_effect_contexts,
     file_fingerprint,
+    faction_is_human_player,
     find_faction_state,
     find_latest_save,
     first_value,
     json_default,
     load_named_templates,
+    load_hab_module_catalog,
     load_save,
     load_trait_templates,
     match_raw_state,
@@ -60,6 +62,7 @@ from ti_parser_core import (
     state_value_by_id,
     template_source_value,
     type_entries,
+    module_catalog_diagnostics,
 )
 import ti_parser_snapshot as snapshot_layer
 import ti_parser_income as income_layer
@@ -68,7 +71,7 @@ import ti_parser_org as org_layer
 from ti_parser_snapshot import SnapshotConfig
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 DEFAULT_MAX_COUNCILOR_ATTRIBUTE = 25
 DAYS_PER_YEAR = 365.2422
 DEFAULT_GLOBAL_CONFIG = {
@@ -163,6 +166,21 @@ HAB_MONTHLY_RESOURCES = (
     "Influence",
     "Operations",
     "Projects",
+)
+TOPBAR_EFFECT_CONTEXTS = frozenset(
+    {
+        "ControlPointMaintenance",
+        "MissionControlDisruption_PCT",
+        "SpaceMiningBonus",
+        "MiningWaterBonus",
+        "MiningVolatilesBonus",
+        "MiningMetalsBonus",
+        "MiningNoblesBonus",
+        "MiningFissilesBonus",
+        "PublicOpinionInfluence",
+        "ControlPointResearch",
+        "HabResearchProduction",
+    }
 )
 HAB_INCOME_FIELDS = {
     "Money": "incomeMoney_month",
@@ -781,6 +799,10 @@ def hab_module_active_record(record: dict[str, Any]) -> bool:
     return hab_layer.hab_module_active_record(record)
 
 
+def get_effective_module_state(record: dict[str, Any], at_date: datetime | None = None) -> dict[str, Any]:
+    return hab_layer.get_effective_module_state(record, at_date)
+
+
 def hab_module_current_mission_control(record: dict[str, Any]) -> int:
     return hab_layer.hab_module_current_mission_control(record)
 
@@ -866,8 +888,8 @@ def hab_crew(records: list[dict[str, Any]]) -> int:
     return hab_layer.hab_crew(records)
 
 
-def hab_administration_modifier(records: list[dict[str, Any]]) -> float:
-    return hab_layer.hab_administration_modifier(records)
+def hab_administration_modifier(records: list[dict[str, Any]], at_date: datetime | None = None) -> float:
+    return hab_layer.hab_administration_modifier(records, at_date)
 
 
 def hab_farm_crew_discount(records: list[dict[str, Any]], any_core_completed: bool) -> int:
@@ -886,6 +908,7 @@ def hab_monthly_resource_income(
     effect_contexts: dict[str, list[str]] | None = None,
     effect_templates: dict[str, dict[str, Any]] | None = None,
     mining_rate: float = 1.0,
+    at_date: datetime | None = None,
 ) -> dict[str, float]:
     return hab_layer.hab_monthly_resource_income(
         hab,
@@ -899,6 +922,7 @@ def hab_monthly_resource_income(
         effect_contexts=effect_contexts,
         effect_templates=effect_templates,
         mining_rate=mining_rate,
+        at_date=at_date,
         config=HAB_CONFIG,
         faction_councilor_ids=faction_councilor_ids,
     )
@@ -1184,14 +1208,17 @@ def hab_power_summary(
     hab: dict[str, Any] | None = None,
     body_templates: dict[str, dict[str, Any]] | None = None,
     orbit_templates: dict[str, dict[str, Any]] | None = None,
+    at_date: datetime | None = None,
 ) -> dict[str, int]:
     generated = 0
     consumed = 0
     for record in records:
-        if not hab_module_active_record(record):
+        effective = get_effective_module_state(record, at_date)
+        if not effective.get("operational"):
             continue
+        template = effective.get("operationalTemplate") if isinstance(effective.get("operationalTemplate"), dict) else {}
         power = hab_module_power(
-            record.get("template", {}),
+            template,
             indexed=indexed,
             hab=hab,
             body_templates=body_templates,
@@ -1282,7 +1309,7 @@ def calculate_hab_ui(
     if not found:
         raise SystemExit(f"Hab not found: {hab_name}")
     hab_id, hab = found
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
     orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
     trait_templates = load_trait_templates(templates_dir)
@@ -1423,7 +1450,7 @@ def calculate_hab_slots(
     include_module_counts: bool = False,
 ) -> dict[str, Any]:
     faction_id, faction = find_faction_state(indexed, faction_name)
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     rows_all = [
         summarize_hab_slots(indexed, templates_dir, hab_id, hab, hab_module_templates, include_module_counts)
         for hab_id, hab in faction_hab_states(indexed, faction)
@@ -2270,7 +2297,7 @@ def hab_module_candidate_rows(
     mission_control_available: float,
     topbar: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
     orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
     effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
@@ -2319,7 +2346,7 @@ def hab_module_upgrade_rows(
     mission_control_available: float,
     topbar: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
     orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
     effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
@@ -2703,7 +2730,7 @@ def hab_plan_row(
     top: int,
     topbar: dict[str, Any],
 ) -> dict[str, Any]:
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
     orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
     records = hab_module_records(indexed, hab, hab_module_templates)
@@ -3836,7 +3863,7 @@ def load_research_templates(templates_dir: Path | None) -> ResearchTemplates:
         traits=load_trait_templates(templates_dir),
         effects=load_named_templates(templates_dir, "TIEffectTemplate.json"),
         orgs=load_named_templates(templates_dir, "TIOrgTemplate.json"),
-        hab_modules=load_named_templates(templates_dir, "TIHabModuleTemplate.json"),
+        hab_modules=load_hab_module_catalog(),
         utility_modules=load_named_templates(templates_dir, "TIUtilityModuleTemplate.json"),
         techs=load_named_templates(templates_dir, "TITechTemplate.json"),
         projects=load_named_templates(templates_dir, "TIProjectTemplate.json"),
@@ -5311,12 +5338,7 @@ def command_research_plan(save_path: Path, templates_dir: Path | None, args: arg
 
 
 def faction_is_player(indexed: IndexedState, faction: dict[str, Any]) -> bool:
-    metadata = first_value(indexed, "TIMetadataState") or {}
-    player_name = metadata.get("playerFactionName")
-    if player_name and str(player_name) == str(faction.get("displayName")):
-        return True
-    player = resolve_ref(indexed, faction.get("player"))
-    return bool(player and player[2].get("templateName") == "ResistPlayer")
+    return faction_is_human_player(indexed, faction)
 
 
 def faction_mining_rate(indexed: IndexedState, faction: dict[str, Any]) -> float:
@@ -5862,7 +5884,7 @@ def ship_plan_simulation_catalogs(templates_dir: Path | None) -> dict[str, dict[
         "utilities": ship_plan_tagged_templates(templates_dir, SHIP_PLAN_UTILITY_TEMPLATE_FILES),
         "weapons": ship_plan_tagged_templates(templates_dir, SHIP_PLAN_WEAPON_TEMPLATE_FILES),
         "effects": load_named_templates(templates_dir, "TIEffectTemplate.json"),
-        "shipyards": load_named_templates(templates_dir, "TIHabModuleTemplate.json"),
+        "shipyards": load_hab_module_catalog(),
     }
 
 
@@ -6606,7 +6628,7 @@ def faction_yearly_income_from_habs(
     councilor_by_id: dict[int, dict[str, Any]],
     resource: str,
 ) -> float:
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     total_month = 0.0
     for _, hab in faction_hab_states(indexed, faction):
         records = hab_module_records(indexed, hab, hab_module_templates)
@@ -6644,7 +6666,7 @@ def faction_max_mission_control_components(
     councilors = faction_yearly_income_from_councilors(indexed, faction, trait_templates, councilor_by_id, "MissionControl")
     nations = faction_yearly_income_from_nations(indexed, faction_id, faction, councilor_by_id, effect_contexts, effect_templates, "MissionControl")
     habs = 0.0
-    hab_module_templates = hab_module_templates if hab_module_templates is not None else load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = hab_module_templates if hab_module_templates is not None else load_hab_module_catalog()
     for _, hab in faction_hab_states(indexed, faction):
         for record in hab_module_records(indexed, hab, hab_module_templates):
             value = hab_module_current_mission_control(record)
@@ -6803,12 +6825,26 @@ def faction_control_point_maintenance(
         )
 
     habs = 0.0
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     for _, hab in faction_hab_states(indexed, faction):
         habs += hab_control_point_capacity(hab, hab_module_records(indexed, hab, hab_module_templates))
 
+    cp_effect_names = effect_contexts.get("ControlPointMaintenance", [])
+    missing_effects = sorted({name for name in cp_effect_names if name not in effect_templates})
+    if missing_effects:
+        raise RuntimeError(
+            "Control-point capacity effects are missing template data: " + ", ".join(missing_effects)
+        )
     effect_delta = effect_modifier_delta(effect_contexts, effect_templates, "ControlPointMaintenance", global_freebies)
     cap = global_freebies + councilors + habs - effect_delta
+    breakdown = {
+        "base": global_freebies,
+        "councilors": councilors,
+        "projectFactionEffects": -effect_delta,
+        "habModules": habs,
+        "scenarioModifiers": 0.0,
+        "difficultyModifiers": 0.0,
+    }
     overage = max(baseline - cap, 0.0)
     return {
         "usage": baseline,
@@ -6817,6 +6853,15 @@ def faction_control_point_maintenance(
         "annualInfluenceCost": overage * overage,
         "missionPenaltyRecent": (faction.get("history_CPCapOverageByDay") or [0.0])[0],
         "missionPenaltyCurrent": overage * DEFAULT_GLOBAL_CONFIG["TIMissionModifier_ControlPointOverage_Multiplier"],
+        "breakdown": breakdown,
+        "effectProvenance": [
+            {
+                "name": name,
+                "operation": effect_templates[name].get("operation"),
+                "value": as_float(effect_templates[name].get("value"), 0.0),
+            }
+            for name in cp_effect_names
+        ],
         "components": {
             "scenarioMultiplier": scenario_rules.control_point_maintenance_multiplier,
             "gdpScale": gdp_scale,
@@ -6857,6 +6902,231 @@ def faction_resource_components_yearly(
     return components
 
 
+def faction_hab_resource_at_date(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+    councilor_by_id: dict[int, dict[str, Any]],
+    resource: str,
+    at_date: datetime,
+) -> dict[str, float]:
+    production = 0.0
+    consumption = 0.0
+    for _, hab in faction_hab_states(indexed, faction):
+        records = hab_module_records(indexed, hab, hab_module_templates)
+        monthly = hab_monthly_resource_income(
+            hab,
+            records,
+            resource,
+            hab_administration_modifier(records, at_date),
+            science_adviser_multiplier=1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Science"),
+            administration_adviser_multiplier=1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Administration"),
+            indexed=indexed,
+            faction=faction,
+            effect_contexts=effect_contexts,
+            effect_templates=effect_templates,
+            mining_rate=faction_mining_rate(indexed, faction),
+            at_date=at_date,
+        )
+        production += as_float(monthly.get("income"), 0.0)
+        consumption += as_float(monthly.get("support"), 0.0)
+    return {"production": production, "consumption": consumption, "net": production - consumption}
+
+
+def first_sustained_surplus_date(events: list[dict[str, Any]]) -> str | None:
+    for index, event in enumerate(events):
+        if as_float(event.get("net"), 0.0) > 0.0 and all(
+            as_float(later.get("net"), 0.0) > 0.0 for later in events[index:]
+        ):
+            return str(event.get("date"))
+    return None
+
+
+def faction_mining_calculation_samples(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+    org_bonus = faction_active_org_mining_bonus(indexed, faction)
+    mining_rate = faction_mining_rate(indexed, faction)
+    for _, hab in faction_hab_states(indexed, faction):
+        site = state_value_by_id(indexed, ref_id(hab.get("habSite")))
+        if not isinstance(site, dict):
+            continue
+        for record in hab_module_records(indexed, hab, hab_module_templates):
+            effective = get_effective_module_state(record)
+            template = effective.get("operationalTemplate")
+            if not isinstance(template, dict) or not template.get("mine"):
+                continue
+            module_multiplier = as_float(template.get("miningModifier"), 1.0)
+            for resource in BASIC_SPACE_RESOURCES:
+                site_yield = hab_site_daily_production(site, resource)
+                if site_yield <= 0.0:
+                    continue
+                faction_multiplier = faction_mining_multiplier(
+                    indexed,
+                    faction,
+                    resource,
+                    effect_contexts,
+                    effect_templates,
+                )
+                final_daily = site_yield * module_multiplier * faction_multiplier * mining_rate
+                samples.append(
+                    {
+                        "hab": hab.get("displayName") or hab.get("templateName"),
+                        "resource": resource,
+                        "siteYieldPerDay": site_yield,
+                        "module": effective.get("templateName"),
+                        "moduleMultiplier": module_multiplier,
+                        "activeOrgBonus": org_bonus,
+                        "factionEffectNames": (
+                            effect_contexts.get("SpaceMiningBonus", [])
+                            + effect_contexts.get(MINING_BONUS_CONTEXTS.get(resource, ""), [])
+                        ),
+                        "factionMultiplier": faction_multiplier,
+                        "scenarioMiningRate": mining_rate,
+                        "finalPerDay": final_daily,
+                        "monthly": final_daily * DAYS_PER_YEAR / 12.0,
+                    }
+                )
+    selected: list[dict[str, Any]] = []
+    for resource in BASIC_SPACE_RESOURCES:
+        candidates = [row for row in samples if row["resource"] == resource]
+        if candidates:
+            selected.append(max(candidates, key=lambda row: as_float(row.get("monthly"), 0.0)))
+    return clean_numbers(selected, 6)
+
+
+def forecast_faction_hab_resource(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+    councilor_by_id: dict[int, dict[str, Any]],
+    resource: str,
+    *,
+    body_templates: dict[str, dict[str, Any]] | None = None,
+    orbit_templates: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    time_state = first_value(indexed, "TITimeState") or {}
+    current = ti_datetime(time_state.get("currentDateTime"))
+    if current is None:
+        raise RuntimeError("Cannot forecast module completions: TITimeState.currentDateTime is missing or invalid.")
+
+    grouped: dict[datetime, list[dict[str, Any]]] = {}
+    hab_by_id: dict[int, dict[str, Any]] = {}
+    records_by_hab: dict[int, list[dict[str, Any]]] = {}
+    for hab_id, hab in faction_hab_states(indexed, faction):
+        hab_by_id[hab_id] = hab
+        records = hab_module_records(indexed, hab, hab_module_templates)
+        records_by_hab[hab_id] = records
+        for record in records:
+            if not hab_module_okay(record) or record.get("completed"):
+                continue
+            completion = completion_datetime((record.get("state") or {}).get("completionDate"))
+            if completion is None or completion <= current:
+                continue
+            grouped.setdefault(completion, []).append({"habId": hab_id, "record": record})
+
+    rows: list[dict[str, Any]] = []
+    previous = faction_hab_resource_at_date(
+        indexed,
+        faction,
+        hab_module_templates,
+        effect_contexts,
+        effect_templates,
+        councilor_by_id,
+        resource,
+        current,
+    )
+    rows.append(
+        {
+            "date": current.isoformat(),
+            **previous,
+            "changeFromPrior": 0.0,
+            "moduleCompletions": [],
+        }
+    )
+
+    for event_date in sorted(grouped):
+        current_values = faction_hab_resource_at_date(
+            indexed,
+            faction,
+            hab_module_templates,
+            effect_contexts,
+            effect_templates,
+            councilor_by_id,
+            resource,
+            event_date,
+        )
+        completions: list[dict[str, Any]] = []
+        power_rows: list[dict[str, Any]] = []
+        impacted_habs = sorted({int(item["habId"]) for item in grouped[event_date]})
+        for item in grouped[event_date]:
+            record = item["record"]
+            hab = hab_by_id[int(item["habId"])]
+            completions.append(
+                {
+                    "hab": hab.get("displayName") or hab.get("templateName") or item["habId"],
+                    "module": record.get("display") or record.get("templateName"),
+                    "template": record.get("templateName"),
+                    "priorTemplate": record.get("priorTemplateName") or None,
+                }
+            )
+        for hab_id in impacted_habs:
+            hab = hab_by_id[hab_id]
+            power_rows.append(
+                {
+                    "hab": hab.get("displayName") or hab.get("templateName") or hab_id,
+                    **hab_power_summary(
+                        records_by_hab[hab_id],
+                        indexed=indexed,
+                        hab=hab,
+                        body_templates=body_templates,
+                        orbit_templates=orbit_templates,
+                        at_date=event_date,
+                    ),
+                }
+            )
+        power_warnings = [
+            f"Projected powered module set exceeds generation at {row['hab']} by {-int(row['net'])}."
+            for row in power_rows
+            if int(row.get("net", 0)) < 0
+        ]
+        rows.append(
+            {
+                "date": event_date.isoformat(),
+                **current_values,
+                "changeFromPrior": current_values["net"] - previous["net"],
+                "moduleCompletions": completions,
+                "powerAfterEvent": power_rows,
+                "status": "incomplete" if power_warnings else "complete",
+                "warnings": power_warnings,
+            }
+        )
+        previous = current_values
+
+    incomplete = any(row.get("status") == "incomplete" for row in rows)
+    return {
+        "resource": resource,
+        "scope": "faction hab production and consumption only",
+        "status": "incomplete" if incomplete else "complete",
+        "events": clean_numbers(rows, 6),
+        "firstSustainedSurplusDate": first_sustained_surplus_date(rows),
+        "warnings": [
+            warning
+            for row in rows
+            for warning in row.get("warnings", [])
+        ],
+    }
+
+
 def calculate_topbar(
     indexed: IndexedState,
     templates_dir: Path | None,
@@ -6865,12 +7135,26 @@ def calculate_topbar(
     *,
     research_templates: ResearchTemplates | None = None,
     base_daily_cache: dict[int, float] | None = None,
+    include_diagnostics: bool = False,
+    forecast_resource: str | None = None,
 ) -> dict[str, Any]:
     trait_templates = research_templates.traits if research_templates else load_trait_templates(templates_dir)
     effect_templates = research_templates.effects if research_templates else load_named_templates(templates_dir, "TIEffectTemplate.json")
-    hab_module_templates = research_templates.hab_modules if research_templates else load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = research_templates.hab_modules if research_templates else load_hab_module_catalog()
     faction_id, faction = find_faction_state(indexed, faction_name)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
+    missing_effects = sorted(
+        {
+            name
+            for context in TOPBAR_EFFECT_CONTEXTS
+            for name in effect_contexts.get(context, [])
+            if name not in effect_templates
+        }
+    )
+    if missing_effects:
+        raise RuntimeError(
+            "Effects required by topbar calculations are missing template data: " + ", ".join(missing_effects)
+        )
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     mc_components = faction_max_mission_control_components(
         indexed,
@@ -6991,24 +7275,83 @@ def calculate_topbar(
             "id": faction_id,
             "template": faction.get("templateName"),
             "display": faction.get("displayName"),
+            "player": faction_is_player(indexed, faction),
         },
         "showMonthlyIncomes": bool(faction.get("showMonthlyIncomesInTopBarAndIntel")),
         "resources": rows,
         "controlPointMaintenance": clean_numbers(cp_maintenance, 6),
         "resourceIncomeDeficiencies": faction.get("resourceIncomeDeficiencies") or [],
+        "valueProvenance": {
+            "saveNative": [
+                "resources.*.current",
+                "resources.MissionControl.usage",
+                "resourceIncomeDeficiencies",
+            ],
+            "calculated": [
+                "resources.*.daily/monthly/yearly",
+                "resources.MissionControl.capacity/available/projectedAfterCurrentQueue",
+                "controlPointMaintenance",
+                "forecast",
+            ],
+        },
         "sourceNotes": [
             "Top-bar stockpiles are raw TIFactionState.resources.",
             "Top-bar non-research deltas use TIFactionState.GetMonthlyIncome-equivalent yearly components divided by 12 when monthly display is enabled.",
             "Research row includes the distribution-slot bonus, matching GeneralControlsController.ResourceReportString.",
         ],
     }
+    if forecast_resource:
+        output["forecast"] = forecast_faction_hab_resource(
+            indexed,
+            faction,
+            hab_module_templates,
+            effect_contexts,
+            effect_templates,
+            councilor_by_id,
+            forecast_resource,
+            body_templates=load_named_templates(templates_dir, "TISpaceBodyTemplate.json"),
+            orbit_templates=load_named_templates(templates_dir, "TIOrbitTemplate.json"),
+        )
+    if include_diagnostics:
+        output["diagnostics"] = {
+            "faction": {
+                "selection": "override" if faction_name else "save human-player metadata/TIPlayerState",
+                "id": faction_id,
+                "template": faction.get("templateName"),
+                "display": faction.get("displayName"),
+                "player": faction_is_player(indexed, faction),
+            },
+            "catalog": module_catalog_diagnostics(),
+            "unknownTemplates": [],
+            "unknownEffects": [],
+            "miningSamples": faction_mining_calculation_samples(
+                indexed,
+                faction,
+                hab_module_templates,
+                effect_contexts,
+                effect_templates,
+            ),
+            "calculationAssumptions": [
+                "Installed game TIHabState.GetNetCurrentMonthlyIncome charges target-module crew during construction but no direct support or production.",
+                "Installed game active-module paths exclude under-construction upgrades from power/production/bonuses; priorModuleCompleted is retained for current MC only.",
+                "Forecast completion events assume the completed target module becomes powered; per-event hab power balance is reported.",
+                "Daily-to-monthly space mining conversion is DAYS_PER_YEAR / 12.",
+            ],
+        }
     return output
 
 
 def command_topbar(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
     data = load_save(save_path)
     indexed = build_index(data)
-    result = calculate_topbar(indexed, templates_dir, args.faction, include_details=args.details)
+    result = calculate_topbar(
+        indexed,
+        templates_dir,
+        args.faction,
+        include_details=args.details,
+        include_diagnostics=args.diagnostics,
+        forecast_resource=args.forecast_resource,
+    )
     print_json(result, compact=args.compact)
 
 
@@ -7108,7 +7451,7 @@ def hab_is_alien(indexed: IndexedState, hab: dict[str, Any], records: list[dict[
 
 
 def world_space_population(indexed: IndexedState, templates_dir: Path | None) -> int:
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     total = 0
     for entry in type_entries(indexed, "TIHabState"):
         hab = entry.get("Value") or {}
@@ -7776,11 +8119,31 @@ def command_nation_ui(save_path: Path, templates_dir: Path | None, args: argpars
 
 def command_summary(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
     player_name = snapshot.get("metadata", {}).get("playerFactionName")
-    player_faction = None
+    metadata_candidates = []
     if player_name:
-        player_faction = match_named(snapshot["factions"], player_name)
-    if player_faction is None and snapshot["factions"]:
-        player_faction = next((f for f in snapshot["factions"] if f.get("player", {}).get("template") == "ResistPlayer"), None)
+        needle = str(player_name).casefold()
+        metadata_candidates = [
+            faction
+            for faction in snapshot["factions"]
+            if needle
+            in {
+                str(faction.get("template") or "").casefold(),
+                str(faction.get("display") or "").casefold(),
+                str(faction.get("code") or "").casefold(),
+            }
+        ]
+    player_state_candidates = [
+        faction
+        for faction in snapshot["factions"]
+        if isinstance(faction.get("player"), dict) and faction["player"].get("isAI") is False
+    ]
+    if len(metadata_candidates) > 1 or len(player_state_candidates) > 1:
+        raise SystemExit("Multiple human player faction candidates found in snapshot.")
+    if metadata_candidates and player_state_candidates and metadata_candidates[0].get("id") != player_state_candidates[0].get("id"):
+        raise SystemExit("Snapshot player faction metadata conflicts with TIPlayerState.")
+    player_faction = (player_state_candidates or metadata_candidates or [None])[0]
+    if player_faction is None:
+        raise SystemExit("Human player faction could not be resolved in snapshot.")
 
     top_nations = []
     if player_faction:
@@ -7810,6 +8173,11 @@ def command_summary(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
         )
 
     output = {
+        "faction": {
+            "display": player_faction.get("display"),
+            "template": player_faction.get("template"),
+            "player": True,
+        },
         "source": snapshot.get("source"),
         "currentID": snapshot.get("currentID"),
         "time": snapshot.get("time"),
