@@ -124,6 +124,14 @@ from the local Terra Invicta install and refreshes that JSON plus the
 human-readable `docs/module_catalog.md`; raw module templates are generator
 inputs, not an implicit runtime fallback.
 
+Variable-output solar modules require location-aware body and orbit templates.
+If the relevant `TISpaceBodyTemplate` or `TIOrbitTemplate` data cannot be
+resolved, hab UI, planning, and forecast power calculations fail with an
+explicit solar calculation-data error. They never substitute the module's
+nominal power, because that value can be wrong by several times near Mercury.
+Body/orbit templates are still loaded from the installed game data; packaging
+their required normalized fields is a future catalog-hardening step.
+
 The research catalog generator reads global tech and faction project templates
 from the local Terra Invicta install and writes `data/research_catalog.json`
 plus `docs/research_catalog.md`. The JSON stores research prerequisites as

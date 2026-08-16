@@ -22,6 +22,7 @@ from ti_parser_core import (
     DEFAULT_CACHE_DIR,
     SAVE_GLOB,
     IndexedState,
+    SolarPowerDataError,
     TemplateSource,
     apply_effect_modifiers,
     as_float,
@@ -1126,7 +1127,8 @@ def hab_natural_solar_multiplier(
     hab: dict[str, Any],
     body_templates: dict[str, dict[str, Any]],
     orbit_templates: dict[str, dict[str, Any]],
-) -> float | None:
+) -> float:
+    validate_hab_solar_context(indexed, hab, body_templates, orbit_templates)
     barycenter = hab_barycenter_state(indexed, hab)
     distance_au = natural_space_object_sun_distance_au(indexed, barycenter, body_templates)
     if hab.get("habType") == "Base" or hab.get("habSite"):
@@ -1135,12 +1137,12 @@ def hab_natural_solar_multiplier(
         if str(template.get("objectType") or "") == "Star":
             return 1.0
         if distance_au is None or distance_au <= 0.0 or not body:
-            return None
+            raise_solar_power_data_error(hab, "solar distance could not be derived from the body template chain")
         site = state_value_by_id(indexed, ref_id(hab.get("habSite")))
         return space_body_surface_solar_visibility(indexed, body, site, body_templates) / (distance_au * distance_au)
 
     if distance_au is None or distance_au <= 0.0:
-        return None
+        raise_solar_power_data_error(hab, "solar distance could not be derived from the body template chain")
     orbit_state = state_value_by_id(indexed, ref_id(hab.get("orbitState"))) or {}
     orbit_template = orbit_templates.get(str(orbit_state.get("templateName") or ""), {})
     if barycenter.get("secondaryObject"):
@@ -1148,6 +1150,86 @@ def hab_natural_solar_multiplier(
     else:
         visibility = space_body_orbit_solar_visibility(indexed, barycenter, orbit_template, body_templates)
     return visibility / (distance_au * distance_au)
+
+
+def solar_hab_label(hab: dict[str, Any]) -> str:
+    return str(hab.get("displayName") or hab.get("templateName") or ref_id(hab.get("ID")) or "<unknown hab>")
+
+
+def raise_solar_power_data_error(hab: dict[str, Any], detail: str) -> None:
+    raise SolarPowerDataError(
+        f"Cannot calculate Solar_Power_Variable_Output at {solar_hab_label(hab)}: {detail}. "
+        "Nominal module power is not a valid fallback."
+    )
+
+
+def require_solar_body_template(
+    hab: dict[str, Any],
+    body: dict[str, Any] | None,
+    body_templates: dict[str, dict[str, Any]],
+    role: str,
+) -> dict[str, Any]:
+    if not body:
+        raise_solar_power_data_error(hab, f"{role} body state is unresolved")
+    template_name = str(body.get("templateName") or "")
+    if not template_name:
+        raise_solar_power_data_error(hab, f"{role} body state has no templateName")
+    template = body_templates.get(template_name)
+    if not isinstance(template, dict) or not template:
+        raise_solar_power_data_error(hab, f"required body template {template_name!r} ({role}) is missing")
+    return template
+
+
+def validate_hab_solar_context(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]],
+    orbit_templates: dict[str, dict[str, Any]],
+) -> None:
+    """Fail closed when a variable-output solar calculation lacks location templates."""
+
+    if not body_templates:
+        raise_solar_power_data_error(hab, "the space-body template catalog is missing or empty")
+    barycenter = hab_barycenter_state(indexed, hab)
+    if not barycenter:
+        raise_solar_power_data_error(hab, "the hab barycenter state is unresolved")
+
+    surface = hab.get("habType") == "Base" or bool(hab.get("habSite"))
+    if surface:
+        body = state_value_by_id(indexed, ref_id(hab.get("barycenter")))
+        require_solar_body_template(hab, body, body_templates, "surface")
+        if hab.get("habSite") and not state_value_by_id(indexed, ref_id(hab.get("habSite"))):
+            raise_solar_power_data_error(hab, "the hab-site state is unresolved")
+        parent = state_value_by_id(indexed, ref_id((body or {}).get("barycenter")))
+        if parent:
+            require_solar_body_template(hab, parent, body_templates, "surface parent")
+    else:
+        orbit_state = state_value_by_id(indexed, ref_id(hab.get("orbitState")))
+        if not orbit_state:
+            raise_solar_power_data_error(hab, "the orbit state is unresolved")
+        orbit_template_name = str(orbit_state.get("templateName") or "")
+        if not orbit_template_name:
+            raise_solar_power_data_error(hab, "the orbit state has no templateName")
+        if not orbit_templates:
+            raise_solar_power_data_error(hab, "the orbit template catalog is missing or empty")
+        orbit_template = orbit_templates.get(orbit_template_name)
+        if not isinstance(orbit_template, dict) or not orbit_template:
+            raise_solar_power_data_error(hab, f"required orbit template {orbit_template_name!r} is missing")
+
+        if barycenter.get("secondaryObject"):
+            secondary = state_value_by_id(indexed, ref_id(barycenter.get("secondaryObject")))
+            require_solar_body_template(hab, secondary, body_templates, "Lagrange secondary")
+            primary = state_value_by_id(indexed, ref_id((secondary or {}).get("barycenter")))
+            if primary:
+                require_solar_body_template(hab, primary, body_templates, "Lagrange primary")
+        else:
+            require_solar_body_template(hab, barycenter, body_templates, "orbital barycenter")
+            parent = state_value_by_id(indexed, ref_id(barycenter.get("barycenter")))
+            if parent:
+                require_solar_body_template(hab, parent, body_templates, "orbital parent")
+                grandparent = state_value_by_id(indexed, ref_id(parent.get("barycenter")))
+                if grandparent:
+                    require_solar_body_template(hab, grandparent, body_templates, "orbital grandparent")
 
 
 def hab_solar_mirror_bonus(
@@ -1176,19 +1258,22 @@ def hab_module_power(
 ) -> int:
     template_power = int(as_float(template.get("power"), 0.0))
     rules = hab_template_special_rules(template)
-    if indexed is not None and hab is not None and body_templates:
-        if "Solar_Power_Variable_Output" in rules:
-            multiplier = hab_natural_solar_multiplier(indexed, hab, body_templates, orbit_templates or {})
-            if multiplier is None:
-                return template_power
-            output = int(round(multiplier * as_float(template.get("power"), 0.0)))
-            output += hab_solar_mirror_bonus(
-                indexed,
-                hab,
-                ref_id(hab.get("faction")),
-                int(as_float(template.get("tier"), 0.0)),
+    if "Solar_Power_Variable_Output" in rules:
+        if indexed is None or hab is None:
+            raise SolarPowerDataError(
+                "Solar_Power_Variable_Output requires indexed hab and location-template context; "
+                "nominal module power is not a valid fallback."
             )
-            return min(output, int(MAX_SOLAR_POWER_MULTIPLIER * as_float(template.get("power"), 0.0)))
+        multiplier = hab_natural_solar_multiplier(indexed, hab, body_templates or {}, orbit_templates or {})
+        output = int(round(multiplier * as_float(template.get("power"), 0.0)))
+        output += hab_solar_mirror_bonus(
+            indexed,
+            hab,
+            ref_id(hab.get("faction")),
+            int(as_float(template.get("tier"), 0.0)),
+        )
+        return min(output, int(MAX_SOLAR_POWER_MULTIPLIER * as_float(template.get("power"), 0.0)))
+    if indexed is not None and hab is not None and body_templates:
         if "Cost_Scales_With_Gravity" in rules:
             faction = state_value_by_id(indexed, ref_id(hab.get("faction"))) or {}
             relative_energy = space_body_relative_energy_for_mining(

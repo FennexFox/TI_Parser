@@ -33,6 +33,10 @@ class ModuleCatalogError(RuntimeError):
     """Raised when authoritative hab-module data cannot be loaded safely."""
 
 
+class SolarPowerDataError(RuntimeError):
+    """Raised when location-aware solar output lacks authoritative location data."""
+
+
 def json_default(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)

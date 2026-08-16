@@ -249,6 +249,57 @@ class ParserReliabilityTests(unittest.TestCase):
         self.assertEqual(forecast["events"][1]["net"], 9.0)
         self.assertEqual(forecast["firstSustainedSurplusDate"], "2035-02-01T00:00:00")
 
+    def test_forecast_does_not_emit_power_warning_from_nominal_solar_fallback(self):
+        gamestates = {}
+        faction = add_state(
+            gamestates,
+            "TIFactionState",
+            1,
+            {"templateName": "CooperateCouncil", "displayName": "Academy", "habSectors": [ref(11)]},
+        )
+        add_state(gamestates, "TIPlayerState", 2, {"isAI": False, "faction": ref(1)})
+        add_state(gamestates, "TIMetadataState", 3, {"playerFactionName": "Academy"})
+        add_state(gamestates, "TITimeState", 4, {"currentDateTime": {"year": 2035, "month": 1, "day": 1}})
+        add_state(gamestates, "TISpaceBodyState", 30, {"templateName": "Mercury"})
+        add_state(gamestates, "TIHabSiteState", 31, {"parentBody": ref(30), "latitude": 0.0})
+        add_state(
+            gamestates,
+            "TIHabModuleState",
+            20,
+            {
+                "templateName": "SolarArray",
+                "constructionCompleted": False,
+                "powered": False,
+                "completionDate": "2035-02-01T00:00:00",
+            },
+        )
+        add_state(gamestates, "TISectorState", 11, {"faction": ref(1), "hab": ref(10), "habModules": [ref(20)]})
+        add_state(
+            gamestates,
+            "TIHabState",
+            10,
+            {
+                "displayName": "Mercury Base",
+                "habType": "Base",
+                "faction": ref(1),
+                "barycenter": ref(30),
+                "habSite": ref(31),
+                "sectors": [ref(11)],
+                "anyCoreCompleted": True,
+            },
+        )
+        indexed = ti.build_index({"gamestates": gamestates})
+        templates = {
+            "SolarArray": {
+                "dataName": "SolarArray",
+                "power": 80,
+                "specialRules": ["Solar_Power_Variable_Output"],
+            }
+        }
+
+        with self.assertRaisesRegex(ti.SolarPowerDataError, "space-body template catalog"):
+            ti.forecast_faction_hab_resource(indexed, faction, templates, {}, {}, {}, "Volatiles")
+
     def test_exit_save_three_regression_when_local_fixture_is_available(self):
         save_path = next(
             (

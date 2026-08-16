@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping
 from ti_parser_core import (
     IndexedState,
     ModuleCatalogError,
+    SolarPowerDataError,
     apply_effect_modifiers,
     as_float,
     ref_id,
@@ -582,6 +583,11 @@ def hab_power_summary(records: list[dict[str, Any]]) -> dict[str, int]:
         if not effective.get("operational"):
             continue
         template = effective.get("operationalTemplate") if isinstance(effective.get("operationalTemplate"), dict) else {}
+        if "Solar_Power_Variable_Output" in hab_template_special_rules(template):
+            raise SolarPowerDataError(
+                "Location-aware solar power requires indexed hab, body-template, and orbit-template context; "
+                "use ti_save_parser.hab_power_summary for Solar_Power_Variable_Output modules."
+            )
         power = int(as_float(template.get("power"), 0.0))
         if power > 0:
             generated += power

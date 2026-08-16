@@ -21,6 +21,93 @@ def add_state(gamestates, type_name, state_id, value):
 
 
 class HabPowerTests(unittest.TestCase):
+    def test_variable_solar_power_fails_without_body_templates(self):
+        gamestates = {}
+        add_state(gamestates, "TISpaceBodyState", 10, {"templateName": "Sol"})
+        add_state(gamestates, "TISpaceBodyState", 11, {"templateName": "Mercury", "barycenter": ref(10)})
+        add_state(gamestates, "TIHabSiteState", 20, {"parentBody": ref(11), "latitude": 0.0})
+        indexed = ti.build_index({"gamestates": gamestates})
+        hab = {"displayName": "Mercury Base", "habType": "Base", "barycenter": ref(11), "habSite": ref(20)}
+        solar = {"dataName": "SolarArray", "power": 80, "specialRules": ["Solar_Power_Variable_Output"]}
+
+        with self.assertRaisesRegex(ti.SolarPowerDataError, "space-body template catalog"):
+            ti.hab_module_power(solar, indexed=indexed, hab=hab, body_templates={})
+
+    def test_variable_solar_power_fails_when_location_body_template_is_missing(self):
+        gamestates = {}
+        add_state(gamestates, "TISpaceBodyState", 10, {"templateName": "Sol"})
+        add_state(gamestates, "TISpaceBodyState", 11, {"templateName": "Mercury", "barycenter": ref(10)})
+        add_state(gamestates, "TIHabSiteState", 20, {"parentBody": ref(11), "latitude": 0.0})
+        indexed = ti.build_index({"gamestates": gamestates})
+        hab = {"displayName": "Mercury Base", "habType": "Base", "barycenter": ref(11), "habSite": ref(20)}
+        solar = {"dataName": "SolarArray", "power": 80, "specialRules": ["Solar_Power_Variable_Output"]}
+
+        with self.assertRaisesRegex(ti.SolarPowerDataError, "body template 'Mercury'"):
+            ti.hab_module_power(
+                solar,
+                indexed=indexed,
+                hab=hab,
+                body_templates={"Sol": {"dataName": "Sol", "objectType": "Star"}},
+            )
+
+    def test_orbital_variable_solar_power_fails_when_orbit_template_is_missing(self):
+        gamestates = {}
+        add_state(gamestates, "TISpaceBodyState", 10, {"templateName": "Sol"})
+        add_state(gamestates, "TISpaceBodyState", 11, {"templateName": "Mercury", "barycenter": ref(10)})
+        add_state(gamestates, "TIOrbitState", 20, {"templateName": "MercuryLowOrbit", "barycenter": ref(11)})
+        indexed = ti.build_index({"gamestates": gamestates})
+        hab = {"displayName": "Mercury Station", "habType": "Station", "barycenter": ref(11), "orbitState": ref(20)}
+        solar = {"dataName": "SolarArray", "power": 80, "specialRules": ["Solar_Power_Variable_Output"]}
+        bodies = {
+            "Sol": {"dataName": "Sol", "objectType": "Star"},
+            "Mercury": {"dataName": "Mercury", "objectType": "Planet", "semiMajorAxis_AU": 0.4},
+        }
+
+        with self.assertRaisesRegex(ti.SolarPowerDataError, "orbit template catalog"):
+            ti.hab_module_power(solar, indexed=indexed, hab=hab, body_templates=bodies, orbit_templates={})
+
+        with self.assertRaisesRegex(ti.SolarPowerDataError, "orbit template 'MercuryLowOrbit'"):
+            ti.hab_module_power(
+                solar,
+                indexed=indexed,
+                hab=hab,
+                body_templates=bodies,
+                orbit_templates={"DifferentOrbit": {"dataName": "DifferentOrbit", "altitude_km": 100.0}},
+            )
+
+    def test_variable_solar_power_fails_when_solar_distance_is_unresolved(self):
+        gamestates = {}
+        add_state(gamestates, "TISpaceBodyState", 11, {"templateName": "UnknownOrbitBody"})
+        add_state(gamestates, "TIHabSiteState", 20, {"parentBody": ref(11), "latitude": 0.0})
+        indexed = ti.build_index({"gamestates": gamestates})
+        hab = {"displayName": "Unlocated Base", "habType": "Base", "barycenter": ref(11), "habSite": ref(20)}
+        solar = {"dataName": "SolarArray", "power": 80, "specialRules": ["Solar_Power_Variable_Output"]}
+
+        with self.assertRaisesRegex(ti.SolarPowerDataError, "solar distance could not be derived"):
+            ti.hab_module_power(
+                solar,
+                indexed=indexed,
+                hab=hab,
+                body_templates={"UnknownOrbitBody": {"dataName": "UnknownOrbitBody", "objectType": "Planet"}},
+            )
+
+    def test_variable_solar_error_propagates_through_power_summary(self):
+        solar = {"dataName": "SolarArray", "power": 80, "specialRules": ["Solar_Power_Variable_Output"]}
+        record = {
+            "templateName": "SolarArray",
+            "template": solar,
+            "completed": True,
+            "powered": True,
+            "destroyed": False,
+            "decommissioning": False,
+        }
+
+        with self.assertRaisesRegex(ti.SolarPowerDataError, "nominal module power is not a valid fallback"):
+            ti.hab_power_summary([record])
+
+    def test_fixed_output_power_does_not_require_location_templates(self):
+        self.assertEqual(ti.hab_module_power({"dataName": "FissionPile", "power": 20}), 20)
+
     def test_radial_orbit_radius_respects_small_body_hill_radius_and_minimum_altitude(self):
         orbit_template = {"radialOrbit": True}
         body_template = {
