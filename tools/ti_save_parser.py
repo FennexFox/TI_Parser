@@ -1396,15 +1396,15 @@ def hab_location_summary(
 
     location_catalog = load_location_catalog()
     orbit_templates = location_catalog.orbit_templates
-    body_templates = location_catalog.body_templates
+    location_templates = location_catalog.location_templates
     orbit_name = str(orbit.get("template") or "")
     body_name = str(barycenter.get("template") or "")
     orbit_template = orbit_templates.get(orbit_name)
-    body_template = body_templates.get(body_name)
+    body_template = location_templates.get(body_name)
     if orbit_template is None:
         raise LocationCatalogError(f"Orbit template {orbit_name!r} is missing from the packaged location catalog")
     if body_template is None:
-        raise LocationCatalogError(f"Space-body template {body_name!r} is missing from the packaged location catalog")
+        raise LocationCatalogError(f"Natural-location template {body_name!r} is missing from the packaged location catalog")
     max_hab_size = int(as_float(body_template.get("maxHabSize"), 0.0))
     if max_hab_size:
         summary["maxTier"] = max(1, min(max_hab_size, 3))

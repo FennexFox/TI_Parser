@@ -126,14 +126,16 @@ human-readable `docs/module_catalog.md`; raw module templates are generator
 inputs, not an implicit runtime fallback.
 
 The packaged `data/location_catalog.json` is the runtime source of truth for
-location-aware body and orbit values used by solar output, gravity, irradiation,
-construction, and mining calculations. Missing, corrupt, empty, or incompatible
+location-aware body, Lagrange-point navigable, and orbit values used by solar
+output, gravity, irradiation, construction, and mining calculations. Missing,
+corrupt, empty, or incompatible
 catalogs are fatal calculation-data errors. Variable-output solar modules also
 fail when their exact body/orbit dependency cannot be resolved; they never use
 nominal power as a fallback because that value can be wrong by several times
 near Mercury. `build_location_catalog.py` reads the raw
-`TISpaceBodyTemplate.json` and `TIOrbitTemplate.json` files only to regenerate
-the packaged catalog. Normal parser execution does not read either raw file.
+`TISpaceBodyTemplate.json`, `TINavigableTemplate.json`, and
+`TIOrbitTemplate.json` files only to regenerate the packaged catalog. Normal
+parser execution does not read those raw files.
 
 The research catalog generator reads global tech and faction project templates
 from the local Terra Invicta install and writes `data/research_catalog.json`

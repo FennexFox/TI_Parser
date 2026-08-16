@@ -7,7 +7,7 @@
 - Source plan: None
 - Scope: Human-player resolution, packaged module-catalog runtime loading, CP-cap provenance,
   shared hab state interpretation, mining diagnostics, completion-event forecasts, location-aware
-  solar-power validation, packaged location-catalog runtime loading, and fail-closed tests.
+  solar-power validation, packaged natural-location catalog runtime loading, and fail-closed tests.
 
 ## Strategy
 
@@ -20,6 +20,7 @@
 - Reject nominal solar output when required body/orbit template context cannot be resolved.
 - Generate normalized body/orbit data into `data/location_catalog.json` and make it the only runtime
   source for location-dependent calculations.
+- Include `TINavigableTemplate` Lagrange points in the same atomic catalog so all saved hab barycenters resolve.
 - Verify synthetic cases and the installed `ExitSave(3).gz` fixture.
 
 ## Phase Order
@@ -30,6 +31,7 @@
 4. [Diagnostics and ExitSave regression verification](04-verification.md)
 5. [Fail-closed location-aware solar power](05-solar-power-fail-closed.md)
 6. [Packaged body and orbit location catalog](06-packaged-location-catalog.md)
+7. [Lagrange point catalog coverage](07-lagrange-location-coverage.md)
 
 ## Phase Dependencies
 
@@ -39,6 +41,7 @@
 - Phase 4 depends on completion and validation of phase 3.
 - Phase 5 is a reliability follow-up and depends on the effective-state and forecast work from phases 2-4.
 - Phase 6 depends on phase 5's strict location-data contract and replaces its installed-template runtime dependency.
+- Phase 7 corrects the natural-location coverage gap discovered after phase 6 and depends on its schema and loader.
 
 ## Source Of Truth Decisions
 
@@ -54,6 +57,8 @@
 
 - Installed raw effect templates remain necessary for dynamic effects. Raw body/orbit templates are generator
   inputs only; the packaged location catalog is mandatory at runtime and missing location data fails closed.
+- Raw `TINavigableTemplate` data is also generator-only input; its Lagrange rows must not be confused with
+  physical space bodies when radius, mass, atmosphere, or irradiation fields are interpreted.
 - Decompiled installed game code confirms construction crew uses the target template, while direct
   support/production/power require active completion. `priorModuleCompleted` remains relevant to MC.
 - Forecast power management priority cannot be reconstructed exactly from a static save, so negative

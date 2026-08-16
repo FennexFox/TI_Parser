@@ -24,12 +24,26 @@ def write_text(path: Path, content: str) -> None:
 
 
 class CatalogGeneratorTests(unittest.TestCase):
-    def test_location_catalog_normalizes_body_and_orbit_without_zero_filling(self):
+    def test_location_catalog_normalizes_body_navigable_and_orbit_without_zero_filling(self):
         with tempfile.TemporaryDirectory() as tmp:
             templates_dir = Path(tmp) / "Templates"
             write_json(
                 templates_dir / "TISpaceBodyTemplate.json",
                 [
+                    {
+                        "dataName": "Mars",
+                        "friendlyName": "Mars",
+                        "barycenterName": "Sol",
+                        "objectType": "Planet",
+                        "atmosphere": "Thin",
+                        "semiMajorAxis_AU": 1.523679,
+                        "equatorialRadius_km": 3396.2,
+                        "mass_kg": 6.4171e23,
+                        "oblateness": 0.00648,
+                        "rotationPeriod_strHours": "24.6230",
+                        "irradiatedMultiplier": 1,
+                        "maxHabSize": 4,
+                    },
                     {
                         "dataName": "Mercury",
                         "friendlyName": "Mercury",
@@ -47,6 +61,18 @@ class CatalogGeneratorTests(unittest.TestCase):
                 ],
             )
             write_json(
+                templates_dir / "TINavigableTemplate.json",
+                [
+                    {
+                        "dataName": "SunMarsL1",
+                        "lagrangeValue": "L1",
+                        "relatedObject": "Mars",
+                        "orbits": ["SunMarsL1Orbit"],
+                        "maxHabSize": 3,
+                    }
+                ],
+            )
+            write_json(
                 templates_dir / "TIOrbitTemplate.json",
                 [
                     {
@@ -55,25 +81,48 @@ class CatalogGeneratorTests(unittest.TestCase):
                         "radialOrbit": True,
                         "synch": False,
                         "irradiatedMultiplier": 2.0,
-                    }
+                    },
+                    {
+                        "dataName": "SunMarsL1Orbit",
+                        "barycenterName": "SunMarsL1",
+                        "semiMajorAxis_km": 3500,
+                        "irradiatedMultiplier": 1,
+                    },
                 ],
             )
 
             catalog = lc.build_catalog(templates_dir)
 
-            self.assertEqual(catalog["schemaVersion"], 1)
+            self.assertEqual(catalog["schemaVersion"], 2)
             self.assertEqual(catalog["source"]["spaceBodyTemplate"]["file"], "TISpaceBodyTemplate.json")
+            self.assertEqual(catalog["source"]["navigableTemplate"]["file"], "TINavigableTemplate.json")
             self.assertEqual(catalog["source"]["orbitTemplate"]["file"], "TIOrbitTemplate.json")
             self.assertEqual(len(catalog["source"]["spaceBodyTemplate"]["sha256"]), 64)
-            self.assertEqual(catalog["counts"], {"spaceBodies": 1, "orbits": 1})
-            self.assertEqual(catalog["byDataName"]["spaceBodies"], {"Mercury": 0})
-            self.assertEqual(catalog["byDataName"]["orbits"], {"LowMercuryOrbit": 0})
-            body = catalog["spaceBodies"][0]
+            self.assertEqual(catalog["counts"], {"spaceBodies": 2, "navigables": 1, "orbits": 2})
+            self.assertEqual(catalog["byDataName"]["spaceBodies"], {"Mars": 0, "Mercury": 1})
+            self.assertEqual(catalog["byDataName"]["navigables"], {"SunMarsL1": 0})
+            self.assertEqual(
+                catalog["byDataName"]["orbits"],
+                {"LowMercuryOrbit": 0, "SunMarsL1Orbit": 1},
+            )
+            body = catalog["spaceBodies"][catalog["byDataName"]["spaceBodies"]["Mercury"]]
+            navigable = catalog["navigables"][0]
             orbit = catalog["orbits"][0]
             self.assertEqual(body["mass_kg"], 3.3011e23)
             self.assertEqual(body["oblateness"], 0)
             self.assertEqual(body["meanRadius_km"], 2493.7)
             self.assertEqual(body["maxRadius_km"], 2493.7)
+            self.assertEqual(
+                navigable,
+                {
+                    "dataName": "SunMarsL1",
+                    "lagrangeValue": "L1",
+                    "relatedObject": "Mars",
+                    "orbits": ["SunMarsL1Orbit"],
+                    "maxHabSize": 3,
+                    "locationKind": "LagrangePoint",
+                },
+            )
             self.assertTrue(orbit["radialOrbit"])
             self.assertFalse(orbit["synch"])
             self.assertEqual(orbit["irradiatedMultiplier"], 2)

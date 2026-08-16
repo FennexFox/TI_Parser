@@ -44,9 +44,11 @@ class SolarPowerDataError(RuntimeError):
 
 @dataclass(frozen=True)
 class LocationCatalog:
-    """A version-locked pair of template-shaped body and orbit mappings."""
+    """One version-locked body/navigable/orbit location dataset."""
 
     body_templates: dict[str, dict[str, Any]]
+    navigable_templates: dict[str, dict[str, Any]]
+    location_templates: dict[str, dict[str, Any]]
     orbit_templates: dict[str, dict[str, Any]]
     metadata: dict[str, Any]
 
@@ -295,6 +297,8 @@ def location_catalog_diagnostics(catalog_path: Path = DEFAULT_LOCATION_CATALOG) 
         "path": str(resolved),
         "schemaVersion": catalog.metadata["schemaVersion"],
         "bodyCount": len(catalog.body_templates),
+        "navigableCount": len(catalog.navigable_templates),
+        "locationCount": len(catalog.location_templates),
         "orbitCount": len(catalog.orbit_templates),
         "size": stat.st_size,
         "mtime_ns": stat.st_mtime_ns,
@@ -322,7 +326,7 @@ def _load_location_catalog_cached(path_value: str, size: int, mtime_ns: int) -> 
             raw = json.load(handle)
     except (OSError, json.JSONDecodeError) as exc:
         raise LocationCatalogError(f"Unable to read location catalog {path}: {exc}") from exc
-    if not isinstance(raw, dict) or raw.get("schemaVersion") != 1:
+    if not isinstance(raw, dict) or raw.get("schemaVersion") != 2:
         raise LocationCatalogError(f"Unsupported or missing location catalog schemaVersion in: {path}")
     if not isinstance(raw.get("scenarioOverrides"), dict):
         raise LocationCatalogError(f"Invalid scenarioOverrides collection in location catalog: {path}")
@@ -350,13 +354,25 @@ def _load_location_catalog_cached(path_value: str, size: int, mtime_ns: int) -> 
             templates[data_name] = dict(row)
         return templates
 
-    body_templates = index_rows("spaceBodies", {"dataName", "objectType"})
+    space_body_templates = index_rows("spaceBodies", {"dataName", "objectType"})
+    navigable_templates = index_rows(
+        "navigables",
+        {"dataName", "locationKind", "lagrangeValue", "relatedObject", "orbits", "maxHabSize"},
+    )
     orbit_templates = index_rows("orbits", {"dataName", "irradiatedMultiplier"})
+    collisions = sorted(set(space_body_templates) & set(navigable_templates))
+    if collisions:
+        raise LocationCatalogError(f"Location catalog body/navigable dataName collisions {collisions}: {path}")
+    location_templates = {**space_body_templates, **navigable_templates}
     counts = raw.get("counts")
-    expected_counts = {"spaceBodies": len(body_templates), "orbits": len(orbit_templates)}
+    expected_counts = {
+        "spaceBodies": len(space_body_templates),
+        "navigables": len(navigable_templates),
+        "orbits": len(orbit_templates),
+    }
     if counts != expected_counts:
         raise LocationCatalogError(f"Location catalog counts do not match row collections: {path}")
-    for name, body in body_templates.items():
+    for name, body in space_body_templates.items():
         if not isinstance(body.get("objectType"), str) or not isinstance(body.get("atmosphere"), str):
             raise LocationCatalogError(f"Invalid body classification fields for {name!r} in: {path}")
         if not isinstance(body.get("irradiatedMultiplier"), (int, float)) or not isinstance(
@@ -366,14 +382,52 @@ def _load_location_catalog_cached(path_value: str, size: int, mtime_ns: int) -> 
     for name, orbit in orbit_templates.items():
         if not isinstance(orbit.get("irradiatedMultiplier"), (int, float)):
             raise LocationCatalogError(f"Invalid orbit calculation fields for {name!r} in: {path}")
+    for name, navigable in navigable_templates.items():
+        if navigable.get("locationKind") != "LagrangePoint" or navigable.get("lagrangeValue") not in {
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5",
+        }:
+            raise LocationCatalogError(f"Invalid navigable classification fields for {name!r} in: {path}")
+        if not isinstance(navigable.get("relatedObject"), str) or not isinstance(navigable.get("orbits"), list):
+            raise LocationCatalogError(f"Invalid navigable relation fields for {name!r} in: {path}")
+        if not isinstance(navigable.get("maxHabSize"), (int, float)):
+            raise LocationCatalogError(f"Invalid navigable maxHabSize for {name!r} in: {path}")
+        related_object = str(navigable["relatedObject"])
+        if related_object not in space_body_templates:
+            raise LocationCatalogError(
+                f"Navigable {name!r} references missing related body {related_object!r} in: {path}"
+            )
+        orbit_names = navigable["orbits"]
+        if (
+            not orbit_names
+            or any(not isinstance(orbit_name, str) or not orbit_name for orbit_name in orbit_names)
+            or len(set(orbit_names)) != len(orbit_names)
+        ):
+            raise LocationCatalogError(f"Navigable {name!r} has invalid orbit references in: {path}")
+        missing_orbits = [orbit_name for orbit_name in orbit_names if orbit_name not in orbit_templates]
+        if missing_orbits:
+            raise LocationCatalogError(f"Navigable {name!r} references missing orbits {missing_orbits} in: {path}")
+        mismatched_orbits = [
+            orbit_name for orbit_name in orbit_names if orbit_templates[orbit_name].get("barycenterName") != name
+        ]
+        if mismatched_orbits:
+            raise LocationCatalogError(
+                f"Navigable {name!r} has orbits with mismatched barycenters {mismatched_orbits} in: {path}"
+            )
     expected_indexes = {
         "spaceBodies": {name: index for index, name in enumerate(row["dataName"] for row in raw["spaceBodies"])},
+        "navigables": {name: index for index, name in enumerate(row["dataName"] for row in raw["navigables"])},
         "orbits": {name: index for index, name in enumerate(row["dataName"] for row in raw["orbits"])},
     }
     if raw.get("byDataName") != expected_indexes:
         raise LocationCatalogError(f"Location catalog byDataName indexes do not match row order: {path}")
     return LocationCatalog(
-        body_templates=body_templates,
+        body_templates=space_body_templates,
+        navigable_templates=navigable_templates,
+        location_templates=location_templates,
         orbit_templates=orbit_templates,
         metadata={
             "schemaVersion": raw["schemaVersion"],

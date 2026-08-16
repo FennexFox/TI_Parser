@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "source": {
     "templateRoot": "TerraInvicta_Data/StreamingAssets/Templates",
     "spaceBodyTemplate": {
@@ -7,6 +7,12 @@
       "size": 546835,
       "mtime_ns": 1782251008870762400,
       "sha256": "16f6f8e6cb85a3c3a68e0600f8bbf766748f3b8ed59391e171ba8c0d440eb01b"
+    },
+    "navigableTemplate": {
+      "file": "TINavigableTemplate.json",
+      "size": 38854,
+      "mtime_ns": 1776892999584666100,
+      "sha256": "03a809b8f78f8125632b285366737f113c47e15e5099904cca03771a123141a2"
     },
     "orbitTemplate": {
       "file": "TIOrbitTemplate.json",
@@ -17,12 +23,14 @@
   },
   "counts": {
     "spaceBodies": 495,
+    "navigables": 117,
     "orbits": 919
   },
   "notes": [
-    "Runtime calculations use this packaged catalog and never fall back to installed body/orbit templates.",
+    "Runtime calculations use this packaged catalog and never fall back to installed body/navigable/orbit templates.",
     "Absent optional fields remain absent rather than being normalized to zero.",
-    "Installed 2003 and Broken Earth scenario sources contain no body/orbit overrides."
+    "Lagrange navigables remain distinct from physical bodies and have no synthesized physical properties.",
+    "Installed 2003 and Broken Earth scenario sources contain no body/navigable/orbit overrides."
   ],
   "spaceBodies": [
     {
@@ -9920,6 +9928,1178 @@
       "hillRadius_km": 2498.68
     }
   ],
+  "navigables": [
+    {
+      "dataName": "EarthLunaL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Luna",
+      "orbits": [
+        "EarthLunaL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "EarthLunaL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Luna",
+      "orbits": [
+        "EarthLunaL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "EarthLunaL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Luna",
+      "orbits": [
+        "EarthLunaL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "EarthLunaL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Luna",
+      "orbits": [
+        "EarthLunaL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "EarthLunaL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Luna",
+      "orbits": [
+        "EarthLunaL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterCallistoL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Callisto",
+      "orbits": [
+        "JupiterCallistoL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterCallistoL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Callisto",
+      "orbits": [
+        "JupiterCallistoL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterCallistoL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Callisto",
+      "orbits": [
+        "JupiterCallistoL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterCallistoL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Callisto",
+      "orbits": [
+        "JupiterCallistoL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterCallistoL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Callisto",
+      "orbits": [
+        "JupiterCallistoL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterEuropaL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Europa",
+      "orbits": [
+        "JupiterEuropaL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterEuropaL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Europa",
+      "orbits": [
+        "JupiterEuropaL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterEuropaL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Europa",
+      "orbits": [
+        "JupiterEuropaL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterEuropaL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Europa",
+      "orbits": [
+        "JupiterEuropaL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterEuropaL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Europa",
+      "orbits": [
+        "JupiterEuropaL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterGanymedeL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Ganymede",
+      "orbits": [
+        "JupiterGanymedeL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterGanymedeL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Ganymede",
+      "orbits": [
+        "JupiterGanymedeL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterGanymedeL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Ganymede",
+      "orbits": [
+        "JupiterGanymedeL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterGanymedeL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Ganymede",
+      "orbits": [
+        "JupiterGanymedeL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterGanymedeL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Ganymede",
+      "orbits": [
+        "JupiterGanymedeL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterIoL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Io",
+      "orbits": [
+        "JupiterIoL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterIoL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Io",
+      "orbits": [
+        "JupiterIoL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterIoL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Io",
+      "orbits": [
+        "JupiterIoL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterIoL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Io",
+      "orbits": [
+        "JupiterIoL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "JupiterIoL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Io",
+      "orbits": [
+        "JupiterIoL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "NeptuneTritonL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Triton",
+      "orbits": [
+        "NeptuneTritonL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "NeptuneTritonL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Triton",
+      "orbits": [
+        "NeptuneTritonL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "NeptuneTritonL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Triton",
+      "orbits": [
+        "NeptuneTritonL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "NeptuneTritonL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Triton",
+      "orbits": [
+        "NeptuneTritonL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "NeptuneTritonL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Triton",
+      "orbits": [
+        "NeptuneTritonL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnDioneL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Dione",
+      "orbits": [
+        "SaturnDioneL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnDioneL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Dione",
+      "orbits": [
+        "SaturnDioneL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnDioneL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Dione",
+      "orbits": [
+        "SaturnDioneL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnDioneL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Dione",
+      "orbits": [
+        "SaturnDioneL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnEnceladusL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Enceladus",
+      "orbits": [
+        "SaturnEnceladusL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnEnceladusL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Enceladus",
+      "orbits": [
+        "SaturnEnceladusL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnEnceladusL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Enceladus",
+      "orbits": [
+        "SaturnEnceladusL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnEnceladusL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Enceladus",
+      "orbits": [
+        "SaturnEnceladusL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnEnceladusL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Enceladus",
+      "orbits": [
+        "SaturnEnceladusL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnIapetusL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Iapetus",
+      "orbits": [
+        "SaturnIapetusL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnIapetusL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Iapetus",
+      "orbits": [
+        "SaturnIapetusL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnIapetusL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Iapetus",
+      "orbits": [
+        "SaturnIapetusL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnIapetusL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Iapetus",
+      "orbits": [
+        "SaturnIapetusL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnIapetusL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Iapetus",
+      "orbits": [
+        "SaturnIapetusL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnRheaL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Rhea",
+      "orbits": [
+        "SaturnRheaL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnRheaL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Rhea",
+      "orbits": [
+        "SaturnRheaL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnRheaL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Rhea",
+      "orbits": [
+        "SaturnRheaL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnRheaL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Rhea",
+      "orbits": [
+        "SaturnRheaL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnRheaL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Rhea",
+      "orbits": [
+        "SaturnRheaL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnTethysL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Tethys",
+      "orbits": [
+        "SaturnTethysL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnTethysL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Tethys",
+      "orbits": [
+        "SaturnTethysL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnTethysL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Tethys",
+      "orbits": [
+        "SaturnTethysL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnTitanL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Titan",
+      "orbits": [
+        "SaturnTitanL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnTitanL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Titan",
+      "orbits": [
+        "SaturnTitanL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnTitanL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Titan",
+      "orbits": [
+        "SaturnTitanL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnTitanL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Titan",
+      "orbits": [
+        "SaturnTitanL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SaturnTitanL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Titan",
+      "orbits": [
+        "SaturnTitanL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunEarthL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Earth",
+      "orbits": [
+        "SunEarthL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunEarthL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Earth",
+      "orbits": [
+        "SunEarthL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunEarthL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Earth",
+      "orbits": [
+        "SunEarthL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunEarthL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Earth",
+      "orbits": [
+        "SunEarthL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunEarthL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Earth",
+      "orbits": [
+        "SunEarthL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunJupiterL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Jupiter",
+      "orbits": [
+        "SunJupiterL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunJupiterL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Jupiter",
+      "orbits": [
+        "SunJupiterL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunJupiterL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Jupiter",
+      "orbits": [
+        "SunJupiterL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunJupiterL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Jupiter",
+      "orbits": [
+        "SunJupiterL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunJupiterL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Jupiter",
+      "orbits": [
+        "SunJupiterL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunMarsL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Mars",
+      "orbits": [
+        "SunMarsL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunMarsL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Mars",
+      "orbits": [
+        "SunMarsL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunMarsL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Mars",
+      "orbits": [
+        "SunMarsL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunMarsL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Mars",
+      "orbits": [
+        "SunMarsL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunMarsL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Mars",
+      "orbits": [
+        "SunMarsL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunMercuryL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Mercury",
+      "orbits": [
+        "SunMercuryL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunMercuryL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Mercury",
+      "orbits": [
+        "SunMercuryL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunMercuryL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Mercury",
+      "orbits": [
+        "SunMercuryL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunMercuryL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Mercury",
+      "orbits": [
+        "SunMercuryL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunMercuryL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Mercury",
+      "orbits": [
+        "SunMercuryL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunNeptuneL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Neptune",
+      "orbits": [
+        "SunNeptuneL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunNeptuneL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Neptune",
+      "orbits": [
+        "SunNeptuneL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunNeptuneL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Neptune",
+      "orbits": [
+        "SunNeptuneL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunNeptuneL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Neptune",
+      "orbits": [
+        "SunNeptuneL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunNeptuneL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Neptune",
+      "orbits": [
+        "SunNeptuneL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunSaturnL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Saturn",
+      "orbits": [
+        "SunSaturnL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunSaturnL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Saturn",
+      "orbits": [
+        "SunSaturnL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunSaturnL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Saturn",
+      "orbits": [
+        "SunSaturnL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunSaturnL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Saturn",
+      "orbits": [
+        "SunSaturnL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunSaturnL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Saturn",
+      "orbits": [
+        "SunSaturnL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunUranusL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Uranus",
+      "orbits": [
+        "SunUranusL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunUranusL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Uranus",
+      "orbits": [
+        "SunUranusL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunUranusL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Uranus",
+      "orbits": [
+        "SunUranusL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunUranusL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Uranus",
+      "orbits": [
+        "SunUranusL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunUranusL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Uranus",
+      "orbits": [
+        "SunUranusL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunVenusL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Venus",
+      "orbits": [
+        "SunVenusL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunVenusL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Venus",
+      "orbits": [
+        "SunVenusL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunVenusL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Venus",
+      "orbits": [
+        "SunVenusL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunVenusL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Venus",
+      "orbits": [
+        "SunVenusL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "SunVenusL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Venus",
+      "orbits": [
+        "SunVenusL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusArielL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Ariel",
+      "orbits": [
+        "UranusArielL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusArielL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Ariel",
+      "orbits": [
+        "UranusArielL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusArielL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Ariel",
+      "orbits": [
+        "UranusArielL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusArielL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Ariel",
+      "orbits": [
+        "UranusArielL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusArielL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Ariel",
+      "orbits": [
+        "UranusArielL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusOberonL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Oberon",
+      "orbits": [
+        "UranusOberonL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusOberonL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Oberon",
+      "orbits": [
+        "UranusOberonL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusOberonL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Oberon",
+      "orbits": [
+        "UranusOberonL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusOberonL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Oberon",
+      "orbits": [
+        "UranusOberonL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusOberonL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Oberon",
+      "orbits": [
+        "UranusOberonL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusTitaniaL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Titania",
+      "orbits": [
+        "UranusTitaniaL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusTitaniaL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Titania",
+      "orbits": [
+        "UranusTitaniaL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusTitaniaL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Titania",
+      "orbits": [
+        "UranusTitaniaL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusTitaniaL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Titania",
+      "orbits": [
+        "UranusTitaniaL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusTitaniaL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Titania",
+      "orbits": [
+        "UranusTitaniaL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusUmbrielL1",
+      "lagrangeValue": "L1",
+      "relatedObject": "Umbriel",
+      "orbits": [
+        "UranusUmbrielL1Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusUmbrielL2",
+      "lagrangeValue": "L2",
+      "relatedObject": "Umbriel",
+      "orbits": [
+        "UranusUmbrielL2Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusUmbrielL3",
+      "lagrangeValue": "L3",
+      "relatedObject": "Umbriel",
+      "orbits": [
+        "UranusUmbrielL3Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusUmbrielL4",
+      "lagrangeValue": "L4",
+      "relatedObject": "Umbriel",
+      "orbits": [
+        "UranusUmbrielL4Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    },
+    {
+      "dataName": "UranusUmbrielL5",
+      "lagrangeValue": "L5",
+      "relatedObject": "Umbriel",
+      "orbits": [
+        "UranusUmbrielL5Orbit"
+      ],
+      "maxHabSize": 3,
+      "locationKind": "LagrangePoint"
+    }
+  ],
   "orbits": [
     {
       "dataName": "101742AsteroidParkingOrbit",
@@ -19174,6 +20354,125 @@
       "Weywot": 492,
       "Xiangliu": 493,
       "Ymir": 494
+    },
+    "navigables": {
+      "EarthLunaL1": 0,
+      "EarthLunaL2": 1,
+      "EarthLunaL3": 2,
+      "EarthLunaL4": 3,
+      "EarthLunaL5": 4,
+      "JupiterCallistoL1": 5,
+      "JupiterCallistoL2": 6,
+      "JupiterCallistoL3": 7,
+      "JupiterCallistoL4": 8,
+      "JupiterCallistoL5": 9,
+      "JupiterEuropaL1": 10,
+      "JupiterEuropaL2": 11,
+      "JupiterEuropaL3": 12,
+      "JupiterEuropaL4": 13,
+      "JupiterEuropaL5": 14,
+      "JupiterGanymedeL1": 15,
+      "JupiterGanymedeL2": 16,
+      "JupiterGanymedeL3": 17,
+      "JupiterGanymedeL4": 18,
+      "JupiterGanymedeL5": 19,
+      "JupiterIoL1": 20,
+      "JupiterIoL2": 21,
+      "JupiterIoL3": 22,
+      "JupiterIoL4": 23,
+      "JupiterIoL5": 24,
+      "NeptuneTritonL1": 25,
+      "NeptuneTritonL2": 26,
+      "NeptuneTritonL3": 27,
+      "NeptuneTritonL4": 28,
+      "NeptuneTritonL5": 29,
+      "SaturnDioneL1": 30,
+      "SaturnDioneL2": 31,
+      "SaturnDioneL3": 32,
+      "SaturnDioneL5": 33,
+      "SaturnEnceladusL1": 34,
+      "SaturnEnceladusL2": 35,
+      "SaturnEnceladusL3": 36,
+      "SaturnEnceladusL4": 37,
+      "SaturnEnceladusL5": 38,
+      "SaturnIapetusL1": 39,
+      "SaturnIapetusL2": 40,
+      "SaturnIapetusL3": 41,
+      "SaturnIapetusL4": 42,
+      "SaturnIapetusL5": 43,
+      "SaturnRheaL1": 44,
+      "SaturnRheaL2": 45,
+      "SaturnRheaL3": 46,
+      "SaturnRheaL4": 47,
+      "SaturnRheaL5": 48,
+      "SaturnTethysL1": 49,
+      "SaturnTethysL2": 50,
+      "SaturnTethysL3": 51,
+      "SaturnTitanL1": 52,
+      "SaturnTitanL2": 53,
+      "SaturnTitanL3": 54,
+      "SaturnTitanL4": 55,
+      "SaturnTitanL5": 56,
+      "SunEarthL1": 57,
+      "SunEarthL2": 58,
+      "SunEarthL3": 59,
+      "SunEarthL4": 60,
+      "SunEarthL5": 61,
+      "SunJupiterL1": 62,
+      "SunJupiterL2": 63,
+      "SunJupiterL3": 64,
+      "SunJupiterL4": 65,
+      "SunJupiterL5": 66,
+      "SunMarsL1": 67,
+      "SunMarsL2": 68,
+      "SunMarsL3": 69,
+      "SunMarsL4": 70,
+      "SunMarsL5": 71,
+      "SunMercuryL1": 72,
+      "SunMercuryL2": 73,
+      "SunMercuryL3": 74,
+      "SunMercuryL4": 75,
+      "SunMercuryL5": 76,
+      "SunNeptuneL1": 77,
+      "SunNeptuneL2": 78,
+      "SunNeptuneL3": 79,
+      "SunNeptuneL4": 80,
+      "SunNeptuneL5": 81,
+      "SunSaturnL1": 82,
+      "SunSaturnL2": 83,
+      "SunSaturnL3": 84,
+      "SunSaturnL4": 85,
+      "SunSaturnL5": 86,
+      "SunUranusL1": 87,
+      "SunUranusL2": 88,
+      "SunUranusL3": 89,
+      "SunUranusL4": 90,
+      "SunUranusL5": 91,
+      "SunVenusL1": 92,
+      "SunVenusL2": 93,
+      "SunVenusL3": 94,
+      "SunVenusL4": 95,
+      "SunVenusL5": 96,
+      "UranusArielL1": 97,
+      "UranusArielL2": 98,
+      "UranusArielL3": 99,
+      "UranusArielL4": 100,
+      "UranusArielL5": 101,
+      "UranusOberonL1": 102,
+      "UranusOberonL2": 103,
+      "UranusOberonL3": 104,
+      "UranusOberonL4": 105,
+      "UranusOberonL5": 106,
+      "UranusTitaniaL1": 107,
+      "UranusTitaniaL2": 108,
+      "UranusTitaniaL3": 109,
+      "UranusTitaniaL4": 110,
+      "UranusTitaniaL5": 111,
+      "UranusUmbrielL1": 112,
+      "UranusUmbrielL2": 113,
+      "UranusUmbrielL3": 114,
+      "UranusUmbrielL4": 115,
+      "UranusUmbrielL5": 116
     },
     "orbits": {
       "101742AsteroidParkingOrbit": 0,

@@ -27,6 +27,7 @@ class ParserReliabilityTests(unittest.TestCase):
     def test_runtime_parser_has_no_raw_body_orbit_template_load_path(self):
         source = (Path(__file__).resolve().parents[1] / "tools" / "ti_save_parser.py").read_text(encoding="utf-8")
         self.assertNotIn("TISpaceBodyTemplate.json", source)
+        self.assertNotIn("TINavigableTemplate.json", source)
         self.assertNotIn("TIOrbitTemplate.json", source)
 
     def test_packaged_location_catalog_loads_mercury_and_reports_provenance(self):
@@ -34,10 +35,17 @@ class ParserReliabilityTests(unittest.TestCase):
         diagnostics = core.location_catalog_diagnostics()
 
         self.assertEqual(catalog.body_templates["Mercury"]["semiMajorAxis_AU"], 0.387099)
+        self.assertNotIn("SunMarsL1", catalog.body_templates)
+        self.assertEqual(catalog.navigable_templates["SunMarsL1"]["relatedObject"], "Mars")
+        self.assertEqual(catalog.location_templates["SunMarsL1"]["relatedObject"], "Mars")
+        self.assertNotIn("mass_kg", catalog.location_templates["SunMarsL1"])
         self.assertTrue(catalog.orbit_templates["LowMercuryOrbit"]["radialOrbit"])
         self.assertGreater(diagnostics["bodyCount"], 400)
+        self.assertGreater(diagnostics["navigableCount"], 100)
+        self.assertEqual(diagnostics["locationCount"], diagnostics["bodyCount"] + diagnostics["navigableCount"])
         self.assertGreater(diagnostics["orbitCount"], 900)
         self.assertEqual(diagnostics["source"]["spaceBodyTemplate"]["file"], "TISpaceBodyTemplate.json")
+        self.assertEqual(diagnostics["source"]["navigableTemplate"]["file"], "TINavigableTemplate.json")
 
     def test_missing_or_invalid_location_catalog_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -49,11 +57,12 @@ class ParserReliabilityTests(unittest.TestCase):
             invalid_path.write_text(
                 json.dumps(
                     {
-                        "schemaVersion": 1,
-                        "counts": {"spaceBodies": 0, "orbits": 0},
+                        "schemaVersion": 2,
+                        "counts": {"spaceBodies": 0, "navigables": 0, "orbits": 0},
                         "spaceBodies": [],
+                        "navigables": [],
                         "orbits": [],
-                        "byDataName": {"spaceBodies": {}, "orbits": {}},
+                        "byDataName": {"spaceBodies": {}, "navigables": {}, "orbits": {}},
                         "scenarioOverrides": {},
                     }
                 ),
@@ -70,15 +79,28 @@ class ParserReliabilityTests(unittest.TestCase):
                 "maxHabSize": 3,
             }
             orbit = {"dataName": "TestOrbit", "irradiatedMultiplier": 1}
+            navigable = {
+                "dataName": "TestL1",
+                "locationKind": "LagrangePoint",
+                "lagrangeValue": "L1",
+                "relatedObject": "TestBody",
+                "orbits": ["TestOrbit"],
+                "maxHabSize": 3,
+            }
             duplicate_path = root / "duplicate.json"
             duplicate_path.write_text(
                 json.dumps(
                     {
-                        "schemaVersion": 1,
-                        "counts": {"spaceBodies": 2, "orbits": 1},
+                        "schemaVersion": 2,
+                        "counts": {"spaceBodies": 2, "navigables": 1, "orbits": 1},
                         "spaceBodies": [body, body],
+                        "navigables": [navigable],
                         "orbits": [orbit],
-                        "byDataName": {"spaceBodies": {"TestBody": 1}, "orbits": {"TestOrbit": 0}},
+                        "byDataName": {
+                            "spaceBodies": {"TestBody": 1},
+                            "navigables": {"TestL1": 0},
+                            "orbits": {"TestOrbit": 0},
+                        },
                         "scenarioOverrides": {},
                     }
                 ),
@@ -86,6 +108,48 @@ class ParserReliabilityTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(core.LocationCatalogError, "Duplicate spaceBodies"):
                 core.load_location_catalog(duplicate_path)
+
+            collision_path = root / "collision.json"
+            colliding_navigable = dict(navigable, dataName="TestBody")
+            collision_path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 2,
+                        "counts": {"spaceBodies": 1, "navigables": 1, "orbits": 1},
+                        "spaceBodies": [body],
+                        "navigables": [colliding_navigable],
+                        "orbits": [orbit],
+                        "byDataName": {
+                            "spaceBodies": {"TestBody": 0},
+                            "navigables": {"TestBody": 0},
+                            "orbits": {"TestOrbit": 0},
+                        },
+                        "scenarioOverrides": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(core.LocationCatalogError, "body/navigable dataName collisions"):
+                core.load_location_catalog(collision_path)
+
+    def test_lagrange_hab_location_summary_resolves_from_packaged_catalog(self):
+        gamestates = {}
+        add_state(
+            gamestates,
+            "TILagrangePointState",
+            10,
+            {"templateName": "SunMarsL1", "secondaryObject": ref(30), "barycenter": ref(31)},
+        )
+        add_state(gamestates, "TIOrbitState", 20, {"templateName": "SunMarsL1Orbit", "barycenter": ref(10)})
+        indexed = ti.build_index({"gamestates": gamestates})
+        hab = {"displayName": "L1 Station", "habType": "Station", "barycenter": ref(10), "orbitState": ref(20)}
+
+        summary = ti.hab_location_summary(indexed, None, hab)
+
+        self.assertEqual(summary["barycenter"]["template"], "SunMarsL1")
+        self.assertEqual(summary["orbit"]["template"], "SunMarsL1Orbit")
+        self.assertEqual(summary["maxTier"], 3)
+        self.assertIsNone(summary["gravity_mg"])
 
     def test_packaged_location_catalog_drives_mercury_solar_without_raw_templates(self):
         gamestates = {}
