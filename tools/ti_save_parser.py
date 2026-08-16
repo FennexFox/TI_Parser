@@ -22,6 +22,7 @@ from ti_parser_core import (
     DEFAULT_CACHE_DIR,
     SAVE_GLOB,
     IndexedState,
+    LocationCatalogError,
     SolarPowerDataError,
     TemplateSource,
     apply_effect_modifiers,
@@ -43,6 +44,7 @@ from ti_parser_core import (
     json_default,
     load_named_templates,
     load_hab_module_catalog,
+    load_location_catalog,
     load_save,
     load_trait_templates,
     match_raw_state,
@@ -64,6 +66,7 @@ from ti_parser_core import (
     template_source_value,
     type_entries,
     module_catalog_diagnostics,
+    location_catalog_diagnostics,
 )
 import ti_parser_snapshot as snapshot_layer
 import ti_parser_income as income_layer
@@ -935,7 +938,11 @@ def space_body_template(
 ) -> dict[str, Any]:
     if not body:
         return {}
-    return (body_templates or {}).get(str(body.get("templateName") or ""), {})
+    template_name = str(body.get("templateName") or "")
+    template = (body_templates or {}).get(template_name)
+    if template is None and template_name:
+        raise LocationCatalogError(f"Space-body template {template_name!r} is missing from the packaged location catalog")
+    return template or {}
 
 
 def space_body_mean_radius_km(template: dict[str, Any]) -> float:
@@ -955,6 +962,9 @@ def space_body_mean_radius_km(template: dict[str, Any]) -> float:
 
 
 def space_body_max_radius_km(template: dict[str, Any]) -> float:
+    normalized_radius = as_float(template.get("maxRadius_km"), 0.0)
+    if normalized_radius > 0.0:
+        return normalized_radius
     dimensions = [
         dimension
         for field in ("dimensionX_km", "dimensionY_km", "dimensionZ_km")
@@ -1040,11 +1050,22 @@ def orbit_template_semi_major_axis_km(
         semi_major_axis_km = space_body_mean_radius_km(barycenter_template) + altitude_km
     elif semi_major_axis_km <= 0.0 and semi_major_axis_au > 0.0:
         semi_major_axis_km = semi_major_axis_au * ASTRONOMICAL_UNIT_KM
+    elif semi_major_axis_km <= 0.0 and orbit_template.get("synch"):
+        mass_kg = as_float(barycenter_template.get("mass_kg"), 0.0)
+        rotation_hours = as_float(barycenter_template.get("rotationPeriod_strHours"), 0.0)
+        if mass_kg > 0.0 and rotation_hours > 0.0:
+            rotation_seconds = rotation_hours * 3600.0
+            semi_major_axis_km = (
+                GRAVITATIONAL_CONSTANT * mass_kg * rotation_seconds * rotation_seconds / (4.0 * math.pi * math.pi)
+            ) ** (1.0 / 3.0) / 1000.0
     elif semi_major_axis_km <= 0.0 and orbit_template.get("radialOrbit"):
         semi_major_axis_km = space_body_max_radius_km(barycenter_template) * 3.25
 
     max_radius_km = space_body_max_radius_km(barycenter_template)
-    hill_radius_km = as_float(barycenter_template.get("Hill Radius in km"), 0.0)
+    hill_radius_km = as_float(
+        barycenter_template.get("hillRadius_km", barycenter_template.get("Hill Radius in km")),
+        0.0,
+    )
     if semi_major_axis_km > 0.0 and max_radius_km > 0.0:
         if hill_radius_km > 0.0:
             semi_major_axis_km = min(semi_major_axis_km, hill_radius_km)
@@ -1062,7 +1083,10 @@ def space_body_orbit_solar_visibility(
     semi_major_axis_km = orbit_template_semi_major_axis_km(orbit_template, template)
     mean_radius_km = space_body_mean_radius_km(template)
     if semi_major_axis_km <= 0.0 or mean_radius_km <= 0.0:
-        return 1.0
+        raise SolarPowerDataError(
+            f"Cannot derive orbital solar visibility for {orbit_template.get('dataName') or '<unknown orbit>'}: "
+            "the packaged location catalog lacks resolvable orbit radius or body radius data."
+        )
     visibility = 1.0 - math.atan(mean_radius_km / semi_major_axis_km) / math.pi
 
     parent = state_value_by_id(indexed, ref_id(body.get("barycenter")))
@@ -1106,7 +1130,10 @@ def lagrange_solar_visibility(
     secondary_mass_kg = as_float(secondary_template.get("mass_kg"), 0.0)
     primary_mass_kg = as_float(primary_template.get("mass_kg"), 0.0)
     if min(secondary_orbit_km, secondary_radius_km, primary_radius_km, secondary_mass_kg, primary_mass_kg) <= 0.0:
-        return 1.0
+        raise SolarPowerDataError(
+            f"Cannot derive L2 solar visibility for {lagrange.get('templateName') or '<unknown Lagrange point>'}: "
+            "the packaged location catalog lacks required radius, mass, or orbit data."
+        )
 
     shadow_length_km = secondary_orbit_km * secondary_radius_km / primary_radius_km
     hill_ratio = (secondary_mass_kg / (3.0 * primary_mass_kg)) ** (1.0 / 3.0)
@@ -1364,13 +1391,20 @@ def hab_location_summary(
         "gravity_mg": None,
         "maxTier": None,
     }
-    if not templates_dir or not orbit or not barycenter:
+    if not orbit or not barycenter:
         return summary
 
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_template = orbit_templates.get(str(orbit.get("template")), {})
-    body_template = body_templates.get(str(barycenter.get("template")), {})
+    location_catalog = load_location_catalog()
+    orbit_templates = location_catalog.orbit_templates
+    body_templates = location_catalog.body_templates
+    orbit_name = str(orbit.get("template") or "")
+    body_name = str(barycenter.get("template") or "")
+    orbit_template = orbit_templates.get(orbit_name)
+    body_template = body_templates.get(body_name)
+    if orbit_template is None:
+        raise LocationCatalogError(f"Orbit template {orbit_name!r} is missing from the packaged location catalog")
+    if body_template is None:
+        raise LocationCatalogError(f"Space-body template {body_name!r} is missing from the packaged location catalog")
     max_hab_size = int(as_float(body_template.get("maxHabSize"), 0.0))
     if max_hab_size:
         summary["maxTier"] = max(1, min(max_hab_size, 3))
@@ -1395,8 +1429,9 @@ def calculate_hab_ui(
         raise SystemExit(f"Hab not found: {hab_name}")
     hab_id, hab = found
     hab_module_templates = load_hab_module_catalog()
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
+    location_catalog = load_location_catalog()
+    body_templates = location_catalog.body_templates
+    orbit_templates = location_catalog.orbit_templates
     trait_templates = load_trait_templates(templates_dir)
     effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
     faction_ref = resolve_ref(indexed, hab.get("faction"))
@@ -1886,7 +1921,12 @@ def hab_irradiated_multiplier(
     if hab.get("habType") == "Base" or hab.get("habSite"):
         return max(as_float(space_body_template(hab_construction_surface_body(indexed, hab), body_templates).get("irradiatedMultiplier"), 1.0), 1.0)
     orbit = state_value_by_id(indexed, ref_id(hab.get("orbitState"))) or {}
-    orbit_template = orbit_templates.get(str(orbit.get("templateName") or ""), {})
+    orbit_name = str(orbit.get("templateName") or "")
+    if not orbit_name:
+        return 1.0
+    orbit_template = orbit_templates.get(orbit_name)
+    if orbit_template is None:
+        raise LocationCatalogError(f"Orbit template {orbit_name!r} is missing from the packaged location catalog")
     return max(as_float(orbit_template.get("irradiatedMultiplier"), 1.0), 1.0)
 
 
@@ -2383,8 +2423,9 @@ def hab_module_candidate_rows(
     topbar: dict[str, Any],
 ) -> list[dict[str, Any]]:
     hab_module_templates = load_hab_module_catalog()
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
+    location_catalog = load_location_catalog()
+    body_templates = location_catalog.body_templates
+    orbit_templates = location_catalog.orbit_templates
     effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
     trait_templates = load_trait_templates(templates_dir)
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
@@ -2432,8 +2473,9 @@ def hab_module_upgrade_rows(
     topbar: dict[str, Any],
 ) -> list[dict[str, Any]]:
     hab_module_templates = load_hab_module_catalog()
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
+    location_catalog = load_location_catalog()
+    body_templates = location_catalog.body_templates
+    orbit_templates = location_catalog.orbit_templates
     effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
     trait_templates = load_trait_templates(templates_dir)
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
@@ -2816,8 +2858,9 @@ def hab_plan_row(
     topbar: dict[str, Any],
 ) -> dict[str, Any]:
     hab_module_templates = load_hab_module_catalog()
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
+    location_catalog = load_location_catalog()
+    body_templates = location_catalog.body_templates
+    orbit_templates = location_catalog.orbit_templates
     records = hab_module_records(indexed, hab, hab_module_templates)
     slots = hab_slot_summary(records)
     upgrade = hab_upgrade_info(records)
@@ -3332,8 +3375,9 @@ def prospective_module_unlocks_for_project(
     if not unlocked_modules:
         return []
 
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
+    location_catalog = load_location_catalog()
+    body_templates = location_catalog.body_templates
+    orbit_templates = location_catalog.orbit_templates
     effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
     trait_templates = load_trait_templates(templates_dir)
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
@@ -7386,6 +7430,7 @@ def calculate_topbar(
         ],
     }
     if forecast_resource:
+        location_catalog = load_location_catalog()
         output["forecast"] = forecast_faction_hab_resource(
             indexed,
             faction,
@@ -7394,8 +7439,8 @@ def calculate_topbar(
             effect_templates,
             councilor_by_id,
             forecast_resource,
-            body_templates=load_named_templates(templates_dir, "TISpaceBodyTemplate.json"),
-            orbit_templates=load_named_templates(templates_dir, "TIOrbitTemplate.json"),
+            body_templates=location_catalog.body_templates,
+            orbit_templates=location_catalog.orbit_templates,
         )
     if include_diagnostics:
         output["diagnostics"] = {
@@ -7407,6 +7452,7 @@ def calculate_topbar(
                 "player": faction_is_player(indexed, faction),
             },
             "catalog": module_catalog_diagnostics(),
+            "locationCatalog": location_catalog_diagnostics(),
             "unknownTemplates": [],
             "unknownEffects": [],
             "miningSamples": faction_mining_calculation_samples(

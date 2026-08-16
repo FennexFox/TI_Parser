@@ -40,6 +40,7 @@ python .\tools\ti_save_parser.py research-plan --top 5
 python .\tools\ti_save_parser.py topbar --details
 python .\tools\build_research_catalog.py
 python .\tools\build_module_catalog.py
+python .\tools\build_location_catalog.py
 python .\tools\ti_save_parser.py world-ui
 python .\tools\ti_save_parser.py advise "Lati Wirya" "중화민국"
 python .\tools\ti_save_parser.py types --limit 30
@@ -108,7 +109,7 @@ player is missing, ambiguous, or conflicting; an explicit faction argument or
 `--faction` remains an override. Faction identity output includes display name,
 internal template, and `player` status.
 
-`topbar --diagnostics` adds catalog/effect provenance, mining formula samples,
+`topbar --diagnostics` adds module/location catalog and effect provenance, mining formula samples,
 and explicit calculation assumptions. `topbar --forecast-resource Volatiles`
 recalculates faction-hab production and support after each module completion,
 reports the completing modules and resulting hab power balance, and identifies
@@ -124,13 +125,15 @@ from the local Terra Invicta install and refreshes that JSON plus the
 human-readable `docs/module_catalog.md`; raw module templates are generator
 inputs, not an implicit runtime fallback.
 
-Variable-output solar modules require location-aware body and orbit templates.
-If the relevant `TISpaceBodyTemplate` or `TIOrbitTemplate` data cannot be
-resolved, hab UI, planning, and forecast power calculations fail with an
-explicit solar calculation-data error. They never substitute the module's
-nominal power, because that value can be wrong by several times near Mercury.
-Body/orbit templates are still loaded from the installed game data; packaging
-their required normalized fields is a future catalog-hardening step.
+The packaged `data/location_catalog.json` is the runtime source of truth for
+location-aware body and orbit values used by solar output, gravity, irradiation,
+construction, and mining calculations. Missing, corrupt, empty, or incompatible
+catalogs are fatal calculation-data errors. Variable-output solar modules also
+fail when their exact body/orbit dependency cannot be resolved; they never use
+nominal power as a fallback because that value can be wrong by several times
+near Mercury. `build_location_catalog.py` reads the raw
+`TISpaceBodyTemplate.json` and `TIOrbitTemplate.json` files only to regenerate
+the packaged catalog. Normal parser execution does not read either raw file.
 
 The research catalog generator reads global tech and faction project templates
 from the local Terra Invicta install and writes `data/research_catalog.json`

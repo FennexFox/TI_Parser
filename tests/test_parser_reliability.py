@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,89 @@ def add_state(gamestates, type_name, state_id, value):
 
 
 class ParserReliabilityTests(unittest.TestCase):
+    def test_runtime_parser_has_no_raw_body_orbit_template_load_path(self):
+        source = (Path(__file__).resolve().parents[1] / "tools" / "ti_save_parser.py").read_text(encoding="utf-8")
+        self.assertNotIn("TISpaceBodyTemplate.json", source)
+        self.assertNotIn("TIOrbitTemplate.json", source)
+
+    def test_packaged_location_catalog_loads_mercury_and_reports_provenance(self):
+        catalog = core.load_location_catalog()
+        diagnostics = core.location_catalog_diagnostics()
+
+        self.assertEqual(catalog.body_templates["Mercury"]["semiMajorAxis_AU"], 0.387099)
+        self.assertTrue(catalog.orbit_templates["LowMercuryOrbit"]["radialOrbit"])
+        self.assertGreater(diagnostics["bodyCount"], 400)
+        self.assertGreater(diagnostics["orbitCount"], 900)
+        self.assertEqual(diagnostics["source"]["spaceBodyTemplate"]["file"], "TISpaceBodyTemplate.json")
+
+    def test_missing_or_invalid_location_catalog_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaises(core.LocationCatalogError):
+                core.load_location_catalog(root / "missing.json")
+
+            invalid_path = root / "invalid.json"
+            invalid_path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "counts": {"spaceBodies": 0, "orbits": 0},
+                        "spaceBodies": [],
+                        "orbits": [],
+                        "byDataName": {"spaceBodies": {}, "orbits": {}},
+                        "scenarioOverrides": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(core.LocationCatalogError, "empty spaceBodies"):
+                core.load_location_catalog(invalid_path)
+
+            body = {
+                "dataName": "TestBody",
+                "objectType": "Planet",
+                "atmosphere": "None",
+                "irradiatedMultiplier": 1,
+                "maxHabSize": 3,
+            }
+            orbit = {"dataName": "TestOrbit", "irradiatedMultiplier": 1}
+            duplicate_path = root / "duplicate.json"
+            duplicate_path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "counts": {"spaceBodies": 2, "orbits": 1},
+                        "spaceBodies": [body, body],
+                        "orbits": [orbit],
+                        "byDataName": {"spaceBodies": {"TestBody": 1}, "orbits": {"TestOrbit": 0}},
+                        "scenarioOverrides": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(core.LocationCatalogError, "Duplicate spaceBodies"):
+                core.load_location_catalog(duplicate_path)
+
+    def test_packaged_location_catalog_drives_mercury_solar_without_raw_templates(self):
+        gamestates = {}
+        add_state(gamestates, "TISpaceBodyState", 10, {"templateName": "Sol"})
+        add_state(gamestates, "TISpaceBodyState", 11, {"templateName": "Mercury", "barycenter": ref(10)})
+        add_state(gamestates, "TIOrbitState", 20, {"templateName": "LowMercuryOrbit", "barycenter": ref(11)})
+        indexed = ti.build_index({"gamestates": gamestates})
+        hab = {"displayName": "Mercury Station", "habType": "Station", "barycenter": ref(11), "orbitState": ref(20)}
+        solar = {"dataName": "SolarArray", "power": 80, "specialRules": ["Solar_Power_Variable_Output"]}
+        locations = core.load_location_catalog()
+
+        power = ti.hab_module_power(
+            solar,
+            indexed=indexed,
+            hab=hab,
+            body_templates=locations.body_templates,
+            orbit_templates=locations.orbit_templates,
+        )
+
+        self.assertEqual(power, 483)
+
     def test_non_resistance_human_player_is_selected_from_player_state(self):
         gamestates = {}
         add_state(gamestates, "TIFactionState", 10, {"templateName": "ResistCouncil", "displayName": "Resistance"})

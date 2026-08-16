@@ -15,6 +15,7 @@ from typing import Any, Iterable
 DEFAULT_CACHE_DIR = ".ti_cache"
 SAVE_GLOB = "*.gz"
 DEFAULT_MODULE_CATALOG = Path(__file__).resolve().parents[1] / "data" / "module_catalog.json"
+DEFAULT_LOCATION_CATALOG = Path(__file__).resolve().parents[1] / "data" / "location_catalog.json"
 TemplateSource = Path | tuple[Path, ...] | list[Path] | None
 SCENARIO_DLC_TEMPLATE_HINTS = {
     "2003Scenario": Path("DLC_Content/DarkSkies/2003_Scenario/Templates"),
@@ -33,8 +34,21 @@ class ModuleCatalogError(RuntimeError):
     """Raised when authoritative hab-module data cannot be loaded safely."""
 
 
+class LocationCatalogError(RuntimeError):
+    """Raised when authoritative body/orbit data cannot be loaded safely."""
+
+
 class SolarPowerDataError(RuntimeError):
     """Raised when location-aware solar output lacks authoritative location data."""
+
+
+@dataclass(frozen=True)
+class LocationCatalog:
+    """A version-locked pair of template-shaped body and orbit mappings."""
+
+    body_templates: dict[str, dict[str, Any]]
+    orbit_templates: dict[str, dict[str, Any]]
+    metadata: dict[str, Any]
 
 
 def json_default(value: Any) -> Any:
@@ -271,6 +285,102 @@ def module_catalog_diagnostics(catalog_path: Path = DEFAULT_MODULE_CATALOG) -> d
         "mtime_ns": stat.st_mtime_ns,
         "source": raw.get("source"),
     }
+
+
+def location_catalog_diagnostics(catalog_path: Path = DEFAULT_LOCATION_CATALOG) -> dict[str, Any]:
+    resolved = catalog_path.resolve()
+    catalog = load_location_catalog(resolved)
+    stat = resolved.stat()
+    return {
+        "path": str(resolved),
+        "schemaVersion": catalog.metadata["schemaVersion"],
+        "bodyCount": len(catalog.body_templates),
+        "orbitCount": len(catalog.orbit_templates),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "source": catalog.metadata.get("source"),
+        "scenarioOverrides": sorted(catalog.metadata.get("scenarioOverrides") or {}),
+    }
+
+
+def load_location_catalog(catalog_path: Path = DEFAULT_LOCATION_CATALOG) -> LocationCatalog:
+    """Load packaged body/orbit data; raw game templates are never a runtime fallback."""
+
+    resolved = catalog_path.resolve()
+    if not resolved.is_file():
+        raise LocationCatalogError(f"Required location catalog not found: {resolved}")
+    stat = resolved.stat()
+    return _load_location_catalog_cached(str(resolved), stat.st_size, stat.st_mtime_ns)
+
+
+@lru_cache(maxsize=None)
+def _load_location_catalog_cached(path_value: str, size: int, mtime_ns: int) -> LocationCatalog:
+    del size, mtime_ns
+    path = Path(path_value)
+    try:
+        with path.open("r", encoding="utf-8-sig") as handle:
+            raw = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LocationCatalogError(f"Unable to read location catalog {path}: {exc}") from exc
+    if not isinstance(raw, dict) or raw.get("schemaVersion") != 1:
+        raise LocationCatalogError(f"Unsupported or missing location catalog schemaVersion in: {path}")
+    if not isinstance(raw.get("scenarioOverrides"), dict):
+        raise LocationCatalogError(f"Invalid scenarioOverrides collection in location catalog: {path}")
+    if raw["scenarioOverrides"]:
+        raise LocationCatalogError(
+            f"Scenario-specific location catalog overrides are present but runtime selection is not implemented: {path}"
+        )
+
+    def index_rows(collection_name: str, required_fields: set[str]) -> dict[str, dict[str, Any]]:
+        rows = raw.get(collection_name)
+        if not isinstance(rows, list) or not rows:
+            raise LocationCatalogError(f"Invalid or empty {collection_name} collection in location catalog: {path}")
+        templates: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                raise LocationCatalogError(f"Invalid row in {collection_name} collection: {path}")
+            data_name = row.get("dataName")
+            missing = required_fields - set(row)
+            if not isinstance(data_name, str) or not data_name or missing:
+                raise LocationCatalogError(
+                    f"Invalid {collection_name} row {data_name!r}; missing {sorted(missing)} in: {path}"
+                )
+            if data_name in templates:
+                raise LocationCatalogError(f"Duplicate {collection_name} dataName {data_name!r} in: {path}")
+            templates[data_name] = dict(row)
+        return templates
+
+    body_templates = index_rows("spaceBodies", {"dataName", "objectType"})
+    orbit_templates = index_rows("orbits", {"dataName", "irradiatedMultiplier"})
+    counts = raw.get("counts")
+    expected_counts = {"spaceBodies": len(body_templates), "orbits": len(orbit_templates)}
+    if counts != expected_counts:
+        raise LocationCatalogError(f"Location catalog counts do not match row collections: {path}")
+    for name, body in body_templates.items():
+        if not isinstance(body.get("objectType"), str) or not isinstance(body.get("atmosphere"), str):
+            raise LocationCatalogError(f"Invalid body classification fields for {name!r} in: {path}")
+        if not isinstance(body.get("irradiatedMultiplier"), (int, float)) or not isinstance(
+            body.get("maxHabSize"), (int, float)
+        ):
+            raise LocationCatalogError(f"Invalid body calculation fields for {name!r} in: {path}")
+    for name, orbit in orbit_templates.items():
+        if not isinstance(orbit.get("irradiatedMultiplier"), (int, float)):
+            raise LocationCatalogError(f"Invalid orbit calculation fields for {name!r} in: {path}")
+    expected_indexes = {
+        "spaceBodies": {name: index for index, name in enumerate(row["dataName"] for row in raw["spaceBodies"])},
+        "orbits": {name: index for index, name in enumerate(row["dataName"] for row in raw["orbits"])},
+    }
+    if raw.get("byDataName") != expected_indexes:
+        raise LocationCatalogError(f"Location catalog byDataName indexes do not match row order: {path}")
+    return LocationCatalog(
+        body_templates=body_templates,
+        orbit_templates=orbit_templates,
+        metadata={
+            "schemaVersion": raw["schemaVersion"],
+            "source": raw.get("source"),
+            "scenarioOverrides": raw["scenarioOverrides"],
+        },
+    )
 
 
 def _catalog_module_to_template(module: dict[str, Any]) -> dict[str, Any]:

@@ -119,6 +119,35 @@ class HabPowerTests(unittest.TestCase):
 
         self.assertAlmostEqual(ti.orbit_template_semi_major_axis_km(orbit_template, body_template), 23.4)
 
+    def test_synchronous_orbit_uses_body_mass_and_rotation_period(self):
+        orbit_template = {"dataName": "SynchronousEarthOrbit", "synch": True}
+        body_template = {
+            "dataName": "Earth",
+            "mass_kg": 5.972e24,
+            "rotationPeriod_strHours": "23.934469",
+            "meanRadius_km": 6356.751107,
+            "maxRadius_km": 6378.137,
+            "hillRadius_km": 1471527.18,
+        }
+
+        semi_major_axis = ti.orbit_template_semi_major_axis_km(orbit_template, body_template)
+        visibility = 1.0 - math.atan(body_template["meanRadius_km"] / semi_major_axis) / math.pi
+
+        self.assertAlmostEqual(semi_major_axis, 42162.804, places=3)
+        self.assertAlmostEqual(visibility, 0.952368, places=6)
+
+    def test_unresolved_orbit_geometry_does_not_assume_full_solar_visibility(self):
+        indexed = ti.build_index({"gamestates": {}})
+        body = {"templateName": "TestBody"}
+
+        with self.assertRaisesRegex(ti.SolarPowerDataError, "lacks resolvable orbit radius"):
+            ti.space_body_orbit_solar_visibility(
+                indexed,
+                body,
+                {"dataName": "UndefinedOrbit"},
+                {"TestBody": {"dataName": "TestBody", "objectType": "Planet", "meanRadius_km": 1000}},
+            )
+
     def test_surface_solar_power_applies_distance_polar_and_mirror_bonuses(self):
         gamestates = {}
         add_state(gamestates, "TISpaceBodyState", 10, {"templateName": "Sol"})

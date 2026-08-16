@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import build_module_catalog as mc
+import build_location_catalog as lc
 import build_research_catalog as rc
 import catalog_utils as cu
 
@@ -23,6 +24,60 @@ def write_text(path: Path, content: str) -> None:
 
 
 class CatalogGeneratorTests(unittest.TestCase):
+    def test_location_catalog_normalizes_body_and_orbit_without_zero_filling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            templates_dir = Path(tmp) / "Templates"
+            write_json(
+                templates_dir / "TISpaceBodyTemplate.json",
+                [
+                    {
+                        "dataName": "Mercury",
+                        "friendlyName": "Mercury",
+                        "barycenterName": "Sol",
+                        "objectType": "Planet",
+                        "atmosphere": "Trace",
+                        "semiMajorAxis_AU": 0.387099,
+                        "equatorialRadius_km": 2493.7,
+                        "mass_kg": 3.3011e23,
+                        "oblateness": 0.0,
+                        "rotationPeriod_strHours": "1407.6",
+                        "irradiatedMultiplier": 2,
+                        "maxHabSize": 4,
+                    }
+                ],
+            )
+            write_json(
+                templates_dir / "TIOrbitTemplate.json",
+                [
+                    {
+                        "dataName": "LowMercuryOrbit",
+                        "barycenterName": "Mercury",
+                        "radialOrbit": True,
+                        "synch": False,
+                        "irradiatedMultiplier": 2.0,
+                    }
+                ],
+            )
+
+            catalog = lc.build_catalog(templates_dir)
+
+            self.assertEqual(catalog["schemaVersion"], 1)
+            self.assertEqual(catalog["source"]["spaceBodyTemplate"]["file"], "TISpaceBodyTemplate.json")
+            self.assertEqual(catalog["source"]["orbitTemplate"]["file"], "TIOrbitTemplate.json")
+            self.assertEqual(len(catalog["source"]["spaceBodyTemplate"]["sha256"]), 64)
+            self.assertEqual(catalog["counts"], {"spaceBodies": 1, "orbits": 1})
+            self.assertEqual(catalog["byDataName"]["spaceBodies"], {"Mercury": 0})
+            self.assertEqual(catalog["byDataName"]["orbits"], {"LowMercuryOrbit": 0})
+            body = catalog["spaceBodies"][0]
+            orbit = catalog["orbits"][0]
+            self.assertEqual(body["mass_kg"], 3.3011e23)
+            self.assertEqual(body["oblateness"], 0)
+            self.assertEqual(body["meanRadius_km"], 2493.7)
+            self.assertEqual(body["maxRadius_km"], 2493.7)
+            self.assertTrue(orbit["radialOrbit"])
+            self.assertFalse(orbit["synch"])
+            self.assertEqual(orbit["irradiatedMultiplier"], 2)
+
     def test_module_catalog_build_and_markdown_use_localized_fixture(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
