@@ -40,12 +40,17 @@
 
 ## Progress
 
-- Not started.
+- Complete. The normal-runtime CLI matrix runs through command-specific bounded synthetic saves with raw loader and install discovery traps active.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Split fixtures by calculation domain (base/research, org, hab/forecast, ship, claims, AI) instead of using one permissive mega-fixture.
+- Trap all five raw/install entry points both in `ti_parser_core` and in the aliases imported by `ti_save_parser`.
+- Keep planner paths bounded with `org-plan --top 1 --max-actions 1 --beam-width 1`, `hab-plan --top 1`, and `ship-plan --top 1 --design`.
+- Require a command-specific populated result in addition to exit code 0 and absence of `status: incomplete`.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Protected summary, topbar, research, research UI/plan, org plan, hab UI/plan, resource forecast, saved-design ship simulation, nation claims diagnostics, and AI fleet diagnostics from raw runtime access.
+- The static raw-loader guard remains part of the focused acceptance command, complementing the dynamic alias/defining-module traps.
+- Focused validation passes all 5 package-only/static-guard tests; full validation passes 200 tests with one expected local-fixture skip.
