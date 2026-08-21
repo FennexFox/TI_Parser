@@ -6956,7 +6956,11 @@ def command_nation_claims(save_path: Path, templates_dir: Path | None, args: arg
         diagnostics=args.diagnostics,
     )
     if args.diagnostics:
-        result["calculationDiagnostics"] = runtime_catalogs.calculation_diagnostics()
+        claim_diagnostics = result.pop("calculationDiagnostics", {})
+        result["calculationDiagnostics"] = {
+            "runtime": runtime_catalogs.calculation_diagnostics(),
+            "claims": claim_diagnostics,
+        }
     print_json(result, compact=args.compact)
 
 

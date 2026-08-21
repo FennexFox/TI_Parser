@@ -1,12 +1,18 @@
+import argparse
+from contextlib import redirect_stdout
+from io import StringIO
+import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import ti_parser_claims as claims
 import ti_parser_core as core
+import ti_save_parser as ti
 
 
 class NationClaimsTests(unittest.TestCase):
@@ -167,6 +173,50 @@ class NationClaimsTests(unittest.TestCase):
         row = self._rows()["LowPeace"]
         self.assertEqual(row["succession"]["annexation"], "unknown / not reconstructed")
         self.assertEqual(row["succession"]["federation"], "unknown / not reconstructed")
+
+    def test_command_diagnostics_preserve_runtime_and_claim_provenance(self):
+        runtime_diagnostics = {
+            "scenario": "StandardScenario",
+            "catalogs": {
+                "nation_claim": {
+                    "payloadFingerprint": "runtime-fingerprint",
+                    "overrideApplied": False,
+                }
+            },
+        }
+
+        class RuntimeCatalogs:
+            nation_claims = NationClaimsTests._catalog()
+
+            @staticmethod
+            def calculation_diagnostics():
+                return runtime_diagnostics
+
+        output = StringIO()
+        args = argparse.Namespace(
+            claimant="CLA",
+            target=None,
+            diagnostics=True,
+            compact=True,
+        )
+        with (
+            patch.object(ti, "load_save", return_value={}),
+            patch.object(ti, "build_index", return_value=self._build_indexed()),
+            patch.object(ti, "calculation_catalogs", return_value=RuntimeCatalogs()),
+            redirect_stdout(output),
+        ):
+            ti.command_nation_claims(Path("synthetic.gz"), None, args)
+
+        result = json.loads(output.getvalue())
+        diagnostics = result["calculationDiagnostics"]
+        self.assertEqual(diagnostics["runtime"], runtime_diagnostics)
+        self.assertEqual(diagnostics["claims"]["selectedScenario"], "StandardScenario")
+        self.assertEqual(diagnostics["claims"]["rule"]["value"], 2.0)
+        self.assertEqual(diagnostics["claims"]["rule"]["formula"], claims.DEMOCRACY_FORMULA)
+        self.assertIn("decompiled game-code", diagnostics["claims"]["rule"]["source"])
+        self.assertEqual(diagnostics["claims"]["assumptions"], [])
+        self.assertEqual(diagnostics["claims"]["missingDependencies"], [])
+        self.assertEqual(diagnostics["claims"]["knownLimitations"], result["knownLimitations"])
 
 
 if __name__ == "__main__":

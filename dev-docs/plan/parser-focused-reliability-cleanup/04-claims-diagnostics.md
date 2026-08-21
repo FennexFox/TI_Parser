@@ -39,12 +39,17 @@
 
 ## Progress
 
-- Not started.
+- Completed.
+- The command wrapper now preserves the calculator's claim-domain diagnostics under `calculationDiagnostics.claims` and attaches catalog provenance under `.runtime`.
+- A command-level JSON regression exercises the actual wrapper and verifies both branches.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Diagnostic output intentionally gains one nesting level; non-diagnostic claim JSON is unchanged.
+- Claim reasoning remains calculator-owned, while payload fingerprints and scenario overlay selection remain runtime-catalog-owned.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- All 8 focused nation-claim tests pass.
+- Full validation passes 199 tests with one expected local-fixture skip.
+- The wrapper regression preserves selected scenario, threshold, formula, decompiled-rule source, assumptions, limitations, missing dependencies, runtime fingerprint, and override metadata without one diagnostic source overwriting the other.
