@@ -28,3 +28,14 @@ tools are outside the runtime module set.
 - Generator fixture tests and raw-reference verification tests.
 
 Normal CLI commands and calculation modules are not allowed to use raw template or DLC paths after migration.
+
+## Final audit result
+
+- CLI startup, snapshot, org, income, hab, topbar, nation/world/advise, research, project analysis, ship planning,
+  simulation, and upkeep now have zero prohibited raw-loader calls.
+- The only AST-allowlisted edges are `load_trait_templates -> load_named_templates` and
+  `scenario_template_sources -> load_named_templates` inside the legacy raw utility module. No normal command
+  reaches either helper; they remain for generator/raw inspection compatibility.
+- Missing relevant effects, traits, org state/catalog rows, active research rows, saved designs, and ship
+  components now fail closed through `CalculationDependencyError`. Empty optional ship slots remain valid.
+- Unsupported scenarios fail exact catalog selection and are returned by the CLI as structured incomplete output.

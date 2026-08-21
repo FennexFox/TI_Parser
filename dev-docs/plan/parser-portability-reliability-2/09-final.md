@@ -40,12 +40,12 @@
 
 ## Progress
 
-- Not started.
+- Complete: residual loader audit, README, phase records, full regression, real-save smoke tests, and raw/package verification are complete.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Two raw helper-to-helper edges remain allowlisted in `ti_parser_core`; no normal command or calculator reaches them.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Full suite passes with one expected local-fixture skip; Broken Earth catalog verification passes 12/12.

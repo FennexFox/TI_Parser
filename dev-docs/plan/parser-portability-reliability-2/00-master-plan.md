@@ -56,3 +56,9 @@
 - Base, Dark Skies DLC templates, `Assembly-CSharp.dll`, and local saves are available for verification.
 - Unknown or unsupported scenarios must be incomplete; they must never inherit Standard data silently.
 - Game mechanics are implemented only when demonstrated by saves, templates, decompiled code, or existing verified behavior.
+
+## Completion
+
+- Completed on 2026-08-21. All nine phase files contain their final decisions and outcomes.
+- Final regression: 179 tests passed, one optional local-fixture test skipped.
+- Broken Earth raw/package verification: 12 passed, zero failed, zero unavailable.

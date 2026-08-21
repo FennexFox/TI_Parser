@@ -12,6 +12,7 @@ Implementation layout:
 - `tools/ti_parser_hab.py` owns hab module, support, mining, and power calculations.
 - `tools/ti_parser_org.py` owns org-plan parsing, conditional evaluation, and committee assignment search.
 - `tools/ti_parser_cli.py` owns argument parsing and command dispatch.
+- `tools/ti_parser_catalogs.py` validates the packaged runtime bundle, manifest, exact scenario overlays, and fingerprints.
 - `tools/ti_save_parser.py` keeps the public script entrypoint and thin compatibility wrappers.
 - `tools/catalog_utils.py` contains shared catalog-generator helpers.
 
@@ -38,7 +39,11 @@ python .\tools\ti_save_parser.py research --details
 python .\tools\ti_save_parser.py research-ui
 python .\tools\ti_save_parser.py research-plan --top 5
 python .\tools\ti_save_parser.py topbar --details
+python .\tools\ti_save_parser.py nation-claims KOR --target PRK --diagnostics
+python .\tools\ti_save_parser.py ai-fleet-diagnostics --stale-days 365
 python .\tools\build_research_catalog.py
+python .\tools\build_runtime_catalogs.py --templates-dir "C:\...\StreamingAssets\Templates"
+python .\tools\ti_save_parser.py --templates-dir "C:\...\StreamingAssets\Templates" catalog-verify --scenario ModernScenario
 python .\tools\build_module_catalog.py
 python .\tools\build_location_catalog.py
 python .\tools\ti_save_parser.py world-ui
@@ -49,6 +54,16 @@ python .\tools\ti_save_parser.py raw --type TIFactionState --template ResistCoun
 
 Use global options such as `--save <path>` and `--refresh-cache` before the
 subcommand.
+
+## Package-only runtime and incomplete results
+
+Normal commands do not discover or read an installed Terra Invicta template tree. Calculation data comes from the packaged effect, trait, org, research, ship, nation-claim, hab-module, and location catalogs under `data/`. `--templates-dir` is verification-only and is rejected for normal commands.
+
+The common `catalog_manifest.json` records each new runtime catalog's file SHA-256, schema version, payload fingerprint, and a bundle fingerprint. Catalog envelopes contain deterministic source hashes, supported canonical scenarios, base data, and exact scenario overrides; timestamps and mtimes are excluded. Unsupported scenarios never inherit another scenario's values.
+
+If a save references a required effect, trait, org, research row, or ship component that cannot be resolved, the CLI exits with code 2 and prints `status: "incomplete"` plus structured `missingDependencies`. Successful command JSON keeps its existing result shape. Commands with `--diagnostics` can include `calculationDiagnostics` with the selected scenario and catalog fingerprints.
+
+`catalog-verify` is the only command that consumes raw templates. It rebuilds normalized reference catalogs, checks source hashes and scenario overlays, and—when a matching save is available—compares Mercury solar, CP cap, MC, research, org eligibility, and saved-design simulation with `rel_tol=1e-9` and `abs_tol=1e-6`.
 
 Councilor attributes are calculated from save base values plus unconditional
 trait and active-org modifiers, then clamped to the game's normal 25 cap.
@@ -137,7 +152,7 @@ near Mercury. `build_location_catalog.py` reads the raw
 `TIOrbitTemplate.json` files only to regenerate the packaged catalog. Normal
 parser execution does not read those raw files.
 
-The research catalog generator reads global tech and faction project templates
+The research catalog v2 generator reads global tech and faction project templates
 from the local Terra Invicta install and writes `data/research_catalog.json`
 plus `docs/research_catalog.md`. The JSON stores research prerequisites as
 explicit `all`/`any` boolean trees, plus derived graph indexes such as `edges`
@@ -208,7 +223,7 @@ across every hypothetical build.
 
 The `ship-plan` command builds an LLM-ready ship-design report from the player's
 finished projects, obsolete-part settings, existing designs, resource state, and
-local ship-component templates. It reports unlocked hulls and core components,
+packaged ship-component catalog. It reports unlocked hulls and core components,
 separate drive shortlists for thrust and exhaust velocity, legal power-plant
 pairings, weapon shortlists, and role-specific utility modules for `balanced`,
 `combat`, `intercept`, `transfer`, `colony`, `assault`, or `science` planning.
@@ -218,10 +233,14 @@ needed. Pass `--design <name-or-template-fragment>` to inspect one saved design
 without printing the large candidate catalog.
 
 Saved designs include a non-combat ship-builder simulation reconstructed from
-the local game templates. It reports crew; wet, dry, propellant, component, and
+the packaged catalog. It reports crew; wet, dry, propellant, component, and
 armor mass; cruise and combat acceleration; delta-v; angular acceleration;
 power demand; waste heat; radiator mass; battery and heat-sink storage;
 construction resources with component breakdowns; tier 1/2/3 shipyard build
 times; MC; and monthly money upkeep. It intentionally excludes combat
 performance ratings. Drive and weapon shortlist scores remain transparent
 comparison proxies rather than a transfer or combat simulation.
+
+The `nation-claims` command distinguishes peaceful, statically hostile, and democracy-conditional hostile claims. It reports the strict comparison `target.democracy > claimant.democracy + democracyDecreaseToMakeHostileClaim` with values and provenance. Permanence and post-annexation/unification/independence succession remain `unknown / not reconstructed` unless directly evidenced.
+
+The `ai-fleet-diagnostics` command inspects supported attack/transport goals, assigned and pending fleets, ships, habs, shipyards, queues, resources, and mission-control evidence for one or all AI factions. It separates observed, derived, suspected, and unknown facts. An empty queue never implies a resource shortage, and stale suspicion is added only when `--stale-days` is supplied.
