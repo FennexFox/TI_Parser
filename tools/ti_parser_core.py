@@ -43,6 +43,39 @@ class SolarPowerDataError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class CalculationDependency:
+    """One required calculation input that could not be resolved safely."""
+
+    kind: str
+    name: str
+    context: str | None
+    scenario: str | None
+    reason: str
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "kind": self.kind,
+            "name": self.name,
+            "context": self.context,
+            "scenario": self.scenario,
+            "reason": self.reason,
+        }
+
+
+class CalculationDependencyError(RuntimeError):
+    """Raised instead of returning a value with required inputs omitted."""
+
+    def __init__(self, dependency: CalculationDependency):
+        self.dependencies = (dependency,)
+        self.missing_dependencies = [dependency.to_dict()]
+        context = f" in context {dependency.context!r}" if dependency.context else ""
+        super().__init__(
+            f"Missing or invalid {dependency.kind} dependency {dependency.name!r}{context}: "
+            f"{dependency.reason}"
+        )
+
+
+@dataclass(frozen=True)
 class LocationCatalog:
     """One version-locked body/navigable/orbit location dataset."""
 
@@ -712,13 +745,92 @@ def apply_effect_modifiers(
     context: str,
     base_value: float,
 ) -> float:
+    active_effects = effect_contexts.get(context, [])
+    if not isinstance(active_effects, list):
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="effectContext",
+                name=context,
+                context=context,
+                scenario=None,
+                reason="active effect names must be a list",
+            )
+        )
+
     result = float(base_value)
-    for effect_name in effect_contexts.get(context, []):
-        effect = effect_templates.get(effect_name)
-        if not effect:
-            continue
+    valid_operations = {
+        "Additive",
+        "Multiplicative",
+        "SetToFixedValue",
+        "IncreaseToValue",
+        "DecreaseToValue",
+    }
+    for effect_name in active_effects:
+        if not isinstance(effect_name, str) or not effect_name:
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="effect",
+                    name=str(effect_name),
+                    context=context,
+                    scenario=None,
+                    reason="active effect name must be a non-empty string",
+                )
+            )
+        if effect_name not in effect_templates:
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="effect",
+                    name=effect_name,
+                    context=context,
+                    scenario=None,
+                    reason="referenced effect is missing from the effect catalog",
+                )
+            )
+        effect = effect_templates[effect_name]
+        if not isinstance(effect, dict):
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="effect",
+                    name=effect_name,
+                    context=context,
+                    scenario=None,
+                    reason="effect catalog row must be an object",
+                )
+            )
         operation = effect.get("operation")
-        value = as_float(effect.get("value"), 0.0)
+        if operation not in valid_operations:
+            reason = "operation is missing" if operation is None else f"unsupported operation {operation!r}"
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="effect",
+                    name=effect_name,
+                    context=context,
+                    scenario=None,
+                    reason=reason,
+                )
+            )
+        if "value" not in effect:
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="effect",
+                    name=effect_name,
+                    context=context,
+                    scenario=None,
+                    reason="value is missing",
+                )
+            )
+        raw_value = effect["value"]
+        value = as_float(raw_value, math.nan)
+        if isinstance(raw_value, bool) or not math.isfinite(value):
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="effect",
+                    name=effect_name,
+                    context=context,
+                    scenario=None,
+                    reason="value must be a finite number",
+                )
+            )
         if operation == "Additive":
             result += value
         elif operation == "Multiplicative":

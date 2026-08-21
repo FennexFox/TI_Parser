@@ -1,0 +1,48 @@
+{
+  "base": {
+    "democracyDecreaseToMakeHostileClaim": 1.5,
+    "hostileClaimDueToDemocracyFormula": "targetDemocracy > claimantDemocracy + democracyDecreaseToMakeHostileClaim",
+    "valueSource": "TIGlobalConfig.democracyDecreaseToMakeHostileClaim compiled field initializer"
+  },
+  "generator": {
+    "name": "build_runtime_catalogs",
+    "version": "1"
+  },
+  "payloadFingerprint": "7ef5efe1e90e9be7469ca29a16921fdd502282281ca75a19d65b5b2d3fc8c510",
+  "scenarioOverrides": {},
+  "schemaVersion": 1,
+  "sourceFiles": [
+    {
+      "name": "2003Scenario/TIMetaTemplate.json",
+      "sha256": "08924ca30930b942a018672134dceaef214befe44cef8e4d1d5d966585089482"
+    },
+    {
+      "name": "BrokenEarthScenario/TIGlobalConfig.json",
+      "sha256": "34b51734b07b9e4d1144e43f98db7d57cb956ea8c1badf87fcf5f9f297f8d390"
+    },
+    {
+      "name": "BrokenEarthScenario/TIMetaTemplate.json",
+      "sha256": "635003cf1a9ac22ec9c87d188c5e8aa709d96dcc1c1ea799bac2612ef31f13d9"
+    },
+    {
+      "name": "TerraInvicta_Data/Managed/Assembly-CSharp.dll",
+      "sha256": "1034138fe98e17ca01c067ff2a90ab19857c600bf7a0c5f52215cacbaf7a9f56"
+    },
+    {
+      "name": "base/TIGlobalConfig.json",
+      "sha256": "415113fadeecb4d67fa79f34275e026396c3fe914b722d936d5adcf737b07f4e"
+    },
+    {
+      "name": "base/TIMetaTemplate.json",
+      "sha256": "46f48a2466f1ff975f76d959ff9a668f97f199637147c6aa925f85439ec15cba"
+    }
+  ],
+  "supportedScenarios": [
+    "2003Scenario",
+    "2026Scenario",
+    "2030Scenario",
+    "2070Scenario",
+    "BrokenEarthScenario",
+    "ModernScenario"
+  ]
+}

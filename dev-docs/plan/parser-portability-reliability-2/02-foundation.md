@@ -42,12 +42,12 @@
 
 ## Progress
 
-- Not started.
+- Complete: strict dependency errors, exact scenario selection, manifest/envelope validation, effect fail-closed behavior, and structured CLI incomplete output are implemented.
 
 ## Decision log
 
-- No decisions recorded yet.
+- `CatalogError` is converted to `CalculationDependencyError` at calculation boundaries; raw verification errors remain verifier results.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Normal CLI bootstrap no longer discovers an installation. `--templates-dir` is accepted only by `catalog-verify`.

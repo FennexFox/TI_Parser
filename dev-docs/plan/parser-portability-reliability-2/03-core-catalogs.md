@@ -40,12 +40,12 @@
 
 ## Progress
 
-- Not started.
+- Complete: deterministic effect, trait, org, ship, and nation-claim catalogs are generated and runtime consumers use the packaged bundle.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Existing function signatures retain `templates_dir` for source compatibility, but normal calculations ignore it.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Snapshot, councilor income, org, hab, nation/world/advise, topbar, research, and ship paths contain no raw-loader calls.
