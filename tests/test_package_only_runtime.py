@@ -371,6 +371,7 @@ class PackageOnlyRuntimeTests(unittest.TestCase):
 
                 research_plan = self._run(research, ["research-plan", "ResistCouncil", "--top", "1"])
                 self.assertGreater(research_plan["globalResearchCandidates"]["count"], 0)
+                self.assertEqual(research_plan["templateAvailability"]["source"], "packaged-runtime-catalog")
 
                 org_plan = self._run(
                     org,

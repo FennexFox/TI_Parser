@@ -18,11 +18,11 @@
 ## Phase Order
 
 1. [Canonical LF catalog artifacts](01-catalog-portability.md) — complete
-2. [Referenced definition fail-closed](02-fail-closed.md)
-3. [Ship scenario delta generation](03-ship-overlays.md)
-4. [Claims diagnostics merge](04-claims-diagnostics.md)
-5. [Package-only command matrix](05-package-only.md)
-6. [Fresh-export gate and documentation](06-fresh-export.md)
+2. [Referenced definition fail-closed](02-fail-closed.md) — complete
+3. [Ship scenario delta generation](03-ship-overlays.md) — complete
+4. [Claims diagnostics merge](04-claims-diagnostics.md) — complete
+5. [Package-only command matrix](05-package-only.md) — complete
+6. [Fresh-export gate and documentation](06-fresh-export.md) — complete
 
 ## Phase Dependencies
 

@@ -5680,10 +5680,11 @@ def calculate_research_plan(
         "questionSupported": "다음 글로벌 연구/프로젝트 연구는 어떤 기술이 좋아?",
         "mode": mode,
         "templateAvailability": {
-            "templatesDir": template_source_value(templates_dir),
+            "source": "packaged-runtime-catalog",
+            "templatesDir": None,
             "globalTechTemplates": len(tech_templates),
             "projectTemplates": len(project_templates),
-            "warning": None if tech_templates and project_templates else "Template files are required for candidate collection.",
+            "warning": None if tech_templates and project_templates else "The packaged research catalog is missing required candidate rows.",
         },
         "currentState": {
             "researchIncome": research_ui.get("researchIncome"),
@@ -6839,8 +6840,9 @@ def calculate_ship_plan(
         "questionSupported": "What ship design should I build, and what non-combat physical and construction values do my saved designs have?",
         "requestedRole": role,
         "templateAvailability": {
-            "templatesDir": template_source_value(templates_dir),
-            "warning": None if hull_templates and drive_templates else "Local Terra Invicta ship templates are required.",
+            "source": "packaged-runtime-catalog",
+            "templatesDir": None,
+            "warning": None if hull_templates and drive_templates else "The packaged ship catalog is missing required component rows.",
         },
         "currentState": {
             "resources": faction.get("resources") or {},
