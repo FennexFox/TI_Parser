@@ -40,12 +40,12 @@
 
 ## Progress
 
-- Not started.
+- Complete: hull, propulsion, thermal, armor, utility, weapon, and effect data are packaged and used by planning/simulation/upkeep.
 
 ## Decision log
 
-- No decisions recorded yet.
+- `Empty` component slots are optional; any other referenced missing component raises a structured dependency error.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Real-save ship-plan and saved-design raw/package simulation parity both pass.

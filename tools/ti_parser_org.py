@@ -9,18 +9,20 @@ from typing import Any, Iterable
 
 import ti_parser_snapshot as snapshot_layer
 from ti_parser_core import (
+    CalculationDependency,
+    CalculationDependencyError,
     IndexedState,
     as_float,
     clean_numbers,
     find_faction_state,
-    load_named_templates,
-    load_trait_templates,
     ref_id,
     region_nation_summary,
     resolve_ref,
     state_value_by_id,
+    scenario_template_name,
     type_entries,
 )
+from ti_parser_catalogs import CatalogError, load_runtime_catalogs
 from ti_parser_snapshot import SnapshotConfig
 
 
@@ -1105,12 +1107,43 @@ def calculate_org_plan(
     max_actions: int = 4,
     beam_width: int = 8,
     include_all_candidates: bool = False,
+    runtime_catalogs: Any | None = None,
 ) -> dict[str, Any]:
-    trait_templates = load_trait_templates(templates_dir)
-    org_templates = load_named_templates(templates_dir, "TIOrgTemplate.json")
+    if runtime_catalogs is None:
+        scenario = scenario_template_name(indexed)
+        if not scenario:
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="scenario",
+                    name="scenarioMetaTemplateName",
+                    context="org-plan",
+                    scenario=None,
+                    reason="save does not identify a canonical supported scenario",
+                )
+            )
+        try:
+            runtime_catalogs = load_runtime_catalogs(scenario)
+        except CatalogError as exc:
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="catalog",
+                    name="runtime bundle",
+                    context="org-plan",
+                    scenario=scenario,
+                    reason=str(exc),
+                )
+            ) from exc
+    trait_templates = runtime_catalogs.traits
+    org_templates = runtime_catalogs.orgs
     if not org_templates:
-        raise FileNotFoundError(
-            "TIOrgTemplate.json could not be loaded; org eligibility cannot be evaluated safely"
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="catalog",
+                name="org catalog",
+                context="org-plan",
+                scenario=scenario_template_name(indexed),
+                reason="org eligibility cannot be evaluated safely without catalog rows",
+            )
         )
     faction_id, faction = find_faction_state(indexed, faction_name)
     profiles = {

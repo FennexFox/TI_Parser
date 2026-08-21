@@ -1,7 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -147,13 +147,9 @@ class ParserOrgParityTests(unittest.TestCase):
         }
         indexed = ti.build_index(data)
 
-        with patch.object(
-            org,
-            "load_named_templates",
-            return_value={"Org100": {"requiresNationality": True}},
-        ):
-            wrapper = ti.calculate_org_plan(indexed, None, "ResistCouncil")
-            direct = org.calculate_org_plan(indexed, None, "ResistCouncil")
+        bundle = SimpleNamespace(traits={}, orgs={"Org100": {"requiresNationality": True}})
+        wrapper = ti.calculate_org_plan(indexed, None, "ResistCouncil", runtime_catalogs=bundle)
+        direct = org.calculate_org_plan(indexed, None, "ResistCouncil", runtime_catalogs=bundle)
 
         self.assertEqual(wrapper, direct)
         self.assertEqual(wrapper["committeePlan"]["actions"][0]["candidate"]["id"], 100)
@@ -240,8 +236,15 @@ class ParserOrgParityTests(unittest.TestCase):
             "RestrictedOrg": {"restricted": ["Cooperate"]},
         }
 
-        with patch.object(org, "load_named_templates", return_value=templates):
-            plan = org.calculate_org_plan(indexed, None, "CooperateCouncil", focus="science", max_actions=1)
+        bundle = SimpleNamespace(traits={}, orgs=templates)
+        plan = org.calculate_org_plan(
+            indexed,
+            None,
+            "CooperateCouncil",
+            focus="science",
+            max_actions=1,
+            runtime_catalogs=bundle,
+        )
 
         candidates = {
             row["template"]: row
@@ -323,16 +326,19 @@ class ParserOrgParityTests(unittest.TestCase):
         }
         indexed = ti.build_index(data)
 
-        with patch.object(org, "load_named_templates", return_value={"Org100": {}}):
-            plan = org.calculate_org_plan(indexed, None, "ResistCouncil", focus="science", max_actions=1)
-            market_only_plan = org.calculate_org_plan(
-                indexed,
-                None,
-                "ResistCouncil",
-                focus="science",
-                max_actions=1,
-                include_unassigned=False,
-            )
+        bundle = SimpleNamespace(traits={}, orgs={"Org100": {}})
+        plan = org.calculate_org_plan(
+            indexed, None, "ResistCouncil", focus="science", max_actions=1, runtime_catalogs=bundle
+        )
+        market_only_plan = org.calculate_org_plan(
+            indexed,
+            None,
+            "ResistCouncil",
+            focus="science",
+            max_actions=1,
+            include_unassigned=False,
+            runtime_catalogs=bundle,
+        )
 
         self.assertEqual(plan["candidateSources"]["market"]["count"], 0)
         self.assertEqual(plan["candidateSources"]["ownedInventory"]["count"], 1)
@@ -366,9 +372,9 @@ class ParserOrgParityTests(unittest.TestCase):
             }
         )
 
-        with patch.object(org, "load_named_templates", return_value={}):
-            with self.assertRaisesRegex(FileNotFoundError, "eligibility cannot be evaluated safely"):
-                org.calculate_org_plan(indexed, None)
+        bundle = SimpleNamespace(traits={}, orgs={})
+        with self.assertRaisesRegex(ti.CalculationDependencyError, "eligibility cannot be evaluated safely"):
+            org.calculate_org_plan(indexed, None, runtime_catalogs=bundle)
 
 
 if __name__ == "__main__":

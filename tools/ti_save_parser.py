@@ -19,6 +19,8 @@ from types import MappingProxyType
 from typing import Any
 
 from ti_parser_core import (
+    CalculationDependency,
+    CalculationDependencyError,
     DEFAULT_CACHE_DIR,
     SAVE_GLOB,
     IndexedState,
@@ -68,6 +70,10 @@ from ti_parser_core import (
     module_catalog_diagnostics,
     location_catalog_diagnostics,
 )
+from ti_parser_catalogs import CatalogError, RuntimeCatalogs, load_runtime_catalogs
+from ti_parser_ai import calculate_ai_fleet_diagnostics
+from ti_parser_claims import calculate_nation_claims
+from ti_parser_verify import verify_catalogs
 import ti_parser_snapshot as snapshot_layer
 import ti_parser_income as income_layer
 import ti_parser_hab as hab_layer
@@ -103,6 +109,70 @@ DEFAULT_GLOBAL_CONFIG = {
     "baselineMaxHumanCombatAcceleration_g": 3.0,
     "smallShipyardPenaltyPowerPerTier": 1.5,
 }
+
+
+def calculation_catalogs(indexed: IndexedState, context: str) -> RuntimeCatalogs:
+    """Load the validated package-only bundle for the save's exact scenario."""
+
+    scenario = scenario_template_name(indexed)
+    if not scenario:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="scenario",
+                name="scenarioMetaTemplateName",
+                context=context,
+                scenario=None,
+                reason="save does not identify a canonical supported scenario",
+            )
+        )
+    try:
+        return load_runtime_catalogs(
+            scenario,
+            catalog_files=(
+                "effect_catalog.json",
+                "trait_catalog.json",
+                "org_catalog.json",
+                "research_catalog.json",
+                "ship_catalog.json",
+                "nation_claim_catalog.json",
+            ),
+        )
+    except CatalogError as exc:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="catalog",
+                name="runtime bundle",
+                context=context,
+                scenario=scenario,
+                reason=str(exc),
+            )
+        ) from exc
+
+
+def required_catalog_row(
+    indexed: IndexedState,
+    rows: dict[str, dict[str, Any]],
+    kind: str,
+    name: Any,
+    context: str,
+) -> dict[str, Any]:
+    """Resolve a referenced catalog row or stop the calculation as incomplete."""
+
+    normalized = str(name or "")
+    row = rows.get(normalized)
+    if normalized and isinstance(row, dict):
+        return row
+    raise CalculationDependencyError(
+        CalculationDependency(
+            kind=kind,
+            name=normalized or "<missing reference>",
+            context=context,
+            scenario=scenario_template_name(indexed),
+            reason="save references a row absent from the packaged catalog",
+        )
+    )
+
+
 DEFAULT_CP_MAINTENANCE_GDP_SCALE = 1_000_000_000.0
 CP_MAINTENANCE_CAMPAIGN_START_GDP_FACTOR = 6.26e-06
 MIN_POPULATION_FOR_FIRST_ARMY_MILLIONS = 5.0
@@ -1432,8 +1502,9 @@ def calculate_hab_ui(
     location_catalog = load_location_catalog()
     body_templates = location_catalog.body_templates
     orbit_templates = location_catalog.orbit_templates
-    trait_templates = load_trait_templates(templates_dir)
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    runtime_catalogs = calculation_catalogs(indexed, "hab-ui")
+    trait_templates = runtime_catalogs.traits
+    effect_templates = runtime_catalogs.effects
     faction_ref = resolve_ref(indexed, hab.get("faction"))
     faction = faction_ref[2] if faction_ref else {}
     faction_id = ref_id(hab.get("faction"))
@@ -2426,8 +2497,9 @@ def hab_module_candidate_rows(
     location_catalog = load_location_catalog()
     body_templates = location_catalog.body_templates
     orbit_templates = location_catalog.orbit_templates
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
-    trait_templates = load_trait_templates(templates_dir)
+    runtime_catalogs = calculation_catalogs(indexed, "hab-plan")
+    effect_templates = runtime_catalogs.effects
+    trait_templates = runtime_catalogs.traits
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     mining_rate = faction_mining_rate(indexed, faction)
@@ -2476,8 +2548,9 @@ def hab_module_upgrade_rows(
     location_catalog = load_location_catalog()
     body_templates = location_catalog.body_templates
     orbit_templates = location_catalog.orbit_templates
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
-    trait_templates = load_trait_templates(templates_dir)
+    runtime_catalogs = calculation_catalogs(indexed, "hab-plan")
+    effect_templates = runtime_catalogs.effects
+    trait_templates = runtime_catalogs.traits
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     mining_rate = faction_mining_rate(indexed, faction)
@@ -3103,8 +3176,18 @@ def project_analysis_candidate_names(
     finished = set(faction.get("finishedProjectNames") if isinstance(faction.get("finishedProjectNames"), list) else [])
     filtered = []
     for name in names:
-        template = project_templates.get(name, {})
-        if not template or template.get("disable"):
+        template = project_templates.get(name)
+        if not isinstance(template, dict):
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="research-project",
+                    name=name,
+                    context="project-analysis.candidates",
+                    scenario=None,
+                    reason="save candidate is absent from the packaged research catalog",
+                )
+            )
+        if template.get("disable"):
             continue
         if name in finished and not template.get("repeatable"):
             continue
@@ -3378,8 +3461,9 @@ def prospective_module_unlocks_for_project(
     location_catalog = load_location_catalog()
     body_templates = location_catalog.body_templates
     orbit_templates = location_catalog.orbit_templates
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
-    trait_templates = load_trait_templates(templates_dir)
+    runtime_catalogs = calculation_catalogs(indexed, "project-analysis")
+    effect_templates = runtime_catalogs.effects
+    trait_templates = runtime_catalogs.traits
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     mining_rate = faction_mining_rate(indexed, faction)
@@ -3769,7 +3853,7 @@ def calculate_project_analysis(
     include_all: bool = False,
 ) -> dict[str, Any]:
     faction_id, faction = find_faction_state(indexed, faction_name)
-    research_templates = load_research_templates(templates_dir)
+    research_templates = load_research_templates(indexed, templates_dir)
     base_daily_cache: dict[int, float] = {}
     project_templates = research_templates.projects
     tech_templates = research_templates.techs
@@ -3987,15 +4071,18 @@ class ResearchTemplates:
     projects: dict[str, dict[str, Any]]
 
 
-def load_research_templates(templates_dir: Path | None) -> ResearchTemplates:
+def load_research_templates(indexed: IndexedState, templates_dir: Path | None = None) -> ResearchTemplates:
+    runtime_catalogs = calculation_catalogs(indexed, "research")
+    research = runtime_catalogs.research
+    ships = runtime_catalogs.ships
     return ResearchTemplates(
-        traits=load_trait_templates(templates_dir),
-        effects=load_named_templates(templates_dir, "TIEffectTemplate.json"),
-        orgs=load_named_templates(templates_dir, "TIOrgTemplate.json"),
+        traits=runtime_catalogs.traits,
+        effects=runtime_catalogs.effects,
+        orgs=runtime_catalogs.orgs,
         hab_modules=load_hab_module_catalog(),
-        utility_modules=load_named_templates(templates_dir, "TIUtilityModuleTemplate.json"),
-        techs=load_named_templates(templates_dir, "TITechTemplate.json"),
-        projects=load_named_templates(templates_dir, "TIProjectTemplate.json"),
+        utility_modules=ships["utilities"],
+        techs=research["techs"],
+        projects=research["projects"],
     )
 
 
@@ -4010,7 +4097,7 @@ def calculate_research_breakdown(
     include_details: bool = False,
     templates: ResearchTemplates | None = None,
 ) -> dict[str, Any]:
-    templates = templates or load_research_templates(templates_dir)
+    templates = templates or load_research_templates(indexed, templates_dir)
     trait_templates = templates.traits
     effect_templates = templates.effects
     hab_module_templates = templates.hab_modules
@@ -4674,7 +4761,7 @@ def calculate_research_ui(
     templates: ResearchTemplates | None = None,
     base_daily_cache: dict[int, float] | None = None,
 ) -> dict[str, Any]:
-    templates = templates or load_research_templates(templates_dir)
+    templates = templates or load_research_templates(indexed, templates_dir)
     base_daily_cache = base_daily_cache if base_daily_cache is not None else {}
     trait_templates = templates.traits
     org_templates = templates.orgs
@@ -4713,7 +4800,7 @@ def calculate_research_ui(
         if not isinstance(progress, dict):
             continue
         template_name = progress.get("techTemplateName")
-        template = tech_templates.get(template_name, {})
+        template = required_catalog_row(indexed, tech_templates, "research-tech", template_name, "research-ui.global")
         accumulated = as_float(progress.get("accumulatedResearch"), 0.0)
         cost = tech_template_cost(indexed, template)
         row = research_progress_row(indexed, template_name, template, accumulated, cost)
@@ -4778,7 +4865,7 @@ def calculate_research_ui(
             project_slots.append({"slot": slot, "empty": True})
             continue
         template_name = progress.get("projectTemplateName")
-        template = project_templates.get(template_name, {})
+        template = required_catalog_row(indexed, project_templates, "research-project", template_name, "research-ui.project")
         accumulated = as_float(progress.get("accumulatedResearch"), 0.0)
         cost = project_template_cost(indexed, template, faction)
         row = research_progress_row(indexed, template_name, template, accumulated, cost)
@@ -4811,7 +4898,7 @@ def calculate_research_ui(
         if slot in active_project_slots:
             continue
         template_name = progress.get("projectTemplateName")
-        template = project_templates.get(template_name, {})
+        template = required_catalog_row(indexed, project_templates, "research-project", template_name, "research-ui.paused-project")
         cost = project_template_cost(indexed, template, faction)
         accumulated = as_float(progress.get("accumulatedResearch"), 0.0)
         row = research_progress_row(indexed, template_name, template, accumulated, cost)
@@ -4970,8 +5057,16 @@ def available_project_research_templates(
         if name in active:
             continue
         template = project_templates.get(name)
-        if not template:
-            continue
+        if not isinstance(template, dict):
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="research-project",
+                    name=name,
+                    context="research-plan.available-projects",
+                    scenario=None,
+                    reason="save candidate is absent from the packaged research catalog",
+                )
+            )
         if as_float(template.get("researchCost"), 0.0) <= 0.0:
             continue
         rows.append((name, template))
@@ -5286,7 +5381,7 @@ def calculate_research_plan(
     mode: str = "all",
     include_all_candidates: bool = False,
 ) -> dict[str, Any]:
-    research_templates = load_research_templates(templates_dir)
+    research_templates = load_research_templates(indexed, templates_dir)
     base_daily_cache: dict[int, float] = {}
     trait_templates = research_templates.traits
     org_templates = research_templates.orgs
@@ -5814,17 +5909,6 @@ def ship_plan_generic_row(template: dict[str, Any], fields: Iterable[tuple[str, 
     return clean_numbers(row)
 
 
-def ship_plan_tagged_templates(
-    templates_dir: Path | None,
-    template_files: Iterable[tuple[str, str]],
-) -> dict[str, dict[str, Any]]:
-    result: dict[str, dict[str, Any]] = {}
-    for kind, filename in template_files:
-        for name, template in load_named_templates(templates_dir, filename).items():
-            result[name] = {**template, "_shipPlanKind": kind}
-    return result
-
-
 def ship_plan_add_scaled_materials(
     destination: dict[str, float],
     materials: dict[str, Any] | None,
@@ -6003,18 +6087,9 @@ def ship_plan_shipyard_times(
     }
 
 
-def ship_plan_simulation_catalogs(templates_dir: Path | None) -> dict[str, dict[str, dict[str, Any]]]:
-    return {
-        "hulls": load_named_templates(templates_dir, "TIShipHullTemplate.json"),
-        "drives": load_named_templates(templates_dir, "TIDriveTemplate.json"),
-        "powerPlants": load_named_templates(templates_dir, "TIPowerPlantTemplate.json"),
-        "radiators": load_named_templates(templates_dir, "TIRadiatorTemplate.json"),
-        "armors": load_named_templates(templates_dir, "TIShipArmorTemplate.json"),
-        "utilities": ship_plan_tagged_templates(templates_dir, SHIP_PLAN_UTILITY_TEMPLATE_FILES),
-        "weapons": ship_plan_tagged_templates(templates_dir, SHIP_PLAN_WEAPON_TEMPLATE_FILES),
-        "effects": load_named_templates(templates_dir, "TIEffectTemplate.json"),
-        "shipyards": load_hab_module_catalog(),
-    }
+def ship_plan_simulation_catalogs(indexed: IndexedState) -> dict[str, dict[str, dict[str, Any]]]:
+    catalogs = calculation_catalogs(indexed, "ship-plan").ship_simulation_catalogs
+    return {**catalogs, "shipyards": load_hab_module_catalog()}
 
 
 def simulate_ship_design(
@@ -6074,7 +6149,7 @@ def simulate_ship_design(
                 if as_float(entry.get("armorValue"), 0.0) > 0.0
             ),
         )
-        if name and template is None
+        if name and str(name) != "Empty" and template is None
     ]
     if not all((hull, drive, power_plant, radiator)) or missing_templates:
         return {
@@ -6355,6 +6430,18 @@ def ship_plan_existing_designs(
         if not isinstance(design, dict):
             continue
         name = str(design.get("dataName") or "")
+        simulation = simulate_ship_design(indexed, faction_id, faction, design, catalogs)
+        if not simulation.get("complete"):
+            missing = simulation.get("missingTemplates") or ["<missing required component reference>"]
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="ship-component",
+                    name=", ".join(str(item) for item in missing),
+                    context=f"ship-plan.saved-design.{name or '<unnamed>'}",
+                    scenario=scenario_template_name(indexed),
+                    reason="saved design references a component absent from the packaged catalog",
+                )
+            )
         result.append(
             clean_numbers(
                 {
@@ -6374,7 +6461,7 @@ def ship_plan_existing_designs(
                     "utilities": design.get("moduleTemplateEntries") or [],
                     "hullWeapons": design.get("hullWeaponTemplateEntries") or [],
                     "noseWeapons": design.get("noseWeaponTemplateEntries") or [],
-                    "simulation": simulate_ship_design(indexed, faction_id, faction, design, catalogs),
+                    "simulation": simulation,
                     "activeShips": active_counts.get(name, 0),
                     "shipsBuilt": int(as_float(built_counts.get(name), 0.0)),
                 }
@@ -6415,19 +6502,20 @@ def calculate_ship_plan(
     design_name: str | None = None,
 ) -> dict[str, Any]:
     faction_id, faction = find_faction_state(indexed, faction_name)
-    simulation_catalogs = ship_plan_simulation_catalogs(templates_dir)
+    runtime_catalogs = calculation_catalogs(indexed, "ship-plan")
+    simulation_catalogs = {**runtime_catalogs.ship_simulation_catalogs, "shipyards": load_hab_module_catalog()}
+    ship_templates = runtime_catalogs.ships
     hull_templates = simulation_catalogs["hulls"]
     drive_templates = simulation_catalogs["drives"]
     plant_templates = simulation_catalogs["powerPlants"]
     radiator_templates = simulation_catalogs["radiators"]
-    battery_templates = load_named_templates(templates_dir, "TIBatteryTemplate.json")
-    heat_sink_templates = load_named_templates(templates_dir, "TIHeatSinkTemplate.json")
+    battery_templates = ship_templates["batteries"]
+    heat_sink_templates = ship_templates["heatSinks"]
     armor_templates = simulation_catalogs["armors"]
-    utility_templates = load_named_templates(templates_dir, "TIUtilityModuleTemplate.json")
+    utility_templates = ship_templates["utilities"]
     weapon_templates = [
-        (kind, template)
-        for kind, filename in SHIP_PLAN_WEAPON_TEMPLATE_FILES
-        for template in load_named_templates(templates_dir, filename).values()
+        (str(template.get("_shipPlanKind") or "weapon"), template)
+        for template in ship_templates["weapons"].values()
     ]
 
     available = lambda template: ship_plan_part_unlocked(template, faction, include_obsolete=include_obsolete)
@@ -6631,6 +6719,43 @@ def command_ship_plan(save_path: Path, templates_dir: Path | None, args: argpars
     print_json(result, compact=args.compact)
 
 
+def command_nation_claims(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    runtime_catalogs = calculation_catalogs(indexed, "nation-claims")
+    result = calculate_nation_claims(
+        indexed,
+        claimant_name=args.claimant,
+        target_name=args.target,
+        claim_catalog=runtime_catalogs.nation_claims,
+        diagnostics=args.diagnostics,
+    )
+    if args.diagnostics:
+        result["calculationDiagnostics"] = runtime_catalogs.calculation_diagnostics()
+    print_json(result, compact=args.compact)
+
+
+def command_ai_fleet_diagnostics(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    result = calculate_ai_fleet_diagnostics(
+        indexed,
+        faction_name=args.faction,
+        stale_days=args.stale_days,
+        diagnostics=args.diagnostics,
+    )
+    print_json(result, compact=args.compact)
+
+
+def command_catalog_verify(args: argparse.Namespace) -> None:
+    result = verify_catalogs(
+        Path(args.templates_dir),
+        args.scenario,
+        save_path=resolve_save_path(args.save),
+    )
+    print_json(result, compact=args.compact)
+
+
 def faction_yearly_income_from_ships(
     indexed: IndexedState,
     templates_dir: Path | None,
@@ -6639,12 +6764,16 @@ def faction_yearly_income_from_ships(
 ) -> float:
     if resource != "Money":
         return 0.0
-    hull_templates = load_named_templates(templates_dir, "TIShipHullTemplate.json")
+    ships = faction_ship_states(indexed, faction)
+    if not ships:
+        return 0.0
+    hull_templates = calculation_catalogs(indexed, "topbar.ship-income").ships["hulls"]
     designs = faction_ship_designs(faction)
     monthly = 0.0
-    for ship in faction_ship_states(indexed, faction):
-        design = designs.get(str(ship.get("templateName")), {})
-        hull = hull_templates.get(str(design.get("hullName")), {})
+    for ship in ships:
+        design_name = str(ship.get("templateName") or "")
+        design = required_catalog_row(indexed, designs, "ship-design", design_name, "topbar.ship-income")
+        hull = required_catalog_row(indexed, hull_templates, "ship-hull", design.get("hullName"), "topbar.ship-income")
         monthly += as_float(hull.get("monthlyIncome_Money"), 0.0)
     return monthly * 12.0
 
@@ -7267,8 +7396,9 @@ def calculate_topbar(
     include_diagnostics: bool = False,
     forecast_resource: str | None = None,
 ) -> dict[str, Any]:
-    trait_templates = research_templates.traits if research_templates else load_trait_templates(templates_dir)
-    effect_templates = research_templates.effects if research_templates else load_named_templates(templates_dir, "TIEffectTemplate.json")
+    runtime_catalogs = calculation_catalogs(indexed, "topbar") if research_templates is None else None
+    trait_templates = research_templates.traits if research_templates else runtime_catalogs.traits
+    effect_templates = research_templates.effects if research_templates else runtime_catalogs.effects
     hab_module_templates = research_templates.hab_modules if research_templates else load_hab_module_catalog()
     faction_id, faction = find_faction_state(indexed, faction_name)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
@@ -7443,6 +7573,11 @@ def calculate_topbar(
             orbit_templates=location_catalog.orbit_templates,
         )
     if include_diagnostics:
+        output["calculationDiagnostics"] = (
+            runtime_catalogs.calculation_diagnostics()
+            if runtime_catalogs is not None
+            else {"source": "explicitly injected ResearchTemplates"}
+        )
         output["diagnostics"] = {
             "faction": {
                 "selection": "override" if faction_name else "save human-player metadata/TIPlayerState",
@@ -7698,7 +7833,7 @@ def world_resource_market(
     global_state = first_value(indexed, "TIGlobalValuesState") or {}
     market_values = global_state.get("resourceMarketValues") if isinstance(global_state.get("resourceMarketValues"), dict) else {}
     faction_id, faction = find_faction_state(indexed, faction_name)
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    effect_templates = calculation_catalogs(indexed, "world-ui").effects
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     sales_modifier = effect_modifier_delta(effect_contexts, effect_templates, "ResourceMarketSales", 0.0)
     sale_multiplier = min(2.0 / 3.0, DEFAULT_GLOBAL_CONFIG["baseEarthSaleInefficiency"] * (1.0 + sales_modifier))
@@ -7866,8 +8001,9 @@ def command_world_ui(save_path: Path, templates_dir: Path | None, args: argparse
 def command_advise(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
     data = load_save(save_path)
     indexed = build_index(data)
-    trait_templates = load_trait_templates(templates_dir)
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    runtime_catalogs = calculation_catalogs(indexed, "advise")
+    trait_templates = runtime_catalogs.traits
+    effect_templates = runtime_catalogs.effects
     faction_id, faction = find_faction_state(indexed, args.faction)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     summaries, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
@@ -8116,8 +8252,9 @@ def calculate_nation_ui(
         raise SystemExit(f"Nation not found: {nation_name}")
     nation_id, nation = found
     faction_id, faction = find_faction_state(indexed, faction_name)
-    trait_templates = load_trait_templates(templates_dir)
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    runtime_catalogs = calculation_catalogs(indexed, "nation-ui")
+    trait_templates = runtime_catalogs.traits
+    effect_templates = runtime_catalogs.effects
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
 

@@ -7,6 +7,8 @@ import math
 from typing import Any, Callable, Mapping
 
 from ti_parser_core import (
+    CalculationDependency,
+    CalculationDependencyError,
     IndexedState,
     apply_effect_modifiers,
     as_float,
@@ -59,7 +61,17 @@ def councilor_monthly_income(
     trait_names = councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []
     for trait_name in trait_names:
         trait = trait_templates.get(trait_name)
-        if not trait or not trait_field:
+        if trait is None:
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="trait",
+                    name=str(trait_name),
+                    context=f"councilor-income.{resource}",
+                    scenario=None,
+                    reason="save references a trait absent from the packaged catalog",
+                )
+            )
+        if not trait_field:
             continue
         value = as_float(trait.get(trait_field), 0.0)
         if value >= 0:
@@ -71,7 +83,15 @@ def councilor_monthly_income(
     for org_ref in org_refs:
         found = resolve_ref(indexed, org_ref)
         if not found:
-            continue
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="org-state",
+                    name=str(ref_id(org_ref) or org_ref),
+                    context=f"councilor-income.{resource}",
+                    scenario=None,
+                    reason="councilor references an unresolved org state",
+                )
+            )
         org = found[2]
         if not org.get("applyingBonuses"):
             continue
