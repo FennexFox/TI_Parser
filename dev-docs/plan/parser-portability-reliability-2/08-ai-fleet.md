@@ -40,12 +40,12 @@
 
 ## Progress
 
-- Not started.
+- Complete: `ai-fleet-diagnostics` connects supported goals, assigned/pending fleets, ships, habs, shipyards, queues, resources, and MC evidence.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Age is always derived; stale suspicion is emitted only when the caller supplies `--stale-days`.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Empty queues retain an unknown cause and do not imply resource shortage.
