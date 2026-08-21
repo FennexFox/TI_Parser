@@ -170,6 +170,31 @@ def select_catalog_scenario(envelope: Mapping[str, Any], scenario: str) -> dict[
     return _merge_overlay(base, override)
 
 
+def resolve_required_definition(
+    rows: Mapping[str, Any],
+    name: Any,
+    kind: str,
+    context: str | None,
+    scenario: str | None,
+    reason: str = "referenced definition is absent from the packaged catalog",
+) -> dict[str, Any]:
+    """Resolve one explicit named reference or raise a structured dependency error."""
+
+    normalized = str(name or "")
+    row = rows.get(normalized) if normalized else None
+    if isinstance(row, dict):
+        return row
+    raise CalculationDependencyError(
+        CalculationDependency(
+            kind=kind,
+            name=normalized or "<missing reference>",
+            context=context,
+            scenario=scenario,
+            reason=reason,
+        )
+    )
+
+
 class RuntimeCatalogs:
     """Validated, scenario-selected packaged calculation data."""
 
@@ -345,18 +370,14 @@ class RuntimeCatalogs:
         if rows is None:
             collection = self.ships.get(kind)
             rows = collection if isinstance(collection, dict) else None
-        row = rows.get(name) if isinstance(rows, dict) else None
-        if not isinstance(row, dict):
-            raise CalculationDependencyError(
-                CalculationDependency(
-                    kind=kind,
-                    name=name,
-                    context=context,
-                    scenario=self.scenario,
-                    reason=reason,
-                )
-            )
-        return row
+        return resolve_required_definition(
+            rows or {},
+            name,
+            kind,
+            context,
+            self.scenario,
+            reason,
+        )
 
     def calculation_diagnostics(self) -> dict[str, Any]:
         return {

@@ -75,6 +75,7 @@ from ti_parser_catalogs import (
     RuntimeCatalogs,
     UnsupportedCatalogScenarioError,
     load_runtime_catalogs,
+    resolve_required_definition,
 )
 from ti_parser_ai import calculate_ai_fleet_diagnostics
 from ti_parser_claims import calculate_nation_claims
@@ -170,21 +171,17 @@ def required_catalog_row(
     kind: str,
     name: Any,
     context: str,
+    reason: str = "referenced definition cannot be resolved from runtime data",
 ) -> dict[str, Any]:
     """Resolve a referenced catalog row or stop the calculation as incomplete."""
 
-    normalized = str(name or "")
-    row = rows.get(normalized)
-    if normalized and isinstance(row, dict):
-        return row
-    raise CalculationDependencyError(
-        CalculationDependency(
-            kind=kind,
-            name=normalized or "<missing reference>",
-            context=context,
-            scenario=scenario_template_name(indexed),
-            reason="save references a row absent from the packaged catalog",
-        )
+    return resolve_required_definition(
+        rows,
+        name,
+        kind,
+        context,
+        scenario_template_name(indexed),
+        reason,
     )
 
 
@@ -455,9 +452,9 @@ SHIP_PLAN_UTILITY_TEMPLATE_FILES = (
     ("heatSink", "TIHeatSinkTemplate.json"),
 )
 SHIP_PLAN_SHIPYARD_TIERS = {
-    1: {"template": "SpaceDock", "constructionTimeModifier": 1.0},
-    2: {"template": "Shipyard", "constructionTimeModifier": 0.8},
-    3: {"template": "Spaceworks", "constructionTimeModifier": 0.6},
+    1: "SpaceDock",
+    2: "Shipyard",
+    3: "Spaceworks",
 }
 SHIP_PLAN_SELF_POWERED_DRIVE_CLASSES = {
     "Chemical",
@@ -1827,7 +1824,18 @@ def hab_body_is_irradiated(
 ) -> bool:
     body = hab_barycenter_state(indexed, hab)
     template_name = str(body.get("templateName") or "")
-    body_template = (body_templates or {}).get(template_name, {})
+    body_template = (
+        required_catalog_row(
+            indexed,
+            body_templates or {},
+            "location-body",
+            template_name,
+            "hab-planner.irradiation",
+            "hab location references a body absent from the packaged location catalog",
+        )
+        if template_name
+        else {}
+    )
     return max(
         as_float(body.get("irradiatedMultiplier"), 1.0),
         as_float(body_template.get("irradiatedMultiplier"), 1.0),
@@ -3256,7 +3264,17 @@ def active_slots_with_hypothetical_project_category(
     for slot in range(3):
         if weights[slot] <= 0.0 or slot >= len(tech_progress):
             continue
-        template = tech_templates.get((tech_progress[slot] or {}).get("techTemplateName"), {})
+        progress = tech_progress[slot] if isinstance(tech_progress[slot], dict) else {}
+        template_name = progress.get("techTemplateName")
+        if not template_name:
+            continue
+        template = required_catalog_row(
+            indexed,
+            tech_templates,
+            "research-tech",
+            template_name,
+            "project-analysis.hypothetical.active-tech",
+        )
         if template.get("techCategory") == category:
             count += 1
 
@@ -3264,7 +3282,21 @@ def active_slots_with_hypothetical_project_category(
     for slot in range(3, 6):
         if weights[slot] <= 0.0 or not faction_project_allowed(faction, slot):
             continue
-        slot_category = category if slot == project_slot else project_templates.get(projects.get(slot, {}).get("projectTemplateName"), {}).get("techCategory")
+        if slot == project_slot:
+            slot_category = category
+        else:
+            progress = projects.get(slot)
+            template_name = progress.get("projectTemplateName") if isinstance(progress, dict) else None
+            if not template_name:
+                continue
+            template = required_catalog_row(
+                indexed,
+                project_templates,
+                "research-project",
+                template_name,
+                "project-analysis.hypothetical.active-project",
+            )
+            slot_category = template.get("techCategory")
         if slot_category == category:
             count += 1
     return count
@@ -3325,7 +3357,13 @@ def hypothetical_project_points_to_slot(
 ) -> dict[str, Any]:
     weights = faction_research_weights(faction)
     total_weights = faction_total_research_weights(faction)
-    if slot < 0 or slot >= len(weights) or total_weights <= 0.0 or not faction_project_allowed(faction, slot):
+    if (
+        slot < 0
+        or slot >= len(weights)
+        or total_weights <= 0.0
+        or weights[slot] <= 0.0
+        or not faction_project_allowed(faction, slot)
+    ):
         return {"daily": 0.0, "weight": 0.0, "weightFraction": 0.0, "category": project_template.get("techCategory"), "modifiers": None}
 
     category = project_template.get("techCategory")
@@ -3341,7 +3379,13 @@ def hypothetical_project_points_to_slot(
         category,
         slot,
     )
-    project_facilities = project_facility_counts(indexed, faction, trait_templates, hab_module_templates)
+    project_facilities = project_facility_counts(
+        indexed,
+        faction,
+        trait_templates,
+        hab_module_templates,
+        org_templates=org_templates,
+    )
     project_bonus = multiple_facilities_multiplier(project_facilities)
     effective_daily = base_daily * (1.0 + as_float(category_modifier["distributed"], 0.0) + project_bonus)
     weight_fraction = weights[slot] / total_weights
@@ -4028,13 +4072,23 @@ def hab_research_and_mc(
     for hab_id, sectors in sectors_by_hab.items():
         hab = state_value_by_id(indexed, hab_id) or {}
         active_modules = active_modules_in_sectors(indexed, sectors)
+        active_templates: dict[str, dict[str, Any]] = {}
+        for module in active_modules:
+            template_name = str(module.get("templateName") or "")
+            active_templates[template_name] = required_catalog_row(
+                indexed,
+                hab_module_templates,
+                "hab-module",
+                template_name,
+                "research-breakdown.hab",
+            )
         records = hab_module_records(indexed, hab, hab_module_templates)
         raw_research_month = 0.0
         admin_modifier = 1.0
         module_counts: dict[str, int] = {}
         for module in active_modules:
-            template_name = module.get("templateName")
-            template = hab_module_templates.get(template_name, {})
+            template_name = str(module.get("templateName") or "")
+            template = active_templates[template_name]
             module_counts[str(template_name)] = module_counts.get(str(template_name), 0) + 1
             raw_research_month += as_float(template.get("incomeResearch_month"), 0.0)
             special_rules = template.get("specialRules") if isinstance(template.get("specialRules"), list) else []
@@ -4429,9 +4483,17 @@ def faction_hab_category_modifier(
     hab_module_templates: dict[str, dict[str, Any]],
     category: str | None,
 ) -> float:
+    if not category:
+        return 0.0
     total = 0.0
     for module in active_modules_in_sectors(indexed, faction_sector_states(indexed, faction)):
-        template = hab_module_templates.get(module.get("templateName"), {})
+        template = required_catalog_row(
+            indexed,
+            hab_module_templates,
+            "hab-module",
+            module.get("templateName"),
+            "research.category.hab",
+        )
         total += tech_bonus_sum(template.get("techBonuses"), category)
     return diminishing_research_modifier(total)
 
@@ -4442,13 +4504,21 @@ def faction_org_category_modifier(
     org_templates: dict[str, dict[str, Any]],
     category: str | None,
 ) -> float:
+    if not category:
+        return 0.0
     total = 0.0
     for councilor in active_faction_councilors(indexed, faction):
         for org_ref in councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []:
             org = state_value_by_id(indexed, ref_id(org_ref))
             if not isinstance(org, dict) or not org.get("applyingBonuses"):
                 continue
-            template = org_templates.get(org.get("templateName"), {})
+            template = required_catalog_row(
+                indexed,
+                org_templates,
+                "org",
+                org.get("templateName"),
+                "research.category.org",
+            )
             bonuses = org.get("techBonuses")
             if not isinstance(bonuses, list) or not bonuses:
                 bonuses = template.get("techBonuses")
@@ -4462,10 +4532,19 @@ def faction_trait_category_modifier(
     trait_templates: dict[str, dict[str, Any]],
     category: str | None,
 ) -> float:
+    if not category:
+        return 0.0
     total = 0.0
     for councilor in active_faction_councilors(indexed, faction):
         for trait_name in councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []:
-            total += tech_bonus_sum(trait_templates.get(trait_name, {}).get("techBonuses"), category)
+            template = required_catalog_row(
+                indexed,
+                trait_templates,
+                "trait",
+                trait_name,
+                "research.category.trait",
+            )
+            total += tech_bonus_sum(template.get("techBonuses"), category)
     return diminishing_research_modifier(total)
 
 
@@ -4506,11 +4585,27 @@ def faction_fleet_category_modifier(
             ship = state_value_by_id(indexed, ref_id(ship_ref))
             if not isinstance(ship, dict):
                 continue
-            design = designs.get(str(ship.get("templateName")), {})
+            design = required_catalog_row(
+                indexed,
+                designs,
+            "ship-design",
+            ship.get("templateName"),
+            "research.category.fleet-design",
+            "ship references a saved design that cannot be resolved",
+            )
             for entry in design.get("moduleTemplateEntries") if isinstance(design.get("moduleTemplateEntries"), list) else []:
                 if not isinstance(entry, dict):
                     continue
-                module = utility_module_templates.get(str(entry.get("moduleName")), {})
+                module_name = str(entry.get("moduleName") or "")
+                if not module_name or module_name == "Empty":
+                    continue
+                module = required_catalog_row(
+                    indexed,
+                    utility_module_templates,
+                    "ship-utility",
+                    module_name,
+                    "research.category.fleet-utility",
+                )
                 special_rules = module.get("specialModuleRules") if isinstance(module.get("specialModuleRules"), list) else []
                 if "GenerateSpaceScienceBonus" in special_rules:
                     total += as_float(module.get("specialModuleValue"), 0.0)
@@ -4542,21 +4637,42 @@ def project_facility_counts(
     faction: dict[str, Any],
     trait_templates: dict[str, dict[str, Any]],
     hab_module_templates: dict[str, dict[str, Any]],
+    org_templates: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, float]:
     base_incomes = faction.get("baseIncomes_year") if isinstance(faction.get("baseIncomes_year"), dict) else {}
     trait_projects = 0.0
     org_projects = 0.0
     for councilor in active_faction_councilors(indexed, faction):
         for trait_name in councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []:
-            trait_projects += as_float(trait_templates.get(trait_name, {}).get("incomeProjects"), 0.0)
+            template = required_catalog_row(
+                indexed,
+                trait_templates,
+                "trait",
+                trait_name,
+                "project.facilities.trait",
+            )
+            trait_projects += as_float(template.get("incomeProjects"), 0.0)
         for org_ref in councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []:
             org = state_value_by_id(indexed, ref_id(org_ref))
             if isinstance(org, dict) and org.get("applyingBonuses"):
+                required_catalog_row(
+                    indexed,
+                    org_templates or {},
+                    "org",
+                    org.get("templateName"),
+                    "project.facilities.org",
+                )
                 org_projects += as_float(org.get("projectCapacityGranted"), 0.0)
 
     hab_projects = 0.0
     for module in active_modules_in_sectors(indexed, faction_sector_states(indexed, faction)):
-        template = hab_module_templates.get(module.get("templateName"), {})
+        template = required_catalog_row(
+            indexed,
+            hab_module_templates,
+            "hab-module",
+            module.get("templateName"),
+            "project.facilities.hab",
+        )
         hab_projects += as_float(template.get("incomeProjects"), 0.0)
 
     return {
@@ -4599,7 +4715,17 @@ def active_slots_with_category(
     for slot in range(3):
         if weights[slot] <= 0.0 or slot >= len(tech_progress):
             continue
-        template = tech_templates.get((tech_progress[slot] or {}).get("techTemplateName"), {})
+        progress = tech_progress[slot] if isinstance(tech_progress[slot], dict) else {}
+        template_name = progress.get("techTemplateName")
+        if not template_name:
+            continue
+        template = required_catalog_row(
+            indexed,
+            tech_templates,
+            "research-tech",
+            template_name,
+            "research.category.active-tech",
+        )
         if template.get("techCategory") == category:
             count += 1
 
@@ -4607,7 +4733,17 @@ def active_slots_with_category(
     for slot in range(3, 6):
         if weights[slot] <= 0.0 or not faction_project_allowed(faction, slot):
             continue
-        template = project_templates.get(projects.get(slot, {}).get("projectTemplateName"), {})
+        progress = projects.get(slot)
+        template_name = progress.get("projectTemplateName") if isinstance(progress, dict) else None
+        if not template_name:
+            continue
+        template = required_catalog_row(
+            indexed,
+            project_templates,
+            "research-project",
+            template_name,
+            "research.category.active-project",
+        )
         if template.get("techCategory") == category:
             count += 1
     return count
@@ -4659,18 +4795,55 @@ def research_points_to_slot(
 ) -> dict[str, Any]:
     weights = faction_research_weights(faction)
     total_weights = faction_total_research_weights(faction)
-    if slot < 0 or slot >= len(weights) or total_weights <= 0.0:
+    if (
+        slot < 0
+        or slot >= len(weights)
+        or total_weights <= 0.0
+        or weights[slot] <= 0.0
+        or (slot >= 3 and not faction_project_allowed(faction, slot))
+    ):
         return {"daily": 0.0, "weight": 0.0, "weightFraction": 0.0, "modifiers": None}
 
     is_project = slot >= 3
     template: dict[str, Any] = {}
     if is_project:
-        template = project_templates.get(project_progress_by_slot(faction).get(slot, {}).get("projectTemplateName"), {})
+        progress = project_progress_by_slot(faction).get(slot)
+        template_name = progress.get("projectTemplateName") if isinstance(progress, dict) else None
+        if not template_name:
+            return {
+                "daily": 0.0,
+                "weight": weights[slot],
+                "weightFraction": weights[slot] / total_weights,
+                "category": None,
+                "modifiers": None,
+            }
+        template = required_catalog_row(
+            indexed,
+            project_templates,
+            "research-project",
+            template_name,
+            "research.slot.active-project",
+        )
     else:
         global_research = first_value(indexed, "TIGlobalResearchState") or {}
         tech_progress = global_research.get("techProgress") if isinstance(global_research.get("techProgress"), list) else []
-        if slot < len(tech_progress):
-            template = tech_templates.get((tech_progress[slot] or {}).get("techTemplateName"), {})
+        progress = tech_progress[slot] if slot < len(tech_progress) and isinstance(tech_progress[slot], dict) else None
+        template_name = progress.get("techTemplateName") if isinstance(progress, dict) else None
+        if not template_name:
+            return {
+                "daily": 0.0,
+                "weight": weights[slot],
+                "weightFraction": weights[slot] / total_weights,
+                "category": None,
+                "modifiers": None,
+            }
+        template = required_catalog_row(
+            indexed,
+            tech_templates,
+            "research-tech",
+            template_name,
+            "research.slot.active-tech",
+        )
 
     category = template.get("techCategory")
     category_modifier = distributed_category_modifier(
@@ -4684,7 +4857,17 @@ def research_points_to_slot(
         project_templates,
         category,
     )
-    project_facilities = project_facility_counts(indexed, faction, trait_templates, hab_module_templates) if is_project else None
+    project_facilities = (
+        project_facility_counts(
+            indexed,
+            faction,
+            trait_templates,
+            hab_module_templates,
+            org_templates=org_templates,
+        )
+        if is_project
+        else None
+    )
     project_bonus = multiple_facilities_multiplier(project_facilities or {}) if is_project else 0.0
     effective_daily = base_daily * (1.0 + as_float(category_modifier["distributed"], 0.0) + project_bonus)
     weight_fraction = weights[slot] / total_weights
@@ -5167,7 +5350,17 @@ def research_plan_category_context(
     category_bonus_if_added = as_float(components.get("sum"), 0.0) * (
         DEFAULT_GLOBAL_CONFIG["categoryBonusPenaltyPerExtraSlot"] ** added_penalty_power
     )
-    project_facilities = project_facility_counts(indexed, faction, trait_templates, hab_module_templates) if kind == "project" else None
+    project_facilities = (
+        project_facility_counts(
+            indexed,
+            faction,
+            trait_templates,
+            hab_module_templates,
+            org_templates=org_templates,
+        )
+        if kind == "project"
+        else None
+    )
     project_bonus = multiple_facilities_multiplier(project_facilities or {}) if kind == "project" else 0.0
     return clean_numbers(
         {
@@ -6081,8 +6274,15 @@ def ship_plan_shipyard_times(
         return apply_effect_modifiers(effect_contexts, effect_templates, "ShipConstructionTime", days)
 
     by_tier: dict[str, Any] = {}
-    for tier, fallback in SHIP_PLAN_SHIPYARD_TIERS.items():
-        shipyard = shipyard_templates.get(str(fallback["template"]), fallback)
+    for tier, shipyard_name in SHIP_PLAN_SHIPYARD_TIERS.items():
+        shipyard = required_catalog_row(
+            indexed,
+            shipyard_templates,
+            "hab-module",
+            shipyard_name,
+            "ship-design.construction-time.shipyard",
+            "required packaged shipyard definition is absent",
+        )
         tier_delta = tier - hull_tier
         if tier_delta > 0:
             yard_modifier = as_float(shipyard.get("constructionTimeModifier"), 1.0) ** tier_delta
@@ -6091,7 +6291,7 @@ def ship_plan_shipyard_times(
         else:
             yard_modifier = 1.0
         by_tier[str(tier)] = {
-            "shipyard": fallback["template"],
+            "shipyard": shipyard_name,
             "days": with_effects(base_days * yard_modifier * settings_modifier),
         }
     return {
@@ -6114,66 +6314,87 @@ def simulate_ship_design(
     design: dict[str, Any],
     catalogs: dict[str, dict[str, dict[str, Any]]],
 ) -> dict[str, Any]:
-    hull = catalogs["hulls"].get(str(design.get("hullName") or ""))
-    drive = catalogs["drives"].get(str(design.get("driveName") or ""))
-    power_plant = catalogs["powerPlants"].get(str(design.get("powerPlantName") or ""))
-    radiator = catalogs["radiators"].get(str(design.get("radiatorName") or ""))
+    hull = required_catalog_row(
+        indexed,
+        catalogs["hulls"],
+        "ship-hull",
+        design.get("hullName"),
+        "ship-design.simulation.hull",
+    )
+    drive = required_catalog_row(
+        indexed,
+        catalogs["drives"],
+        "ship-drive",
+        design.get("driveName"),
+        "ship-design.simulation.drive",
+    )
+    power_plant = required_catalog_row(
+        indexed,
+        catalogs["powerPlants"],
+        "ship-power-plant",
+        design.get("powerPlantName"),
+        "ship-design.simulation.power-plant",
+    )
+    radiator = required_catalog_row(
+        indexed,
+        catalogs["radiators"],
+        "ship-radiator",
+        design.get("radiatorName"),
+        "ship-design.simulation.radiator",
+    )
     utility_entries = design.get("moduleTemplateEntries") if isinstance(design.get("moduleTemplateEntries"), list) else []
     weapon_entries = [
         *(design.get("hullWeaponTemplateEntries") if isinstance(design.get("hullWeaponTemplateEntries"), list) else []),
         *(design.get("noseWeaponTemplateEntries") if isinstance(design.get("noseWeaponTemplateEntries"), list) else []),
     ]
-    utilities = [
-        catalogs["utilities"].get(str(entry.get("moduleName") or ""))
-        for entry in utility_entries
-        if isinstance(entry, dict)
-    ]
-    weapons = [
-        catalogs["weapons"].get(str(entry.get("moduleName") or ""))
-        for entry in weapon_entries
-        if isinstance(entry, dict)
-    ]
+    utilities = []
+    for entry in utility_entries:
+        if not isinstance(entry, dict):
+            continue
+        module_name = str(entry.get("moduleName") or "")
+        if not module_name or module_name == "Empty":
+            continue
+        utilities.append(
+            required_catalog_row(
+                indexed,
+                catalogs["utilities"],
+                "ship-utility",
+                module_name,
+                "ship-design.simulation.utility",
+            )
+        )
+    weapons = []
+    for entry in weapon_entries:
+        if not isinstance(entry, dict):
+            continue
+        module_name = str(entry.get("moduleName") or "")
+        if not module_name or module_name == "Empty":
+            continue
+        weapons.append(
+            required_catalog_row(
+                indexed,
+                catalogs["weapons"],
+                "ship-weapon",
+                module_name,
+                "ship-design.simulation.weapon",
+            )
+        )
     armor_facings = {
         facing: design.get(f"{facing}Armor") if isinstance(design.get(f"{facing}Armor"), dict) else {}
         for facing in ("nose", "lateral", "tail")
     }
-    armor_templates = {
-        facing: catalogs["armors"].get(str(entry.get("materialName") or ""))
-        for facing, entry in armor_facings.items()
-    }
-    missing_templates = [
-        name
-        for name, template in (
-            (design.get("hullName"), hull),
-            (design.get("driveName"), drive),
-            (design.get("powerPlantName"), power_plant),
-            (design.get("radiatorName"), radiator),
-            *(
-                (entry.get("moduleName"), template)
-                for entry, template in zip(utility_entries, utilities)
-                if isinstance(entry, dict)
-            ),
-            *(
-                (entry.get("moduleName"), template)
-                for entry, template in zip(weapon_entries, weapons)
-                if isinstance(entry, dict)
-            ),
-            *(
-                (entry.get("materialName"), armor_templates[facing])
-                for facing, entry in armor_facings.items()
-                if as_float(entry.get("armorValue"), 0.0) > 0.0
-            ),
+    armor_templates: dict[str, dict[str, Any] | None] = {}
+    for facing, entry in armor_facings.items():
+        if as_float(entry.get("armorValue"), 0.0) <= 0.0:
+            armor_templates[facing] = None
+            continue
+        armor_templates[facing] = required_catalog_row(
+            indexed,
+            catalogs["armors"],
+            "ship-armor",
+            entry.get("materialName"),
+            f"ship-design.simulation.{facing}-armor",
         )
-        if name and str(name) != "Empty" and template is None
-    ]
-    if not all((hull, drive, power_plant, radiator)) or missing_templates:
-        return {
-            "complete": False,
-            "missingTemplates": sorted({str(name) for name in missing_templates}),
-        }
-
-    utilities = [template for template in utilities if template]
-    weapons = [template for template in weapons if template]
     crew = int(
         as_float(hull.get("crew"), 0.0)
         + as_float(drive.get("crew"), 0.0)
@@ -6446,17 +6667,6 @@ def ship_plan_existing_designs(
             continue
         name = str(design.get("dataName") or "")
         simulation = simulate_ship_design(indexed, faction_id, faction, design, catalogs)
-        if not simulation.get("complete"):
-            missing = simulation.get("missingTemplates") or ["<missing required component reference>"]
-            raise CalculationDependencyError(
-                CalculationDependency(
-                    kind="ship-component",
-                    name=", ".join(str(item) for item in missing),
-                    context=f"ship-plan.saved-design.{name or '<unnamed>'}",
-                    scenario=scenario_template_name(indexed),
-                    reason="saved design references a component absent from the packaged catalog",
-                )
-            )
         result.append(
             clean_numbers(
                 {

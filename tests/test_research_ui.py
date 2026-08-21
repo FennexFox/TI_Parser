@@ -437,8 +437,14 @@ class ResearchUiTests(unittest.TestCase):
             ti.active_slots_with_category(
                 indexed,
                 faction,
-                {"GlobalSpace": {"techCategory": "SpaceScience"}},
                 {
+                    "GlobalSpace": {"techCategory": "SpaceScience"},
+                    "GlobalLife": {"techCategory": "LifeScience"},
+                    "GlobalInfo": {"techCategory": "InformationScience"},
+                },
+                {
+                    "ProjectXeno": {"techCategory": "Xenology"},
+                    "ProjectMilitary": {"techCategory": "MilitaryScience"},
                     "ProjectSpace": {"techCategory": "SpaceScience"},
                     "ProjectPausedSpace": {"techCategory": "SpaceScience"},
                 },
@@ -472,8 +478,16 @@ class ResearchUiTests(unittest.TestCase):
             faction,
             0,
             100.0,
-            {"GlobalSpace": {"techCategory": "SpaceScience"}},
-            {"ProjectSpace": {"techCategory": "SpaceScience"}},
+            {
+                "GlobalSpace": {"techCategory": "SpaceScience"},
+                "GlobalLife": {"techCategory": "LifeScience"},
+                "GlobalInfo": {"techCategory": "InformationScience"},
+            },
+            {
+                "ProjectXeno": {"techCategory": "Xenology"},
+                "ProjectMilitary": {"techCategory": "MilitaryScience"},
+                "ProjectSpace": {"techCategory": "SpaceScience"},
+            },
             {},
             {},
             {},
@@ -497,8 +511,16 @@ class ResearchUiTests(unittest.TestCase):
             faction,
             0,
             100.0,
-            {"GlobalSpace": {"techCategory": "SpaceScience"}},
-            {"ProjectSpace": {"techCategory": "SpaceScience"}},
+            {
+                "GlobalSpace": {"techCategory": "SpaceScience"},
+                "GlobalLife": {"techCategory": "LifeScience"},
+                "GlobalInfo": {"techCategory": "InformationScience"},
+            },
+            {
+                "ProjectXeno": {"techCategory": "Xenology"},
+                "ProjectMilitary": {"techCategory": "MilitaryScience"},
+                "ProjectSpace": {"techCategory": "SpaceScience"},
+            },
             {},
             {},
             {},
@@ -507,6 +529,146 @@ class ResearchUiTests(unittest.TestCase):
 
         self.assertAlmostEqual(points["modifiers"]["category"]["components"]["fleets"], 0.0)
         self.assertAlmostEqual(points["daily"], 20.0)
+
+    def assert_dependency(self, raised, *, kind, name, context):
+        missing = raised.exception.missing_dependencies
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(set(missing[0]), {"kind", "name", "context", "scenario", "reason"})
+        self.assertEqual(missing[0]["kind"], kind)
+        self.assertEqual(missing[0]["name"], name)
+        self.assertEqual(missing[0]["context"], context)
+        self.assertIsNone(missing[0]["scenario"])
+        self.assertTrue(missing[0]["reason"])
+
+    def test_missing_computer_scientist_trait_fails_project_facilities_closed(self):
+        gamestates = {}
+        faction = add_state(gamestates, "TIFactionState", 1, {"councilors": [ref(2)]})
+        add_state(gamestates, "TICouncilorState", 2, {"traitTemplateNames": ["ComputerScientist"]})
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.project_facility_counts(indexed, faction, {}, {}, {})
+
+        self.assert_dependency(
+            raised,
+            kind="trait",
+            name="ComputerScientist",
+            context="project.facilities.trait",
+        )
+
+    def test_missing_applying_cern_org_fails_project_facilities_closed(self):
+        gamestates = {}
+        faction = add_state(gamestates, "TIFactionState", 1, {"councilors": [ref(2)]})
+        add_state(gamestates, "TICouncilorState", 2, {"orgs": [ref(3)]})
+        add_state(
+            gamestates,
+            "TIOrgState",
+            3,
+            {"templateName": "CERN", "applyingBonuses": True, "projectCapacityGranted": 2},
+        )
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.project_facility_counts(indexed, faction, {}, {}, {})
+
+        self.assert_dependency(
+            raised,
+            kind="org",
+            name="CERN",
+            context="project.facilities.org",
+        )
+
+    def test_missing_active_energy_lab_fails_project_facilities_closed(self):
+        gamestates = {}
+        faction = add_state(gamestates, "TIFactionState", 1, {"habSectors": [ref(11)]})
+        add_state(gamestates, "TISectorState", 11, {"habModules": [ref(20)]})
+        add_state(
+            gamestates,
+            "TIHabModuleState",
+            20,
+            {"templateName": "EnergyLab", "constructionCompleted": True, "powered": True},
+        )
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.project_facility_counts(indexed, faction, {}, {}, {})
+
+        self.assert_dependency(
+            raised,
+            kind="hab-module",
+            name="EnergyLab",
+            context="project.facilities.hab",
+        )
+
+    def test_missing_weighted_research_definition_fails_closed(self):
+        indexed, faction = build_research_fixture()
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.active_slots_with_category(indexed, faction, {}, {}, "SpaceScience")
+
+        self.assert_dependency(
+            raised,
+            kind="research-tech",
+            name="GlobalSpace",
+            context="research.category.active-tech",
+        )
+
+    def test_missing_fleet_design_and_utility_fail_closed(self):
+        indexed, faction = build_research_fixture(docked=False)
+        faction["shipDesigns"] = []
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.faction_fleet_category_modifier(indexed, faction, {}, "SpaceScience")
+        self.assert_dependency(
+            raised,
+            kind="ship-design",
+            name="ScienceShip",
+            context="research.category.fleet-design",
+        )
+
+        indexed, faction = build_research_fixture(docked=False)
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.faction_fleet_category_modifier(indexed, faction, {}, "SpaceScience")
+        self.assert_dependency(
+            raised,
+            kind="ship-utility",
+            name="MobileSpaceScienceLab",
+            context="research.category.fleet-utility",
+        )
+
+    def test_optional_modifier_sources_and_unused_slots_remain_valid(self):
+        gamestates = {}
+        faction = add_state(
+            gamestates,
+            "TIFactionState",
+            1,
+            {
+                "councilors": [ref(2)],
+                "researchWeights": [0, 1, 0, 0, 1, 0],
+                "orgProjectSlotUnlocked": False,
+            },
+        )
+        add_state(gamestates, "TICouncilorState", 2, {"orgs": [ref(3)]})
+        add_state(gamestates, "TIOrgState", 3, {"templateName": "CERN", "applyingBonuses": False})
+        add_state(
+            gamestates,
+            "TIGlobalResearchState",
+            4,
+            {"techProgress": [{"techTemplateName": "MissingZeroWeight"}, {}, {}]},
+        )
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        self.assertEqual(ti.project_facility_counts(indexed, faction, {}, {}, {}), {"base": 0.0, "traits": 0.0, "orgs": 0.0, "habs": 0.0})
+        self.assertEqual(ti.active_slots_with_category(indexed, faction, {}, {}, "SpaceScience"), 0)
+        self.assertEqual(ti.research_points_to_slot(indexed, faction, 0, 100.0, {}, {}, {}, {}, {}, {})["daily"], 0.0)
+        self.assertEqual(ti.research_points_to_slot(indexed, faction, 4, 100.0, {}, {}, {}, {}, {}, {})["daily"], 0.0)
+
+        docked_indexed, docked_faction = build_research_fixture(docked=True)
+        self.assertEqual(ti.faction_fleet_category_modifier(docked_indexed, docked_faction, {}, "SpaceScience"), 0.0)
+        self.assertEqual(ti.faction_fleet_category_modifier(docked_indexed, docked_faction, {}, "LifeScience"), 0.0)
+
+        empty_indexed, empty_faction = build_research_fixture(docked=False)
+        empty_faction["shipDesigns"][0]["moduleTemplateEntries"] = [{"moduleName": "Empty"}]
+        self.assertEqual(ti.faction_fleet_category_modifier(empty_indexed, empty_faction, {}, "SpaceScience"), 0.0)
 
 
 if __name__ == "__main__":

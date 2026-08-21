@@ -208,7 +208,11 @@ class ShipPlanTests(unittest.TestCase):
                 }
             },
             "effects": {},
-            "shipyards": {},
+            "shipyards": {
+                "SpaceDock": {"constructionTimeModifier": 1.0},
+                "Shipyard": {"constructionTimeModifier": 0.8},
+                "Spaceworks": {"constructionTimeModifier": 0.6},
+            },
         }
         design = {
             "hullName": "TestHull",
@@ -216,9 +220,9 @@ class ShipPlanTests(unittest.TestCase):
             "powerPlantName": "TestPlant",
             "radiatorName": "TestRadiator",
             "propellantTanks": 1,
-            "moduleTemplateEntries": [{"moduleName": "Magazine"}],
+            "moduleTemplateEntries": [{"moduleName": "Magazine"}, {"moduleName": "Empty"}, {}],
             "hullWeaponTemplateEntries": [{"moduleName": "TestMissile"}],
-            "noseWeaponTemplateEntries": [],
+            "noseWeaponTemplateEntries": [{"moduleName": "Empty"}],
             "noseArmor": {},
             "lateralArmor": {},
             "tailArmor": {},
@@ -236,6 +240,69 @@ class ShipPlanTests(unittest.TestCase):
         self.assertAlmostEqual(simulation["construction"]["time"]["byShipyardTier"]["1"]["days"], 150)
         self.assertAlmostEqual(simulation["construction"]["time"]["byShipyardTier"]["3"]["days"], 60)
         self.assertFalse(simulation["combatPerformanceRatingIncluded"])
+
+    def test_missing_saved_design_component_fails_with_structured_dependency(self):
+        indexed = ti.IndexedState(data={}, gamestates={}, id_index={})
+        catalogs = {
+            "hulls": {},
+            "drives": {},
+            "powerPlants": {},
+            "radiators": {},
+            "armors": {},
+            "utilities": {},
+            "weapons": {},
+            "effects": {},
+            "shipyards": {},
+        }
+        design = {
+            "hullName": "MissingHull",
+            "driveName": "MissingDrive",
+            "powerPlantName": "MissingPlant",
+            "radiatorName": "MissingRadiator",
+        }
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.simulate_ship_design(indexed, 1, {}, design, catalogs)
+
+        missing = raised.exception.missing_dependencies
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(set(missing[0]), {"kind", "name", "context", "scenario", "reason"})
+        self.assertEqual(missing[0]["kind"], "ship-hull")
+        self.assertEqual(missing[0]["name"], "MissingHull")
+        self.assertEqual(missing[0]["context"], "ship-design.simulation.hull")
+        self.assertIsNone(missing[0]["scenario"])
+        self.assertTrue(missing[0]["reason"])
+
+    def test_missing_packaged_shipyard_fails_instead_of_using_hard_coded_row(self):
+        indexed = ti.IndexedState(data={}, gamestates={}, id_index={})
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.ship_plan_shipyard_times(
+                indexed,
+                1,
+                {"baseConstructionTime_days": 100, "consTier": 1},
+                {},
+                {},
+            )
+
+        missing = raised.exception.missing_dependencies[0]
+        self.assertEqual(set(missing), {"kind", "name", "context", "scenario", "reason"})
+        self.assertEqual(missing["kind"], "hab-module")
+        self.assertEqual(missing["name"], "SpaceDock")
+        self.assertEqual(missing["context"], "ship-design.construction-time.shipyard")
+        self.assertIsNone(missing["scenario"])
+        self.assertTrue(missing["reason"])
+
+    def test_open_cycle_derived_single_engine_alias_falls_back_to_selected_drive(self):
+        drive = {
+            "dataName": "PulseDrive2",
+            "cooling": "Calc",
+            "driveClassification": "Electrostatic",
+            "thrust_N": 10_000,
+            "EV_kps": 1,
+        }
+
+        self.assertTrue(ti.ship_plan_drive_open_cycle(drive, {"PulseDrive2": drive}))
 
 
 if __name__ == "__main__":

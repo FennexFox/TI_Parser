@@ -456,11 +456,30 @@ class HabPlanTests(unittest.TestCase):
             faction,
             3,
             {},
+            {"Mercury": {"dataName": "Mercury", "irradiatedMultiplier": 2.0}},
         )
 
         self.assertIn("combat module outside economic planner", combat_reasons)
         self.assertIn("objective-only module outside economic planner", objective_reasons)
         self.assertIn("not buildable on irradiated body", hospital_reasons)
+
+    def test_named_body_missing_from_packaged_catalog_fails_closed(self):
+        gamestates = {}
+        add_state(gamestates, "TISpaceBodyState", 10, {"templateName": "MissingBody"})
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.hab_body_is_irradiated(indexed, {"barycenter": ref(10)}, {})
+
+        dependency = raised.exception.missing_dependencies[0]
+        self.assertEqual(dependency["kind"], "location-body")
+        self.assertEqual(dependency["name"], "MissingBody")
+        self.assertEqual(dependency["context"], "hab-planner.irradiation")
+
+    def test_absent_body_reference_remains_optional_for_irradiation(self):
+        indexed = ti.build_index({"gamestates": {}})
+
+        self.assertFalse(ti.hab_body_is_irradiated(indexed, {}, {}))
 
 
 if __name__ == "__main__":
