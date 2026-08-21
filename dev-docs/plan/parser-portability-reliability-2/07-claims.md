@@ -40,12 +40,12 @@
 
 ## Progress
 
-- Not started.
+- Complete: `nation-claims` joins save claims, hostile claims, owners, democracy values, and packaged rule provenance.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Permanence and post-annexation/unification/independence succession remain unknown unless directly evidenced.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Peaceful, static hostile, conditional hostile, strict threshold boundary, filters, and unsupported succession are covered.
