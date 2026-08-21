@@ -473,6 +473,56 @@ def resolved_override(
     return {name: resolved[name] for name in changed_names}
 
 
+def _recursive_delta(base: Any, resolved: Any) -> tuple[bool, Any]:
+    """Return the minimal merge overlay needed to turn *base* into *resolved*.
+
+    Runtime catalogs merge dictionaries recursively, so ship scenario overrides can
+    retain only changed or added keys. Lists and scalar values remain atomic. Raw
+    ship overlays are merged before normalization, which means omitted fields keep
+    their base value and no deletion marker is needed here.
+    """
+
+    if isinstance(base, dict) and isinstance(resolved, dict):
+        delta: dict[str, Any] = {}
+        for key in sorted(resolved):
+            if key not in base:
+                delta[key] = deepcopy(resolved[key])
+                continue
+            changed, value = _recursive_delta(base[key], resolved[key])
+            if changed:
+                delta[key] = value
+        return bool(delta), delta
+    if base == resolved:
+        return False, None
+    return True, deepcopy(resolved)
+
+
+def recursive_minimal_override(base: dict[str, Any], resolved: dict[str, Any]) -> dict[str, Any]:
+    changed, delta = _recursive_delta(base, resolved)
+    return delta if changed else {}
+
+
+def combine_weapon_families(
+    families: dict[str, dict[str, dict[str, Any]]],
+    *,
+    scenario: str,
+) -> dict[str, dict[str, Any]]:
+    combined: dict[str, dict[str, Any]] = {}
+    owners: dict[str, str] = {}
+    for family in sorted(families):
+        for name, row in sorted(families[family].items()):
+            previous = owners.get(name)
+            if previous is not None:
+                raise CatalogError(
+                    "Duplicate ship weapon dataName "
+                    f"{name!r} across template collections {previous!r} and {family!r} "
+                    f"for scenario {scenario!r}"
+                )
+            owners[name] = family
+            combined[name] = row
+    return {name: combined[name] for name in sorted(combined)}
+
+
 def discover_supported_scenarios(
     templates_dir: Path,
     scenario_dirs: dict[str, Path],
@@ -573,27 +623,53 @@ def build_ship_catalog(
     supported_scenarios: list[str],
 ) -> dict[str, Any]:
     sources = scenario_metadata_sources(templates_dir, scenario_dirs)
-    collections: dict[str, Any] = {}
-    weapons: dict[str, dict[str, Any]] = {}
+    base_rows: dict[str, dict[str, dict[str, Any]]] = {}
+    base_collections: dict[str, Any] = {}
+    base_weapon_families: dict[str, dict[str, dict[str, Any]]] = {}
     for collection, (filename, kind, extra_fields) in SHIP_COLLECTIONS.items():
         path = templates_dir / filename
         sources.append(source_entry(path, f"base/{filename}"))
+        raw_rows = index_raw_rows(path)
+        base_rows[collection] = raw_rows
         normalized = normalized_collection(
-            index_raw_rows(path),
+            raw_rows,
             (*COMMON_SHIP_FIELDS, *extra_fields),
             kind=kind,
         )
         if collection in WEAPON_COLLECTIONS:
-            collisions = sorted(set(weapons) & set(normalized))
-            if collisions:
-                raise CatalogError(f"Duplicate ship weapon dataName values across template files: {collisions}")
-            weapons.update(normalized)
+            base_weapon_families[collection] = normalized
         else:
-            collections[collection] = normalized
-    collections["weapons"] = {name: weapons[name] for name in sorted(weapons)}
+            base_collections[collection] = normalized
+    base_collections["weapons"] = combine_weapon_families(base_weapon_families, scenario="base")
+
+    scenario_overrides: dict[str, dict[str, Any]] = {}
+    for scenario, directory in sorted(scenario_dirs.items()):
+        resolved_collections: dict[str, Any] = {}
+        resolved_weapon_families: dict[str, dict[str, dict[str, Any]]] = {}
+        for collection, (filename, kind, extra_fields) in SHIP_COLLECTIONS.items():
+            overlay_path = directory / filename
+            if overlay_path.is_file():
+                sources.append(source_entry(overlay_path, f"{scenario}/{filename}"))
+            resolved = normalized_collection(
+                merge_raw_rows(base_rows[collection], overlay_path),
+                (*COMMON_SHIP_FIELDS, *extra_fields),
+                kind=kind,
+            )
+            if collection in WEAPON_COLLECTIONS:
+                resolved_weapon_families[collection] = resolved
+            else:
+                resolved_collections[collection] = resolved
+        resolved_collections["weapons"] = combine_weapon_families(
+            resolved_weapon_families,
+            scenario=scenario,
+        )
+        delta = recursive_minimal_override(base_collections, resolved_collections)
+        if delta:
+            scenario_overrides[scenario] = delta
+
     return make_envelope(
-        base=collections,
-        scenario_overrides={},
+        base=base_collections,
+        scenario_overrides=scenario_overrides,
         source_files=sources,
         supported_scenarios=supported_scenarios,
     )

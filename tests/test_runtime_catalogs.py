@@ -159,11 +159,22 @@ class RuntimeCatalogTests(unittest.TestCase):
             broken / "TIOrgTemplate.json",
             [{"dataName": "Org_Broken", "friendlyName": "Broken Org", "tier": 1}],
         )
+        write_json(
+            broken / "TIDriveTemplate.json",
+            [
+                {
+                    "dataName": "drives_Test",
+                    "thrust_N": 250,
+                    "weightedBuildMaterials": {"metals": 1, "nobleMetals": 2},
+                }
+            ],
+        )
         write_json(broken / "TIGlobalConfig.json", {"scenarioTags": ["PostApoc"]})
 
     def test_loader_selects_exact_scenario_overlay_and_exposes_claim_config(self):
         modern = RuntimeCatalogs.load("ModernScenario", self.output)
         millennium = RuntimeCatalogs.load("2003Scenario", self.output)
+        broken = RuntimeCatalogs.load("BrokenEarthScenario", self.output)
 
         self.assertEqual(modern.effects["Effect_Test"]["operation"], "Additive")
         self.assertEqual(millennium.effects["Effect_Test"]["operation"], "Multiplicative")
@@ -171,6 +182,14 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.assertEqual(millennium.orgs["Org_Test"]["tier"], 2)
         self.assertIn("Trait_2003", millennium.traits)
         self.assertNotIn("unrelatedAsset", modern.effects["Effect_Test"])
+        self.assertEqual(modern.ships["drives"]["drives_Test"]["thrust_N"], 100)
+        self.assertEqual(broken.ships["drives"]["drives_Test"]["thrust_N"], 250)
+        self.assertEqual(
+            broken.ships["drives"]["drives_Test"]["weightedBuildMaterials"],
+            {"metals": 1, "nobleMetals": 2},
+        )
+        self.assertTrue(broken.calculation_diagnostics()["catalogs"]["ship"]["overrideApplied"])
+        self.assertFalse(modern.calculation_diagnostics()["catalogs"]["ship"]["overrideApplied"])
         self.assertEqual(
             modern.nation_claims["democracyDecreaseToMakeHostileClaim"],
             1.5,
@@ -256,6 +275,47 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.assertEqual(first_files, second_files)
         for filename in first_files:
             self.assertEqual((self.output / filename).read_bytes(), (second_output / filename).read_bytes())
+
+    def test_ship_override_is_recursive_minimal_and_tracks_overlay_source(self):
+        envelope = json.loads((self.output / "ship_catalog.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            envelope["scenarioOverrides"]["BrokenEarthScenario"],
+            {
+                "drives": {
+                    "drives_Test": {
+                        "thrust_N": 250,
+                        "weightedBuildMaterials": {"nobleMetals": 2},
+                    }
+                }
+            },
+        )
+        self.assertIn(
+            "BrokenEarthScenario/TIDriveTemplate.json",
+            {source["name"] for source in envelope["sourceFiles"]},
+        )
+
+    def test_generator_rejects_duplicate_ship_rows_in_scenario_overlay(self):
+        overlay_path = (
+            self.dlc / builder.SCENARIO_DIRECTORIES["BrokenEarthScenario"] / "TIDriveTemplate.json"
+        )
+        row = json.loads(overlay_path.read_text(encoding="utf-8"))[0]
+        write_json(overlay_path, [row, row])
+
+        with self.assertRaisesRegex(CatalogError, "Duplicate dataName"):
+            builder.build_all(self.templates, self.root / "duplicate-ship", dlc_content_dir=self.dlc)
+
+    def test_generator_rejects_cross_family_weapon_collision_in_scenario_overlay(self):
+        overlay_path = (
+            self.dlc / builder.SCENARIO_DIRECTORIES["2003Scenario"] / "TIMissileTemplate.json"
+        )
+        write_json(
+            overlay_path,
+            [{"dataName": "guns_Test", "friendlyName": "Collision", "mount": "OneHull"}],
+        )
+
+        with self.assertRaisesRegex(CatalogError, "2003Scenario"):
+            builder.build_all(self.templates, self.root / "weapon-collision", dlc_content_dir=self.dlc)
 
     def test_generator_rejects_duplicate_template_rows(self):
         effect_path = self.templates / "TIEffectTemplate.json"

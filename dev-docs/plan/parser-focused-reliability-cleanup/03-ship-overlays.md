@@ -41,12 +41,20 @@
 
 ## Progress
 
-- Not started.
+- Completed.
+- The ship generator now resolves each component family against every discovered scenario directory, validates the resolved weapon namespace, and emits recursive minimal deltas.
+- Synthetic Broken Earth drive overrides exercise nested field preservation and exact runtime selection.
+- Installed 0.4.77 Dark Skies scenario directories contain no ship component overlay files, so the regenerated packaged ship payload remains byte-identical while the generator is ready for future deltas.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Delta generation compares fully resolved, normalized scenario collections with normalized base collections; omitted raw fields therefore inherit base values before diffing.
+- Weapon collision validation runs after resolving all six weapon families for base and for each scenario, so an overlay cannot introduce an ambiguous combined runtime key.
+- Source provenance includes only scenario ship files that exist; scenario metadata still records the supported overlay roots.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Focused validation passed: 32 tests across runtime catalogs, catalog generators, and ship planning.
+- Full validation passed: 198 tests, with one expected local-fixture skip.
+- Synthetic generation proves a nested Broken Earth drive delta, base preservation, `overrideApplied` diagnostics, overlay source hashing, duplicate-row rejection, cross-family weapon collision rejection, and deterministic regeneration.
+- Authoritative local regeneration retained ship payload fingerprint `1327d1ef9a25f413a23073455e0035dceaac29eafec04c0f9fa2dcf286a0964b` because the installed scenario templates currently add no ship rows.
