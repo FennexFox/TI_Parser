@@ -40,12 +40,12 @@
 
 ## Progress
 
-- Not started.
+- Complete: package-only raw-loader traps and explicit `catalog-verify` raw/package parity are implemented.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Save-backed checks use the requested scenario only and report unavailable instead of inventing evidence when inputs are absent.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Broken Earth verification passes all 12 checks, including Mercury solar, CP, MC, research, org eligibility, and saved-design simulation.
