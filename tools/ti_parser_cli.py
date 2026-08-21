@@ -23,6 +23,8 @@ RAW_COMMANDS = {
     "hab-plan": "command_hab_plan",
     "ship-plan": "command_ship_plan",
     "project-analysis": "command_project_analysis",
+    "nation-claims": "command_nation_claims",
+    "ai-fleet-diagnostics": "command_ai_fleet_diagnostics",
 }
 
 SNAPSHOT_COMMANDS = {
@@ -170,6 +172,22 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     project_analysis.add_argument("--all", action="store_true", help="Return every candidate instead of only the top rows for --sort.")
     add_compact_flag(project_analysis)
 
+    nation_claims = subparsers.add_parser("nation-claims", help="Explain saved nation claims and reconstructed hostility rules.")
+    nation_claims.add_argument("claimant", nargs="?", help="Optional claimant nation template/display/code filter.")
+    nation_claims.add_argument("--target", help="Optional current target nation template/display/code filter.")
+    nation_claims.add_argument("--diagnostics", action="store_true")
+    add_compact_flag(nation_claims)
+
+    ai_fleet = subparsers.add_parser("ai-fleet-diagnostics", help="Inspect AI fleet goals, assignments, queues, and unresolved causes.")
+    ai_fleet.add_argument("faction", nargs="?", help="Optional AI faction template/display/code filter.")
+    ai_fleet.add_argument("--stale-days", type=float, help="Add suspected stale diagnostics at this caller-selected threshold.")
+    ai_fleet.add_argument("--diagnostics", action="store_true")
+    add_compact_flag(ai_fleet)
+
+    catalog_verify = subparsers.add_parser("catalog-verify", help="Compare packaged catalogs with an explicitly supplied game template tree.")
+    catalog_verify.add_argument("--scenario", required=True, help="Exact canonical scenario template name.")
+    add_compact_flag(catalog_verify)
+
     types = subparsers.add_parser("types", help="Print gamestate type counts.")
     types.add_argument("--limit", type=int, default=0)
     add_compact_flag(types)
@@ -200,12 +218,18 @@ def main(api: ModuleType, argv: list[str] | None = None) -> int:
     command = args.command or "summary"
 
     try:
+        if command == "catalog-verify":
+            if not args.templates_dir:
+                parser.error("catalog-verify requires --templates-dir")
+            api.command_catalog_verify(args)
+            return 0
+        if args.templates_dir:
+            parser.error("--templates-dir is verification-only; use it with catalog-verify")
         save_path = api.resolve_save_path(args.save)
-        base_templates_dir = api.resolve_templates_dir(args.templates_dir)
         if command == "raw":
             api.command_raw(save_path, args)
             return 0
-        templates_dir = api.resolve_scenario_templates(save_path, base_templates_dir)
+        templates_dir = None
         if command in RAW_COMMANDS:
             getattr(api, RAW_COMMANDS[command])(save_path, templates_dir, args)
             return 0
@@ -233,6 +257,15 @@ def main(api: ModuleType, argv: list[str] | None = None) -> int:
             parser.error(f"Unknown command: {command}")
     except BrokenPipeError:
         return 1
+    except api.CalculationDependencyError as exc:
+        api.print_json(
+            {
+                "status": "incomplete",
+                "missingDependencies": exc.missing_dependencies,
+            },
+            compact=getattr(args, "compact", False),
+        )
+        return 2
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

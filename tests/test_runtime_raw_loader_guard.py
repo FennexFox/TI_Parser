@@ -15,38 +15,13 @@ PROHIBITED_CALLS = {
     "resolve_scenario_templates",
 }
 
-# Phase-1 audit snapshot. Later phases remove entries from this counter; adding a
-# new raw-loader edge fails immediately instead of silently expanding runtime IO.
+# Final allowlist: these two helpers implement explicit legacy/raw inspection
+# utilities, but no normal command calls them.  All command, calculation,
+# snapshot, org, research, hab, and ship raw-loader edges were removed.
 AUDITED_RUNTIME_CALLS = Counter(
     {
-        ("tools/ti_parser_cli.py", "main", "resolve_scenario_templates"): 1,
-        ("tools/ti_parser_cli.py", "main", "resolve_templates_dir"): 1,
         ("tools/ti_parser_core.py", "load_trait_templates", "load_named_templates"): 1,
         ("tools/ti_parser_core.py", "scenario_template_sources", "load_named_templates"): 1,
-        ("tools/ti_parser_org.py", "calculate_org_plan", "load_named_templates"): 1,
-        ("tools/ti_parser_org.py", "calculate_org_plan", "load_trait_templates"): 1,
-        ("tools/ti_parser_snapshot.py", "build_snapshot", "load_trait_templates"): 1,
-        ("tools/ti_save_parser.py", "calculate_hab_ui", "load_named_templates"): 1,
-        ("tools/ti_save_parser.py", "calculate_hab_ui", "load_trait_templates"): 1,
-        ("tools/ti_save_parser.py", "calculate_nation_ui", "load_named_templates"): 1,
-        ("tools/ti_save_parser.py", "calculate_nation_ui", "load_trait_templates"): 1,
-        ("tools/ti_save_parser.py", "calculate_ship_plan", "load_named_templates"): 4,
-        ("tools/ti_save_parser.py", "calculate_topbar", "load_named_templates"): 1,
-        ("tools/ti_save_parser.py", "calculate_topbar", "load_trait_templates"): 1,
-        ("tools/ti_save_parser.py", "command_advise", "load_named_templates"): 1,
-        ("tools/ti_save_parser.py", "command_advise", "load_trait_templates"): 1,
-        ("tools/ti_save_parser.py", "faction_yearly_income_from_ships", "load_named_templates"): 1,
-        ("tools/ti_save_parser.py", "hab_module_candidate_rows", "load_named_templates"): 1,
-        ("tools/ti_save_parser.py", "hab_module_candidate_rows", "load_trait_templates"): 1,
-        ("tools/ti_save_parser.py", "hab_module_upgrade_rows", "load_named_templates"): 1,
-        ("tools/ti_save_parser.py", "hab_module_upgrade_rows", "load_trait_templates"): 1,
-        ("tools/ti_save_parser.py", "load_research_templates", "load_named_templates"): 5,
-        ("tools/ti_save_parser.py", "load_research_templates", "load_trait_templates"): 1,
-        ("tools/ti_save_parser.py", "prospective_module_unlocks_for_project", "load_named_templates"): 1,
-        ("tools/ti_save_parser.py", "prospective_module_unlocks_for_project", "load_trait_templates"): 1,
-        ("tools/ti_save_parser.py", "ship_plan_simulation_catalogs", "load_named_templates"): 6,
-        ("tools/ti_save_parser.py", "ship_plan_tagged_templates", "load_named_templates"): 1,
-        ("tools/ti_save_parser.py", "world_resource_market", "load_named_templates"): 1,
     }
 )
 
@@ -81,8 +56,7 @@ def runtime_raw_loader_calls() -> Counter[tuple[str, str, str]]:
 class RuntimeRawLoaderGuardTests(unittest.TestCase):
     def test_runtime_raw_loader_edges_do_not_expand_beyond_audited_baseline(self) -> None:
         actual = runtime_raw_loader_calls()
-        unexpected = actual - AUDITED_RUNTIME_CALLS
-        self.assertFalse(unexpected, f"New normal-runtime raw loader calls: {dict(unexpected)}")
+        self.assertEqual(actual, AUDITED_RUNTIME_CALLS)
 
 
 if __name__ == "__main__":
