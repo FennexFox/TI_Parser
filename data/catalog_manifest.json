@@ -1,35 +1,35 @@
 {
-  "bundleFingerprint": "5fc84f713e0ab5b28f9521fa7cdf40c2d5d085250725c310a00c449976203330",
+  "bundleFingerprint": "43239f441b8969a1088f261f84b34aa770056b444f4e12f63b7ac4437b258c9d",
   "catalogs": {
     "effect_catalog.json": {
       "payloadFingerprint": "3f396b7570b8574d49f5ac8c753402c9d72e526f5f1fb781dec53718c4c7a71f",
       "schemaVersion": 1,
-      "sha256": "eaa47c28529a994e2a5da9863e4d0c0a327414605b9c7f0d8fe93d3643181f7c"
+      "sha256": "cd28ece0f369da59271091feabbaed6834254e6c3bed1fbaa55f26b9187e2810"
     },
     "nation_claim_catalog.json": {
       "payloadFingerprint": "7ef5efe1e90e9be7469ca29a16921fdd502282281ca75a19d65b5b2d3fc8c510",
       "schemaVersion": 1,
-      "sha256": "2acfe048172d98bd5e09be8dc53341d6e895493447ee514b5454ca804b913d85"
+      "sha256": "7d43ff7d1eba4ffb2ba40633787cdd3afc7addf7c7545ace6fd484c35fb0f257"
     },
     "org_catalog.json": {
       "payloadFingerprint": "62c90f9eeb27c558ad99ee7997eb1f36ec49d2c85ab9e19da43537d612135cca",
       "schemaVersion": 1,
-      "sha256": "99de4093a0c999a3a72647371185e59150871e8d7fd952e35d8c6747d65c5cc7"
+      "sha256": "a19265fbedda138a41e579dc272bbcaaf74036877c3f535899e384ee06622c78"
     },
     "research_catalog.json": {
       "payloadFingerprint": "e4e1275eb46f1de57a5e1e41fe1722efa65d7e9256f3086d6e56964533b21aca",
       "schemaVersion": 2,
-      "sha256": "80d2e21ae0c91e17c5f850da3b8afb0758a8c3a780e9f919423143f73e961f7b"
+      "sha256": "1d03aa8a7d123ab246b6bfd3cb1dc9f74540b9035b23b5b1605bd2cf9aadaa5c"
     },
     "ship_catalog.json": {
       "payloadFingerprint": "1327d1ef9a25f413a23073455e0035dceaac29eafec04c0f9fa2dcf286a0964b",
       "schemaVersion": 1,
-      "sha256": "f55b4594aa0f17b1895de8f22e1b069bdc0f226cc892feae8d299cf40ba8b43d"
+      "sha256": "1c781e18917ecd48ad79874fcd0519267677743eb3c7b70943055075b878507f"
     },
     "trait_catalog.json": {
       "payloadFingerprint": "90f0eb3a5f534f1d05a4f4b9901ca8d07396d0bcb7936f41929289b6fd28b448",
       "schemaVersion": 1,
-      "sha256": "c24d8a7628c9842ac7849318d907dea8350dc7c4444b74cd7e7a0d4087aff5ab"
+      "sha256": "bad0bcf791945a762c9a8595bbe5688ce8b2a54f254e5e1bcfefe37fe2d875a8"
     }
   },
   "generator": {

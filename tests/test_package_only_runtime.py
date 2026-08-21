@@ -93,8 +93,33 @@ class PackageOnlyRuntimeTests(unittest.TestCase):
             result = json.loads(output.getvalue())
             self.assertEqual(code, 2)
             self.assertEqual(result["status"], "incomplete")
-            self.assertEqual(result["missingDependencies"][0]["kind"], "catalog")
+            self.assertEqual(result["missingDependencies"][0]["kind"], "scenario")
             self.assertEqual(result["missingDependencies"][0]["scenario"], "UnsupportedScenario")
+
+    def test_catalog_error_types_map_to_distinct_calculation_dependencies(self) -> None:
+        indexed = ti.build_index(
+            {
+                "gamestates": {
+                    "TITimeState": [state(1, {"scenarioMetaTemplateName": "ModernScenario"})],
+                }
+            }
+        )
+        cases = (
+            (
+                ti.UnsupportedCatalogScenarioError("ModernScenario", ["2003Scenario"]),
+                "scenario",
+                "ModernScenario",
+            ),
+            (ti.CatalogIntegrityError("manifest hash mismatch"), "catalog-integrity", "runtime bundle"),
+        )
+        for error, expected_kind, expected_name in cases:
+            with self.subTest(error=type(error).__name__):
+                with patch.object(ti, "load_runtime_catalogs", side_effect=error):
+                    with self.assertRaises(ti.CalculationDependencyError) as caught:
+                        ti.calculation_catalogs(indexed, "topbar")
+                dependency = caught.exception.missing_dependencies[0]
+                self.assertEqual(dependency["kind"], expected_kind)
+                self.assertEqual(dependency["name"], expected_name)
 
 
 if __name__ == "__main__":

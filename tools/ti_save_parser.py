@@ -70,7 +70,12 @@ from ti_parser_core import (
     module_catalog_diagnostics,
     location_catalog_diagnostics,
 )
-from ti_parser_catalogs import CatalogError, RuntimeCatalogs, load_runtime_catalogs
+from ti_parser_catalogs import (
+    CatalogIntegrityError,
+    RuntimeCatalogs,
+    UnsupportedCatalogScenarioError,
+    load_runtime_catalogs,
+)
 from ti_parser_ai import calculate_ai_fleet_diagnostics
 from ti_parser_claims import calculate_nation_claims
 from ti_parser_verify import verify_catalogs
@@ -137,10 +142,20 @@ def calculation_catalogs(indexed: IndexedState, context: str) -> RuntimeCatalogs
                 "nation_claim_catalog.json",
             ),
         )
-    except CatalogError as exc:
+    except UnsupportedCatalogScenarioError as exc:
         raise CalculationDependencyError(
             CalculationDependency(
-                kind="catalog",
+                kind="scenario",
+                name=exc.scenario,
+                context=context,
+                scenario=scenario,
+                reason=str(exc),
+            )
+        ) from exc
+    except CatalogIntegrityError as exc:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="catalog-integrity",
                 name="runtime bundle",
                 context=context,
                 scenario=scenario,

@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from catalog_utils import write_utf8_lf
 from ti_parser_catalogs import CatalogError, file_sha256, validate_catalog_envelope, value_fingerprint
 
 
@@ -658,8 +659,7 @@ def deterministic_json(value: Any) -> str:
 
 
 def write_catalog(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(deterministic_json(value), encoding="utf-8")
+    write_utf8_lf(path, deterministic_json(value))
 
 
 def build_all(

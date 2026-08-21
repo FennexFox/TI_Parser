@@ -25,6 +25,21 @@ def write_text(path: Path, content: str) -> None:
 
 
 class CatalogGeneratorTests(unittest.TestCase):
+    def test_catalog_writers_emit_utf8_lf_with_one_trailing_newline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            json_path = root / "catalog.json"
+            text_path = root / "catalog.md"
+
+            cu.write_json_output(json_path, {"label": "한글", "value": 1})
+            cu.write_text_output(text_path, "first\r\nsecond\r\n\r\n")
+
+            json_bytes = json_path.read_bytes()
+            text_bytes = text_path.read_bytes()
+            self.assertEqual(json_bytes.decode("utf-8"), '{\n  "label": "한글",\n  "value": 1\n}\n')
+            self.assertEqual(text_bytes, b"first\nsecond\n")
+            self.assertNotIn(b"\r", json_bytes + text_bytes)
+
     def test_location_catalog_normalizes_body_navigable_and_orbit_without_zero_filling(self):
         with tempfile.TemporaryDirectory() as tmp:
             templates_dir = Path(tmp) / "Templates"

@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -11,7 +12,9 @@ import build_runtime_catalogs as builder
 from ti_parser_catalogs import (
     CalculationDependencyError,
     CatalogError,
+    CatalogIntegrityError,
     RuntimeCatalogs,
+    UnsupportedCatalogScenarioError,
     file_sha256,
     validate_catalog_envelope,
     value_fingerprint,
@@ -175,14 +178,14 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.assertIs(CalculationDependencyError, CoreCalculationDependencyError)
 
     def test_unsupported_scenario_does_not_fall_back(self):
-        with self.assertRaisesRegex(CatalogError, "Unsupported scenario"):
+        with self.assertRaisesRegex(UnsupportedCatalogScenarioError, "Unsupported scenario"):
             RuntimeCatalogs.load("UnknownScenario", self.output)
 
     def test_manifest_detects_catalog_file_corruption(self):
         path = self.output / "effect_catalog.json"
         path.write_text(path.read_text(encoding="utf-8") + " ", encoding="utf-8")
 
-        with self.assertRaisesRegex(CatalogError, "file sha256 mismatch"):
+        with self.assertRaisesRegex(CatalogIntegrityError, "file sha256 mismatch"):
             RuntimeCatalogs.load("ModernScenario", self.output)
 
     def test_envelope_detects_payload_corruption_even_when_json_is_valid(self):
@@ -190,7 +193,7 @@ class RuntimeCatalogTests(unittest.TestCase):
         envelope = json.loads(path.read_text(encoding="utf-8"))
         envelope["base"]["traits"]["Trait_Test"]["incomeMoney"] = 999
 
-        with self.assertRaisesRegex(CatalogError, "payload fingerprint mismatch"):
+        with self.assertRaisesRegex(CatalogIntegrityError, "payload fingerprint mismatch"):
             validate_catalog_envelope(envelope, path=path)
 
     def test_missing_manifest_entry_is_fail_closed(self):
@@ -200,8 +203,30 @@ class RuntimeCatalogTests(unittest.TestCase):
         manifest["bundleFingerprint"] = value_fingerprint(manifest["catalogs"])
         write_json(manifest_path, manifest)
 
-        with self.assertRaisesRegex(CatalogError, "missing required entries"):
+        with self.assertRaisesRegex(CatalogIntegrityError, "missing required entries"):
             RuntimeCatalogs.load("ModernScenario", self.output)
+
+    def test_lf_normalized_copy_loads_every_supported_scenario(self):
+        normalized = self.root / "normalized"
+        shutil.copytree(self.output, normalized)
+        for path in normalized.glob("*.json"):
+            content = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            path.write_bytes(content)
+            self.assertNotIn(b"\r", content)
+            self.assertTrue(content.endswith(b"\n"))
+
+        envelope = json.loads((normalized / "effect_catalog.json").read_text(encoding="utf-8"))
+        for scenario in envelope["supportedScenarios"]:
+            loaded = RuntimeCatalogs.load(scenario, normalized)
+            self.assertEqual(loaded.scenario, scenario)
+
+    def test_generated_manifest_hashes_the_actual_lf_bytes(self):
+        manifest = json.loads((self.output / "catalog_manifest.json").read_text(encoding="utf-8"))
+        for filename, entry in manifest["catalogs"].items():
+            content = (self.output / filename).read_bytes()
+            self.assertNotIn(b"\r", content)
+            self.assertTrue(content.endswith(b"\n"))
+            self.assertEqual(entry["sha256"], file_sha256(self.output / filename))
 
     def test_missing_dependency_uses_shared_structured_error(self):
         catalogs = RuntimeCatalogs.load("ModernScenario", self.output)
