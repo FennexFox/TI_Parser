@@ -129,6 +129,55 @@ class ResearchCatalogTests(unittest.TestCase):
             ],
         )
 
+    def test_strict_runtime_lookup_rejects_missing_and_corrupt_rows(self):
+        base = {
+            "techs": {
+                "Tech_A": {
+                    "dataName": "Tech_A",
+                    "kind": "tech",
+                    "techCategory": "Energy",
+                    "researchCost": 100,
+                    "requirements": {"all": []},
+                    "prerequisiteNodes": [],
+                    "effects": [],
+                }
+            },
+            "projects": {},
+        }
+        payload = {"base": base, "scenarioOverrides": {}}
+        catalog = {
+            "supportedScenarios": ["ModernScenario"],
+            **payload,
+            "payloadFingerprint": rc.value_fingerprint(payload),
+        }
+
+        self.assertEqual(
+            rc.require_runtime_row(catalog, "ModernScenario", "tech", "Tech_A")["researchCost"],
+            100,
+        )
+        with self.assertRaisesRegex(rc.ResearchCatalogError, "Missing required tech row"):
+            rc.require_runtime_row(catalog, "ModernScenario", "tech", "Missing")
+
+        catalog["base"]["techs"]["Tech_A"].pop("researchCost")
+        catalog["payloadFingerprint"] = rc.value_fingerprint(
+            {"base": catalog["base"], "scenarioOverrides": catalog["scenarioOverrides"]}
+        )
+        with self.assertRaisesRegex(rc.ResearchCatalogError, "missing.*researchCost"):
+            rc.select_runtime_payload(catalog, "ModernScenario")
+
+    def test_packaged_v2_catalog_runtime_indexes_are_self_consistent(self):
+        catalog_path = Path(__file__).resolve().parents[1] / "data" / "research_catalog.json"
+        if not catalog_path.is_file():
+            self.skipTest("packaged research catalog is absent")
+        import json
+
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        self.assertEqual(catalog.get("schemaVersion"), 2)
+        for scenario in catalog["supportedScenarios"]:
+            payload = rc.select_runtime_payload(catalog, scenario)
+            self.assertTrue(payload["techs"])
+            self.assertTrue(payload["projects"])
+
 
 if __name__ == "__main__":
     unittest.main()

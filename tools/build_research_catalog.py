@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
+from copy import deepcopy
+import hashlib
+import json
+import math
 from pathlib import Path
+import re
 from typing import Any
 
 import ti_save_parser as ti
@@ -18,13 +23,15 @@ from catalog_utils import (
     compact_number,
     parse_languages,
     read_localization_file,
-    source_fingerprint,
     write_json_output,
     write_text_output,
 )
+from ti_parser_core import SCENARIO_DLC_TEMPLATE_HINTS, game_root_from_templates_dir
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+GENERATOR_NAME = "build_research_catalog"
+GENERATOR_VERSION = "2"
 DEFAULT_JSON_OUTPUT = Path("data/research_catalog.json")
 DEFAULT_MARKDOWN_OUTPUT = Path("docs/research_catalog.md")
 RESEARCH_TEMPLATE_FILES = {
@@ -36,6 +43,84 @@ LOCALIZATION_FILES = {
     "project": "TIProjectTemplate",
 }
 LOCALIZATION_FIELDS = ("displayName",)
+DEFAULT_SUPPORTED_SCENARIOS = (
+    "2026Scenario",
+    "2030Scenario",
+    "2070Scenario",
+    "FullScenario",
+    "ModernScenario",
+    "SkirmishModeScenario",
+    "SkirmishScenario",
+    "TestScenario",
+)
+COMMON_RUNTIME_FIELDS = (
+    "dataName",
+    "friendlyName",
+    "_displayName",
+    "techCategory",
+    "researchCost",
+    "prereqs",
+    "altPrereq0",
+    "effects",
+    "factionPrereq",
+    "requiredMilestone",
+    "requiredObjectiveName",
+    "altRequiredObjectiveName",
+    "requiresNation",
+    "AI_techRole",
+    "AI_projectRole",
+    "AI_criticalTech",
+)
+TECH_RUNTIME_FIELDS = COMMON_RUNTIME_FIELDS + ("endGameTech",)
+PROJECT_RUNTIME_FIELDS = COMMON_RUNTIME_FIELDS + (
+    "repeatable",
+    "oneTimeGlobally",
+    "disable",
+    "factionAvailableChance",
+    "initialUnlockChance",
+    "deltaUnlockChance",
+    "maxUnlockChance",
+    "factionAlways",
+    "orgGranted",
+    "resourcesGranted",
+)
+
+
+class ResearchCatalogError(ValueError):
+    """The generated or packaged research catalog violates its runtime contract."""
+
+
+def canonical_json_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def value_fingerprint(value: Any) -> str:
+    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def source_with_hash(path: Path) -> dict[str, Any]:
+    result: dict[str, Any] = {"file": path.name}
+    if path.is_file():
+        result.update({"size": path.stat().st_size, "sha256": file_sha256(path)})
+    return result
+
+
+def source_file_entry(path: Path, name: str) -> dict[str, str]:
+    return {"name": name.replace("\\", "/"), "sha256": file_sha256(path)}
 
 
 def clean_value(value: Any) -> Any:
@@ -48,6 +133,59 @@ def clean_value(value: Any) -> Any:
 
 def nonempty_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def load_template_rows(path: Path) -> dict[str, dict[str, Any]]:
+    """Load one generator input without hiding duplicate or malformed rows."""
+
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ResearchCatalogError(f"Unable to read research template file {path}: {exc}") from exc
+    if not isinstance(raw, list):
+        raise ResearchCatalogError(f"Research template file must contain an array: {path}")
+    rows: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ResearchCatalogError(f"Research template row {index} is not an object: {path}")
+        data_name = item.get("dataName")
+        if not isinstance(data_name, str) or not data_name:
+            raise ResearchCatalogError(f"Research template row {index} has no dataName: {path}")
+        if data_name in rows:
+            raise ResearchCatalogError(f"Duplicate research dataName {data_name!r}: {path}")
+        rows[data_name] = item
+    return rows
+
+
+def discover_supported_scenarios(templates_dir: Path) -> list[str]:
+    meta_path = templates_dir / "TIMetaTemplate.json"
+    discovered: set[str] = set()
+    if meta_path.is_file():
+        try:
+            text = meta_path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError) as exc:
+            raise ResearchCatalogError(f"Unable to read scenario metadata {meta_path}: {exc}") from exc
+        # TIMetaTemplate is Unity JSON-like data and currently contains both
+        # trailing commas and // comments. dataName extraction is sufficient
+        # here and avoids accepting that relaxed syntax for calculation rows.
+        discovered.update(re.findall(r'"dataName"\s*:\s*"([^"\r\n]*Scenario)"', text))
+    discovered.update(DEFAULT_SUPPORTED_SCENARIOS)
+    discovered.update(SCENARIO_DLC_TEMPLATE_HINTS)
+    return sorted(discovered)
+
+
+def discover_scenario_template_dirs(templates_dir: Path) -> dict[str, Path]:
+    game_root = game_root_from_templates_dir(templates_dir)
+    if game_root is None:
+        return {}
+    return {
+        scenario: candidate
+        for scenario, relative in SCENARIO_DLC_TEMPLATE_HINTS.items()
+        for candidate in (game_root / relative,)
+        if candidate.is_dir()
+    }
 
 
 def load_research_localizations(
@@ -282,6 +420,157 @@ def normalize_research_node(
     return clean_value(node)
 
 
+def normalize_resource_grants(value: Any) -> list[dict[str, Any]]:
+    grants: list[dict[str, Any]] = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict) or not item.get("resource"):
+            continue
+        raw_value = item.get("value", item.get("amount"))
+        grant = {"resource": str(item["resource"])}
+        if raw_value is not None:
+            grant["value"] = compact_number(ti.as_float(raw_value, math.nan))
+        grants.append(grant)
+    return grants
+
+
+def normalize_runtime_row(
+    template: dict[str, Any],
+    kind: str,
+    localizations: dict[str, dict[str, dict[str, dict[str, str]]]],
+    *,
+    partial: bool = False,
+) -> dict[str, Any]:
+    """Keep only fields read by research runtime calculations.
+
+    Base rows are complete, self-validating records. Scenario rows are sparse
+    overlays so an omitted DLC field never erases the corresponding base value.
+    """
+
+    if kind not in {"tech", "project"}:
+        raise ResearchCatalogError(f"Unknown research row kind: {kind!r}")
+    data_name = template.get("dataName")
+    if not isinstance(data_name, str) or not data_name:
+        raise ResearchCatalogError(f"Research {kind} row has no dataName")
+    fields = TECH_RUNTIME_FIELDS if kind == "tech" else PROJECT_RUNTIME_FIELDS
+    row = {
+        field: clean_value(template[field])
+        for field in fields
+        if field in template and template[field] is not None
+    }
+    row["dataName"] = data_name
+    row["kind"] = kind
+    localized = localized_fields(localizations, kind, data_name, "displayName")
+    if localized:
+        row["displayName"] = localized
+
+    requirement_fields = {
+        "prereqs",
+        "altPrereq0",
+        "requiredObjectiveName",
+        "altRequiredObjectiveName",
+        "requiredMilestone",
+        "factionPrereq",
+        "requiresNation",
+    }
+    if not partial or requirement_fields & set(template):
+        requirements = normalize_requirements(template)
+        row["requirements"] = requirements
+        row["prerequisiteNodes"] = requirement_nodes(requirements)
+    if not partial:
+        row.setdefault("prereqs", [])
+        row.setdefault("effects", [])
+        row.setdefault("factionPrereq", [])
+        row["AI_criticalTech"] = bool(template.get("AI_criticalTech"))
+        if kind == "tech":
+            row["endGameTech"] = bool(template.get("endGameTech"))
+        else:
+            row["repeatable"] = bool(template.get("repeatable"))
+            row["oneTimeGlobally"] = bool(template.get("oneTimeGlobally"))
+            row["disable"] = bool(template.get("disable"))
+            row.setdefault("factionAlways", [])
+            row["resourcesGranted"] = normalize_resource_grants(template.get("resourcesGranted"))
+    elif kind == "project" and "resourcesGranted" in template:
+        row["resourcesGranted"] = normalize_resource_grants(template.get("resourcesGranted"))
+    return clean_value(row)
+
+
+def _merge_overlay(base: Any, overlay: Any) -> Any:
+    if not isinstance(base, dict) or not isinstance(overlay, dict):
+        return deepcopy(overlay)
+    result = deepcopy(base)
+    for key, value in overlay.items():
+        result[key] = _merge_overlay(result[key], value) if key in result else deepcopy(value)
+    return result
+
+
+def validate_runtime_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ResearchCatalogError("Research runtime payload must be an object")
+    for collection, kind in (("techs", "tech"), ("projects", "project")):
+        rows = payload.get(collection)
+        if not isinstance(rows, dict):
+            raise ResearchCatalogError(f"Research runtime payload has no {collection} index")
+        for name, row in rows.items():
+            if not isinstance(name, str) or not name or not isinstance(row, dict):
+                raise ResearchCatalogError(f"Invalid {collection} runtime row {name!r}")
+            if row.get("dataName") != name or row.get("kind") != kind:
+                raise ResearchCatalogError(f"Mismatched {collection} runtime row {name!r}")
+            missing = {
+                "researchCost",
+                "techCategory",
+                "requirements",
+                "prerequisiteNodes",
+                "effects",
+            } - set(row)
+            if missing:
+                raise ResearchCatalogError(f"Research runtime row {name!r} is missing {sorted(missing)}")
+            cost = row.get("researchCost")
+            if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not math.isfinite(float(cost)):
+                raise ResearchCatalogError(f"Research runtime row {name!r} has invalid researchCost")
+            if not isinstance(row.get("techCategory"), str) or not row["techCategory"]:
+                raise ResearchCatalogError(f"Research runtime row {name!r} has invalid techCategory")
+            if not isinstance(row.get("requirements"), dict):
+                raise ResearchCatalogError(f"Research runtime row {name!r} has invalid requirements")
+            if not isinstance(row.get("prerequisiteNodes"), list) or not isinstance(row.get("effects"), list):
+                raise ResearchCatalogError(f"Research runtime row {name!r} has invalid list fields")
+    return payload
+
+
+def select_runtime_payload(catalog: dict[str, Any], scenario: str) -> dict[str, Any]:
+    supported = catalog.get("supportedScenarios")
+    if not isinstance(supported, list) or scenario not in supported:
+        raise ResearchCatalogError(f"Unsupported research scenario {scenario!r}")
+    expected = value_fingerprint(
+        {"base": catalog.get("base"), "scenarioOverrides": catalog.get("scenarioOverrides")}
+    )
+    if catalog.get("payloadFingerprint") != expected:
+        raise ResearchCatalogError("Research catalog payload fingerprint mismatch")
+    base = catalog.get("base")
+    overrides = catalog.get("scenarioOverrides")
+    if not isinstance(base, dict) or not isinstance(overrides, dict):
+        raise ResearchCatalogError("Research catalog has invalid base or scenarioOverrides")
+    override = overrides.get(scenario, {})
+    if not isinstance(override, dict):
+        raise ResearchCatalogError(f"Research scenario override {scenario!r} must be an object")
+    return validate_runtime_payload(_merge_overlay(base, override))
+
+
+def require_runtime_row(
+    catalog: dict[str, Any],
+    scenario: str,
+    kind: str,
+    data_name: str,
+) -> dict[str, Any]:
+    payload = select_runtime_payload(catalog, scenario)
+    collection = {"tech": "techs", "project": "projects"}.get(kind)
+    if collection is None:
+        raise ResearchCatalogError(f"Unknown research row kind {kind!r}")
+    row = payload[collection].get(data_name)
+    if not isinstance(row, dict):
+        raise ResearchCatalogError(f"Missing required {kind} row {data_name!r} for {scenario}")
+    return row
+
+
 def node_sort_key(node: dict[str, Any]) -> tuple[Any, ...]:
     return (
         0 if node.get("kind") == "tech" else 1,
@@ -310,11 +599,26 @@ def build_graph_links(nodes: list[dict[str, Any]]) -> tuple[list[dict[str, str]]
     return edges, dict(sorted(children.items())), sorted(unknown)
 
 
-def build_catalog(templates_dir: Path, languages: list[str]) -> dict[str, Any]:
+def build_catalog(
+    templates_dir: Path,
+    languages: list[str],
+    *,
+    scenario_template_dirs: dict[str, Path] | None = None,
+    supported_scenarios: Iterable[str] | None = None,
+) -> dict[str, Any]:
     localizations = load_research_localizations(templates_dir, languages)
+    templates_by_kind = {
+        kind: load_template_rows(templates_dir / filename)
+        for kind, filename in RESEARCH_TEMPLATE_FILES.items()
+    }
+    for kind, templates in templates_by_kind.items():
+        if not templates:
+            raise ResearchCatalogError(
+                f"No {kind} templates found in {templates_dir / RESEARCH_TEMPLATE_FILES[kind]}"
+            )
+
     nodes: list[dict[str, Any]] = []
-    for kind, filename in RESEARCH_TEMPLATE_FILES.items():
-        templates = ti.load_named_templates(templates_dir, filename)
+    for kind, templates in templates_by_kind.items():
         for template in templates.values():
             if kind == "project" and template.get("disable"):
                 continue
@@ -330,19 +634,97 @@ def build_catalog(templates_dir: Path, languages: list[str]) -> dict[str, Any]:
     for node in nodes:
         category = str(node.get("category") or "None")
         counts_by_category[category] = counts_by_category.get(category, 0) + 1
-    return {
+
+    base_payload = validate_runtime_payload(
+        {
+            "techs": {
+                name: normalize_runtime_row(template, "tech", localizations)
+                for name, template in sorted(templates_by_kind["tech"].items())
+            },
+            "projects": {
+                name: normalize_runtime_row(template, "project", localizations)
+                for name, template in sorted(templates_by_kind["project"].items())
+            },
+        }
+    )
+
+    scenario_dirs = (
+        {str(name): Path(path) for name, path in scenario_template_dirs.items()}
+        if scenario_template_dirs is not None
+        else discover_scenario_template_dirs(templates_dir)
+    )
+    scenario_overrides: dict[str, dict[str, Any]] = {}
+    for scenario, directory in sorted(scenario_dirs.items()):
+        override_payload: dict[str, Any] = {}
+        for kind, collection in (("tech", "techs"), ("project", "projects")):
+            path = directory / RESEARCH_TEMPLATE_FILES[kind]
+            templates = load_template_rows(path)
+            if templates:
+                override_payload[collection] = {
+                    name: normalize_runtime_row(
+                        template,
+                        kind,
+                        localizations,
+                        partial=name in base_payload[collection],
+                    )
+                    for name, template in sorted(templates.items())
+                }
+        if override_payload:
+            scenario_overrides[scenario] = override_payload
+
+    scenarios = set(supported_scenarios or discover_supported_scenarios(templates_dir))
+    scenarios.update(scenario_dirs)
+    supported = sorted(scenarios)
+    source_files = [
+        source_file_entry(templates_dir / filename, f"base/{filename}")
+        for filename in RESEARCH_TEMPLATE_FILES.values()
+    ]
+    meta_path = templates_dir / "TIMetaTemplate.json"
+    if meta_path.is_file():
+        source_files.append(source_file_entry(meta_path, "base/TIMetaTemplate.json"))
+    localization_root = templates_dir.parent / "Localization"
+    for kind, prefix in sorted(LOCALIZATION_FILES.items()):
+        for language in languages:
+            path = localization_root / language / f"{prefix}.{language}"
+            if path.is_file():
+                source_files.append(
+                    source_file_entry(path, f"base/Localization/{language}/{prefix}.{language}")
+                )
+    for scenario, directory in sorted(scenario_dirs.items()):
+        for filename in RESEARCH_TEMPLATE_FILES.values():
+            path = directory / filename
+            if path.is_file():
+                source_files.append(source_file_entry(path, f"{scenario}/{filename}"))
+    source_files.sort(key=lambda item: item["name"])
+
+    envelope_payload = {
+        "base": base_payload,
+        "scenarioOverrides": scenario_overrides,
+    }
+    catalog = {
         "schemaVersion": SCHEMA_VERSION,
+        "generator": {"name": GENERATOR_NAME, "version": GENERATOR_VERSION},
+        "sourceFiles": source_files,
+        "supportedScenarios": supported,
+        **envelope_payload,
+        "payloadFingerprint": value_fingerprint(envelope_payload),
         "source": {
             "templateRoot": "TerraInvicta_Data/StreamingAssets/Templates",
-            "techTemplate": source_fingerprint(templates_dir / RESEARCH_TEMPLATE_FILES["tech"]),
-            "projectTemplate": source_fingerprint(templates_dir / RESEARCH_TEMPLATE_FILES["project"]),
+            "techTemplate": source_with_hash(templates_dir / RESEARCH_TEMPLATE_FILES["tech"]),
+            "projectTemplate": source_with_hash(templates_dir / RESEARCH_TEMPLATE_FILES["project"]),
             "localizationLanguages": languages,
+            "scenarioTemplateRoots": {
+                scenario: SCENARIO_DLC_TEMPLATE_HINTS.get(scenario, Path(directory.name)).as_posix()
+                for scenario, directory in sorted(scenario_dirs.items())
+                if scenario in scenario_overrides
+            },
         },
         "notes": [
             "Nodes are static template data; save-specific completion and availability should be evaluated separately.",
             "`requirements` is a boolean tree. `all` means every child is required; `any` means at least one child is required.",
             "`prerequisiteNodes`, `edges`, and `childrenByPrereq` are graph indexes derived from node requirements only.",
             "Objective, milestone, faction, and nation requirements are state gates, not research graph edges.",
+            "Runtime calculations resolve exact names through base.techs/base.projects and scenarioOverrides; disabled project rows remain available for strict dependency resolution.",
         ],
         "counts": {
             "total": len(nodes),
@@ -357,6 +739,9 @@ def build_catalog(templates_dir: Path, languages: list[str]) -> dict[str, Any]:
         "childrenByPrereq": children,
         "unknownPrerequisites": unknown_prerequisites,
     }
+    for scenario in supported:
+        select_runtime_payload(catalog, scenario)
+    return catalog
 
 
 def requirement_text(requirement: Any) -> str:
@@ -429,11 +814,17 @@ def build_markdown(catalog: dict[str, Any], language: str) -> str:
         "",
         "Important interpretation notes:",
         "",
+        f"- Schema version `{catalog['schemaVersion']}` packages strict runtime rows under `base.techs` and `base.projects` while retaining the legacy graph views below.",
+        f"- Payload fingerprint: `{catalog['payloadFingerprint']}`.",
+        "- Supported scenarios: " + ", ".join(f"`{name}`" for name in catalog["supportedScenarios"]) + ".",
+        "- Scenario overrides are sparse row maps merged only after an exact supported-scenario match; unsupported scenarios do not inherit base data.",
         "- `requirements` in the JSON is the canonical source for prerequisite logic.",
         "- `prerequisiteNodes` and `edges` are derived from research-node leaves only and intentionally omit objective, milestone, faction, and nation gates.",
         "- `altPrereq0` is represented as an OR alternative for the first `prereqs` entry.",
+        "- Disabled projects are excluded from the legacy candidate graph but retained in `base.projects` for strict save-reference diagnostics.",
         "",
         f"Node count: `{counts['total']}` total, `{counts['byKind']['tech']}` global techs, `{counts['byKind']['project']}` projects.",
+        f"Runtime row count: `{len(catalog['base']['techs'])}` techs, `{len(catalog['base']['projects'])}` projects.",
         f"Graph edge count: `{counts['edges']}`.",
         "",
     ]

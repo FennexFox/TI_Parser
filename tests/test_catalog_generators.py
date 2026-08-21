@@ -11,6 +11,7 @@ import build_module_catalog as mc
 import build_location_catalog as lc
 import build_research_catalog as rc
 import catalog_utils as cu
+import ti_parser_catalogs as runtime_catalogs
 
 
 def write_json(path: Path, value: object) -> None:
@@ -273,7 +274,14 @@ class CatalogGeneratorTests(unittest.TestCase):
                         "factionAlways": ["ResistCouncil"],
                         "orgGranted": "Org_Gamma",
                         "resourcesGranted": [{"resource": "Money", "amount": 5}],
-                    }
+                    },
+                    {
+                        "dataName": "Project_Disabled",
+                        "friendlyName": "Disabled Project",
+                        "techCategory": "Energy",
+                        "researchCost": 1,
+                        "disable": True,
+                    },
                 ],
             )
             write_text(
@@ -306,13 +314,34 @@ class CatalogGeneratorTests(unittest.TestCase):
             catalog = rc.build_catalog(templates_dir, cu.parse_languages("kor,en"))
             markdown = rc.build_markdown(catalog, "kor")
 
-            self.assertEqual(catalog["schemaVersion"], 1)
+            self.assertEqual(catalog["schemaVersion"], 2)
+            runtime_catalogs.validate_catalog_envelope(catalog)
+            self.assertEqual(catalog["generator"], {"name": "build_research_catalog", "version": "2"})
+            self.assertIn("2026Scenario", catalog["supportedScenarios"])
+            self.assertIn("2003Scenario", catalog["supportedScenarios"])
+            self.assertEqual(len(catalog["payloadFingerprint"]), 64)
+            self.assertEqual(
+                [item["name"] for item in catalog["sourceFiles"]],
+                sorted(item["name"] for item in catalog["sourceFiles"]),
+            )
+            self.assertTrue(all(len(item["sha256"]) == 64 for item in catalog["sourceFiles"]))
             self.assertEqual(catalog["source"]["techTemplate"]["file"], "TITechTemplate.json")
             self.assertEqual(catalog["source"]["projectTemplate"]["file"], "TIProjectTemplate.json")
+            self.assertEqual(len(catalog["source"]["techTemplate"]["sha256"]), 64)
             self.assertEqual(catalog["counts"]["total"], 3)
             self.assertEqual(catalog["counts"]["byKind"], {"tech": 2, "project": 1})
             self.assertEqual(catalog["counts"]["edges"], 3)
             self.assertEqual(catalog["unknownPrerequisites"], [])
+
+            runtime_project = catalog["base"]["projects"]["Project_Gamma"]
+            self.assertEqual(runtime_project["dataName"], "Project_Gamma")
+            self.assertEqual(runtime_project["techCategory"], "SpaceScience")
+            self.assertEqual(runtime_project["researchCost"], 250)
+            self.assertEqual(runtime_project["resourcesGranted"], [{"resource": "Money", "value": 5}])
+            self.assertEqual(runtime_project["AI_criticalTech"], False)
+            self.assertIn("Project_Disabled", catalog["base"]["projects"])
+            self.assertNotIn("Project_Disabled", catalog["byDataName"])
+            self.assertTrue(catalog["base"]["projects"]["Project_Disabled"]["disable"])
 
             project = catalog["nodes"][catalog["byDataName"]["Project_Gamma"]]
             self.assertEqual(project["displayName"]["kor"], "감마 프로젝트")
@@ -331,6 +360,93 @@ class CatalogGeneratorTests(unittest.TestCase):
             self.assertIn("알파 기술", markdown)
             self.assertIn("감마 프로젝트", markdown)
             self.assertIn("Node count: `3` total, `2` global techs, `1` projects.", markdown)
+            self.assertIn("Schema version `2`", markdown)
+
+            first = json.dumps(catalog, ensure_ascii=False, sort_keys=True)
+            (templates_dir / "TITechTemplate.json").touch()
+            second = json.dumps(
+                rc.build_catalog(templates_dir, cu.parse_languages("kor,en")),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            self.assertEqual(first, second)
+
+    def test_research_catalog_scenario_overlay_is_exact_and_base_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            templates_dir = root / "Templates"
+            overlay_dir = root / "Overlay"
+            write_json(
+                templates_dir / "TITechTemplate.json",
+                [
+                    {
+                        "dataName": "Tech_Alpha",
+                        "friendlyName": "Alpha",
+                        "techCategory": "Energy",
+                        "researchCost": 100,
+                    }
+                ],
+            )
+            write_json(
+                templates_dir / "TIProjectTemplate.json",
+                [
+                    {
+                        "dataName": "Project_Alpha",
+                        "friendlyName": "Project Alpha",
+                        "techCategory": "Energy",
+                        "researchCost": 200,
+                    }
+                ],
+            )
+            write_json(
+                overlay_dir / "TITechTemplate.json",
+                [
+                    {
+                        "dataName": "Tech_Alpha",
+                        "researchCost": 125,
+                    },
+                    {
+                        "dataName": "Tech_2003",
+                        "friendlyName": "Millennium Tech",
+                        "techCategory": "SocialScience",
+                        "researchCost": 300,
+                    },
+                ],
+            )
+
+            catalog = rc.build_catalog(
+                templates_dir,
+                [],
+                scenario_template_dirs={"2003Scenario": overlay_dir},
+                supported_scenarios=["ModernScenario", "2003Scenario"],
+            )
+
+            standard = rc.select_runtime_payload(catalog, "ModernScenario")
+            millennium = rc.select_runtime_payload(catalog, "2003Scenario")
+            self.assertEqual(standard["techs"]["Tech_Alpha"]["researchCost"], 100)
+            self.assertNotIn("Tech_2003", standard["techs"])
+            self.assertEqual(millennium["techs"]["Tech_Alpha"]["researchCost"], 125)
+            self.assertEqual(millennium["techs"]["Tech_2003"]["techCategory"], "SocialScience")
+            with self.assertRaisesRegex(rc.ResearchCatalogError, "Unsupported research scenario"):
+                rc.select_runtime_payload(catalog, "UnknownScenario")
+
+    def test_research_catalog_rejects_duplicate_runtime_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            templates_dir = Path(tmp) / "Templates"
+            write_json(
+                templates_dir / "TITechTemplate.json",
+                [
+                    {"dataName": "Duplicate", "techCategory": "Energy", "researchCost": 1},
+                    {"dataName": "Duplicate", "techCategory": "Energy", "researchCost": 2},
+                ],
+            )
+            write_json(
+                templates_dir / "TIProjectTemplate.json",
+                [{"dataName": "Project_One", "techCategory": "Energy", "researchCost": 1}],
+            )
+
+            with self.assertRaisesRegex(rc.ResearchCatalogError, "Duplicate research dataName"):
+                rc.build_catalog(templates_dir, [])
 
 
 if __name__ == "__main__":

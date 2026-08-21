@@ -41,12 +41,12 @@
 
 ## Progress
 
-- Not started.
+- Complete: research catalog v2 packages strict tech/project runtime rows while retaining the prerequisite graph.
 
 ## Decision log
 
-- No decisions recorded yet.
+- Disabled project rows remain in the runtime index so a save reference is distinguishable from a missing dependency.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Research UI, breakdown, plan, and project analysis load research/effect/trait/org/module/ship data from packaged catalogs.
