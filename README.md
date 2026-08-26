@@ -182,14 +182,17 @@ satisfied segment takes effect immediately before the next investment tick.
 only the selected faction's share from that target nation. Advisor placement is
 a hypothetical policy that assumes successful continuous Advise renewal.
 
-Projection mechanics are fail closed. Knowledge, Government, Unity, and Funding
-completion effects currently have authoritative coverage; any plan with a
-nonzero unsupported priority is returned as `incomplete`, with its missing
-mechanics rule IDs, and is excluded from comparison/ranking. A monthly boundary
-also makes a real-save projection incomplete when the save does not provide the
-computed regional population-growth input needed for the audited expected-value
-rule. See `docs/nation_projection_mechanics_audit.md` for the current rule index,
-coverage, and validation boundary.
+Projection mechanics are fail closed. Knowledge, Government, Welfare, Funding,
+Mission Control, and BuildArmy have authoritative paths; MC and BuildArmy
+coverage is resolved from the actual execution path. Economy remains
+unsupported, and Unity remains unsupported until its public-opinion downstream
+effect is projected. Population uses a deterministic mean-input (`meanPath`)
+trajectory: the per-update random input is replaced by zero, but the result is
+not claimed to equal the mathematical expectation across nonlinear stochastic
+trajectories. Unsupported priorities or newly activated dependencies return an
+`incomplete` plan, preserve `lastAuthoritativeState`, and are excluded from
+comparison/ranking. See `docs/nation_projection_mechanics_audit.md` for the
+current rule index, coverage resolvers, and validation boundary.
 
 The `hab-ui` command reconstructs a hab panel from raw sector/module state and
 module templates, including crew, location-adjusted solar power with active
