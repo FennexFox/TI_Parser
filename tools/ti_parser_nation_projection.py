@@ -16,6 +16,7 @@ from ti_parser_income import (
     proportional_cp_contribution,
 )
 from ti_parser_mechanics import Rules, mechanic_diagnostics, validate_rule_execution
+from ti_parser_projection_coverage import MetricDependencyTracker
 
 
 DAYS_PER_YEAR = 365.2422  # TINationState.ControlPointWeightsTotalToPriorityIP literal.
@@ -220,6 +221,7 @@ class NationProjectionState:
     world_context_provenance: str = "heldFixedWorldContext"
     population_mean_path: bool = False
     metric_provenance: dict[str, set[str]] = field(default_factory=dict)
+    metric_tracker: MetricDependencyTracker = field(default_factory=MetricDependencyTracker)
     federation_economy_bonus: float = 0.0
 
     @property
@@ -615,11 +617,22 @@ def _base_ip(state: NationProjectionState, context: ProjectionContext | None = N
     admin = adviser_attribute_bonus_from_values([advisor.administration for advisor in state.advisors])
     unrest_factor = 1.0 - max(state.unrest - 2.0, 0.0) / 10.0
     maintenance = _army_maintenance(state, context) if context is not None else state.army_maintenance
-    return max(state.economy_score * (1.0 + admin) * state.occupation_factor * unrest_factor - maintenance, 0.0)
+    value = max(state.economy_score * (1.0 + admin) * state.occupation_factor * unrest_factor - maintenance, 0.0)
+    state.metric_tracker.record(
+        "nation.baseInvestmentPointsMonth",
+        inputs=("internal.economyScore", "nation.unrest", "nation.armies", "internal.advisorAdministration"),
+        rule_ids=(Rules.NATION_IP_BASE.id, Rules.NATION_ASSET_ARMY_MAINTENANCE.id),
+    )
+    return value
 
 
 def _refresh_economy_score(state: NationProjectionState, context: ProjectionContext, used: set[str] | None = None) -> None:
     state.economy_score = (state.gdp / 1_000_000_000.0) ** _global(context, "controlPointIPScaling") * _global(context, "controlPointIPFactor")
+    state.metric_tracker.record(
+        "internal.economyScore",
+        inputs=("nation.gdp",),
+        rule_ids=(Rules.NATION_IP_ECONOMY_SCORE.id,),
+    )
     if used is not None:
         used.add(Rules.NATION_IP_ECONOMY_SCORE.id)
 
@@ -627,7 +640,9 @@ def _refresh_economy_score(state: NationProjectionState, context: ProjectionCont
 def _population_scaling(state: NationProjectionState, context: ProjectionContext) -> float:
     if state.population_millions <= 0:
         return 0.0
-    return (state.population_millions * 1_000_000.0 / 50_000_000.0) ** _global(context, "populationBasedIPEffectScaling")
+    value = (state.population_millions * 1_000_000.0 / 50_000_000.0) ** _global(context, "populationBasedIPEffectScaling")
+    state.metric_tracker.record("internal.populationScaling", inputs=("nation.population",))
+    return value
 
 
 def _next_legitimize_region(state: NationProjectionState) -> RegionProjectionState | None:
@@ -718,6 +733,10 @@ def _apply_completion(
     trace: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     scale = _population_scaling(state, context)
+    progress_metric = f"nation.priorityProgress.{priority}"
+    metric_inputs = [progress_metric]
+    metric_outputs: list[str] = []
+    child_executions: list[dict[str, Any]] = []
     execution: dict[str, Any] = {
         "ruleId": COMPLETION_RULES[priority].id,
         "effectiveCoverage": "exact",
@@ -733,12 +752,18 @@ def _apply_completion(
             change *= 12.0 / max(1.0, state.education)
         state.education = max(0.0, state.education + scale * change)
         state.cohesion = min(10.0, max(0.0, state.cohesion + scale * (0.01 if state.cohesion < 5 else -0.01 if state.cohesion > 5 else 0.0)))
+        metric_inputs.append("internal.populationScaling")
+        metric_outputs.extend(("nation.education", "nation.cohesion"))
     elif priority == "Government":
         used.add(Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE.id)
         if state.democracy >= 10.0:
             _apply_completion(state, "Knowledge", context, used, trace=trace)
+            metric_inputs.append("internal.populationScaling")
+            metric_outputs.extend(("nation.education", "nation.cohesion"))
         else:
             state.democracy = min(10.0, state.democracy + scale * _global(context, "governmentPriorityDemocracyIncrease") * state.education / 10.0)
+            metric_inputs.extend(("internal.populationScaling", "nation.education"))
+            metric_outputs.append("nation.democracy")
         if state.hostile_region_ids:
             used.add(Rules.NATION_PRIORITY_GOVERNMENT_LEGITIMIZE.id)
             state.legitimize_counter += 1.0
@@ -751,15 +776,34 @@ def _apply_completion(
                     execution["removedHostileClaimRegionId"] = target.id
                     if trace is not None:
                         trace.append({"operation": "removeHostileClaim", "regionId": target.id})
+                    metric_outputs.append("internal.hostileClaims")
             execution["dependencies"].append(Rules.NATION_PRIORITY_GOVERNMENT_LEGITIMIZE.id)
     elif priority == "Welfare":
         used.update({Rules.NATION_PRIORITY_WELFARE_COMPLETE.id, Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id})
         state.inequality = min(9.0, max(1.0, state.inequality + (_global(context, "welfarePriorityInequalityChange") + _welfare_modifier(state, context)) * scale))
+        metric_inputs.append("internal.populationScaling")
+        metric_outputs.append("nation.inequality")
         execution["dependencies"].append(Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id)
+        child_executions.append({
+            "ruleId": Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id,
+            "effectiveCoverage": "exact",
+            "provenance": "dllReimplementation",
+            "dependencies": [],
+            "inputs": list(metric_inputs),
+            "outputs": ["nation.inequality"],
+        })
         colonies = [region for region in state.regions.values() if region.colony is True]
         if colonies:
             used.add(Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id)
             execution["dependencies"].append(Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id)
+            child_executions.append({
+                "ruleId": Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id,
+                "effectiveCoverage": "exact",
+                "provenance": "dllReimplementation",
+                "dependencies": [],
+                "inputs": ["region.colony", "region.welfareColonyCounter"],
+                "outputs": ["region.welfareColonyCounter"],
+            })
             if any(region.welfare_colony_counter is None for region in colonies):
                 raise ProjectionRuntimeStop(
                     "Welfare colony trigger requires the saved decolonization counter",
@@ -794,6 +838,26 @@ def _apply_completion(
                 target.permanent_colony = True
                 target.welfare_colony_counter = 0
                 execution["decolonizedRegionId"] = target.id
+                colony_metric = f"region.{target.id}.colony"
+                metric_outputs.append(colony_metric)
+                child_executions.extend((
+                    {
+                        "ruleId": Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION.id,
+                        "effectiveCoverage": "exact",
+                        "provenance": "dllReimplementation",
+                        "dependencies": [Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id],
+                        "inputs": ["region.welfareColonyCounter"],
+                        "outputs": [colony_metric],
+                    },
+                    {
+                        "ruleId": Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM.id,
+                        "effectiveCoverage": "exact",
+                        "provenance": "dllReimplementation",
+                        "dependencies": [Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION.id],
+                        "inputs": [colony_metric],
+                        "outputs": ["internal.economyScore", "nation.cohesionRest"],
+                    },
+                ))
             else:
                 target.welfare_colony_counter = next_counter
             if trace is not None:
@@ -807,6 +871,7 @@ def _apply_completion(
     elif priority == "Funding":
         used.add(Rules.NATION_PRIORITY_FUNDING_COMPLETE.id)
         state.funding_year += _global(context, "fundingPriorityBaseIncomeIncrease") + state.num_control_points
+        metric_outputs.append("nation.funding")
     elif priority == "MissionControl":
         used.update({Rules.NATION_PRIORITY_MISSION_CONTROL_COMPLETE.id, Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id})
         execution["ruleId"] = Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id
@@ -826,11 +891,13 @@ def _apply_completion(
             target.mission_control += 1
             state.mission_control += 1
             execution.update({"candidateCount": 1, "regionId": target.id})
+            metric_outputs.append("nation.missionControl")
         elif _equivalent_mc_candidates(candidates):
             target = min(candidates, key=lambda region: region.region_order)
             target.mission_control += 1
             state.mission_control += 1
             execution.update({"candidateCount": len(candidates), "regionId": target.id, "effectiveCoverage": "aggregateOnly"})
+            metric_outputs.append("nation.missionControl")
         else:
             raise ProjectionRuntimeStop(
                 "Mission Control has multiple non-equivalent stochastic placement candidates",
@@ -866,6 +933,7 @@ def _apply_completion(
             state.army_count += 1
             used.add(Rules.NATION_ASSET_ARMY_MAINTENANCE.id)
             execution.update({"homeRegionId": target.id, "controlPointPosition": position})
+            metric_outputs.append("nation.armies")
             if trace is not None:
                 trace.append({"operation": "createArmy", "homeRegionId": target.id, "controlPointPosition": position})
     else:
@@ -873,6 +941,11 @@ def _apply_completion(
             f"Priority completion is not implemented: {priority}",
             rule_ids=(COMPLETION_RULES[priority].id,),
         )
+    execution["inputs"] = sorted(set(metric_inputs))
+    execution["outputs"] = sorted(set(metric_outputs))
+    execution["directDependencies"] = list(execution["dependencies"])
+    if child_executions:
+        execution["childExecutions"] = child_executions
     return execution
 
 
@@ -938,6 +1011,94 @@ METRIC_NAMES = frozenset({
     "factionContribution.research", "factionContribution.funding", "factionContribution.boost", "factionContribution.missionControl",
 })
 
+PUBLIC_NATION_METRICS = frozenset({
+    "nation.gdp", "nation.perCapitaGdp", "nation.population", "nation.inequality",
+    "nation.education", "nation.democracy", "nation.cohesion", "nation.cohesionRest",
+    "nation.unrest", "nation.unrestRest", "nation.sustainability", "nation.militaryTech",
+    "nation.funding", "nation.boost", "nation.missionControl", "nation.armies",
+    "nation.navies", "nation.nuclearWeapons", "nation.spaceDefenses", "nation.stoFighters",
+    "nation.baseInvestmentPointsMonth", "nation.research",
+})
+PUBLIC_FACTION_METRICS = frozenset({
+    "factionContribution.research", "factionContribution.funding",
+    "factionContribution.boost", "factionContribution.missionControl",
+})
+
+
+def _public_metric_names(state: NationProjectionState) -> set[str]:
+    return set(PUBLIC_NATION_METRICS) | set(PUBLIC_FACTION_METRICS) | {
+        f"nation.priorityProgress.{priority}" for priority in state.progress
+    }
+
+
+def _seed_metric_evidence(state: NationProjectionState, context: ProjectionContext) -> None:
+    """Initialize a fresh per-plan graph from the authoritative save snapshot."""
+
+    tracker = state.metric_tracker
+    for metric in _public_metric_names(state):
+        tracker.ensure(metric)
+    for region in state.regions.values():
+        tracker.ensure(f"region.{region.id}.population")
+        tracker.ensure(f"region.{region.id}.gdp")
+        tracker.ensure(f"region.{region.id}.boost")
+        tracker.ensure(f"region.{region.id}.missionControl")
+        tracker.ensure(f"region.{region.id}.colony")
+    tracker.ensure("internal.economyScore", rule_ids=(Rules.NATION_IP_ECONOMY_SCORE.id,))
+    tracker.ensure("internal.populationScaling")
+    tracker.ensure("internal.hostileClaims")
+    tracker.ensure("internal.advisorAdministration", provenance=("hypotheticalPolicy",) if state.advisors else ())
+    tracker.ensure("internal.advisorScience", provenance=("hypotheticalPolicy",) if state.advisors else ())
+    _refresh_public_metric_evidence(state, context)
+
+
+def _refresh_advisor_evidence(state: NationProjectionState) -> None:
+    provenance = ("hypotheticalPolicy",) if state.advisors else ()
+    state.metric_tracker.record("internal.advisorAdministration", provenance=provenance)
+    state.metric_tracker.record("internal.advisorScience", provenance=provenance)
+
+
+def _refresh_public_metric_evidence(state: NationProjectionState, context: ProjectionContext) -> None:
+    """Record evidence for live getters without mutating their numeric values."""
+
+    tracker = state.metric_tracker
+    tracker.record(
+        "nation.perCapitaGdp",
+        inputs=("nation.gdp", "nation.population"),
+        rule_ids=(Rules.NATION_IP_ECONOMY_SCORE.id,),
+    )
+    tracker.record(
+        "nation.baseInvestmentPointsMonth",
+        inputs=("internal.economyScore", "nation.unrest", "nation.armies", "internal.advisorAdministration"),
+        rule_ids=(Rules.NATION_IP_BASE.id, Rules.NATION_ASSET_ARMY_MAINTENANCE.id),
+    )
+    tracker.record(
+        "nation.research",
+        inputs=(
+            "nation.population", "nation.gdp", "nation.education", "nation.democracy",
+            "nation.cohesion", "nation.unrest", "internal.advisorScience",
+        ),
+    )
+    tracker.record(
+        "factionContribution.research",
+        inputs=("nation.research",),
+        rule_ids=(Rules.NATION_FACTION_CONTRIBUTION.id,),
+    )
+    tracker.record(
+        "factionContribution.funding",
+        inputs=("nation.funding",),
+        rule_ids=(Rules.NATION_FACTION_CONTRIBUTION.id,),
+    )
+    tracker.record(
+        "factionContribution.boost",
+        inputs=("nation.boost",),
+        rule_ids=(Rules.NATION_FACTION_CONTRIBUTION.id,),
+    )
+    tracker.record(
+        "factionContribution.missionControl",
+        inputs=("nation.missionControl",),
+        rule_ids=(Rules.NATION_FACTION_CONTRIBUTION.id,),
+    )
+
 
 def _metrics(state: NationProjectionState, context: ProjectionContext) -> dict[str, float]:
     nation = _nation_snapshot(state, context)
@@ -947,6 +1108,7 @@ def _metrics(state: NationProjectionState, context: ProjectionContext) -> dict[s
         democracy=state.democracy, cohesion=state.cohesion, unrest=state.unrest,
         num_control_points=state.num_control_points, advisor_sciences=[a.science for a in state.advisors],
     )
+    _refresh_public_metric_evidence(state, context)
     return {
         "nation.gdp": state.gdp, "nation.population": state.population_millions,
         "nation.inequality": state.inequality, "nation.education": state.education,
@@ -1003,6 +1165,7 @@ def _run_investment_transaction(
     trace: list[dict[str, Any]] = []
     rule_executions: list[dict[str, Any]] = []
     allocation = {name: 0.0 for name in context.priorities}
+    _refresh_advisor_evidence(state)
     _refresh_economy_score(state, context, used)
     base_ip = _base_ip(state, context)
     cp_ip = base_ip / state.num_control_points if state.num_control_points else 0.0
@@ -1028,6 +1191,36 @@ def _run_investment_transaction(
             allocation[priority] += cp_ip * pip / total * (1.0 + bonus) * 12.0 / DAYS_PER_YEAR
     for priority, amount in allocation.items():
         state.progress[priority] = max(0.0, state.progress.get(priority, 0.0) + amount)
+        allocation_metric = f"internal.allocation.{priority}"
+        progress_metric = f"nation.priorityProgress.{priority}"
+        allocation_inputs = ["nation.baseInvestmentPointsMonth"]
+        if priority == "Government":
+            allocation_inputs.extend(("nation.democracy", "internal.hostileClaims"))
+        elif priority == "Funding":
+            allocation_inputs.extend(("nation.funding", "nation.gdp"))
+        elif priority == "MissionControl":
+            allocation_inputs.extend(("nation.missionControl", "nation.gdp", "nation.education"))
+        elif priority == "Military_BuildArmy":
+            allocation_inputs.extend(("nation.population", "nation.armies"))
+        state.metric_tracker.record(
+            allocation_metric,
+            inputs=allocation_inputs,
+            rule_ids=(Rules.NATION_IP_CONTROL_POINT_ALLOCATION.id, Rules.NATION_IP_PRIORITY_BONUS.id),
+        )
+        state.metric_tracker.record(
+            progress_metric,
+            inputs=(progress_metric, allocation_metric),
+            rule_ids=(Rules.NATION_IP_CONTROL_POINT_ALLOCATION.id,),
+        )
+    nonzero_allocations = [f"internal.allocation.{name}" for name, amount in allocation.items() if amount]
+    rule_executions.append({
+        "ruleId": Rules.NATION_IP_CONTROL_POINT_ALLOCATION.id,
+        "effectiveCoverage": "exact",
+        "provenance": "dllReimplementation",
+        "dependencies": [Rules.NATION_IP_BASE.id, Rules.NATION_IP_PRIORITY_BONUS.id],
+        "inputs": ["nation.baseInvestmentPointsMonth"],
+        "outputs": nonzero_allocations,
+    })
     completions: list[dict[str, Any]] = []
     ordered = sorted(context.priorities, key=lambda name: int(context.priorities[name]["enumValue"]))
     for priority in ordered:
@@ -1056,6 +1249,38 @@ def _run_investment_transaction(
                 coverage_resolver_id=execution.get("coverageResolverId"),
             )
             state.progress[priority] -= cost
+            progress_metric = f"nation.priorityProgress.{priority}"
+            completion_metric = f"internal.completion.{priority}"
+            state.metric_tracker.record(
+                completion_metric,
+                inputs=(progress_metric,),
+                rule_ids=(Rules.NATION_PRIORITY_COMPLETION_ORDER.id, str(execution["ruleId"])),
+            )
+            completion_inputs = [completion_metric]
+            if priority in {"Knowledge", "Government", "Welfare"}:
+                completion_inputs.append("internal.populationScaling")
+            for output_metric in execution.get("outputs", []):
+                output_coverage = "exact"
+                if priority == "MissionControl" and output_metric == "nation.missionControl":
+                    # Placement can be aggregate-only while the nation-level +1 is exact.
+                    output_coverage = "exact"
+                state.metric_tracker.record(
+                    str(output_metric),
+                    inputs=tuple([str(output_metric), *completion_inputs]),
+                    rule_ids=(str(execution["ruleId"]), *tuple(str(value) for value in execution.get("dependencies", []))),
+                    coverage=output_coverage,
+                )
+            state.metric_tracker.record(
+                progress_metric,
+                inputs=(progress_metric, completion_metric),
+                rule_ids=(Rules.NATION_PRIORITY_COMPLETION_ORDER.id,),
+            )
+            output_evidence = [state.metric_tracker.evidence.get(str(metric)) for metric in execution.get("outputs", [])]
+            execution["inputProvenance"] = sorted({
+                value
+                for evidence in output_evidence if evidence is not None
+                for value in evidence.provenance
+            })
             trace.append({"operation": "consumeProgress", "priority": priority, "cost": cost, "remainingProgress": state.progress[priority]})
             event = {
                 "day": day,
@@ -1063,10 +1288,12 @@ def _run_investment_transaction(
                 "priority": priority,
                 "cost": cost,
                 "remainingProgress": state.progress[priority],
-                **{key: value for key, value in execution.items() if key not in {"ruleId", "dependencies", "provenance"}},
+                **{key: value for key, value in execution.items() if key not in {"ruleId", "dependencies", "provenance", "childExecutions"}},
             }
             completions.append(event)
+            child_executions = execution.pop("childExecutions", [])
             rule_executions.append(execution)
+            rule_executions.extend(child_executions)
     for cp in sorted(state.control_points.values(), key=lambda value: value.position):
         before = cp.pips.get("Economy", 0)
         _record_and_fix_control_point(state, cp, context, trace=trace)
@@ -1187,6 +1414,16 @@ def _run_monthly_transaction(
         state.unrest += min(limit, state.unrest_rest - state.unrest)
     elif state.unrest > state.unrest_rest:
         state.unrest -= min(_global(context, "maxMonthlyUnrestMovement_normal"), state.unrest - state.unrest_rest)
+    state.metric_tracker.record(
+        "nation.cohesion",
+        inputs=("nation.cohesion", "nation.cohesionRest", "nation.inequality"),
+        rule_ids=(Rules.NATION_PERIODIC_COHESION.id,),
+    )
+    state.metric_tracker.record(
+        "nation.unrest",
+        inputs=("nation.unrest", "nation.unrestRest", "nation.cohesion"),
+        rule_ids=(Rules.NATION_PERIODIC_UNREST.id,),
+    )
     population_rows = []
     for region in sorted(state.regions.values(), key=lambda value: value.region_order):
         annual_growth = _annual_population_growth(state, region, context)
@@ -1200,8 +1437,27 @@ def _run_monthly_transaction(
         gdp_delta = regional_pcgdp * delta * 1_000_000.0
         state.gdp += gdp_delta
         region.gdp = regional_gdp + gdp_delta
+        population_metric = f"region.{region.id}.population"
+        gdp_metric = f"region.{region.id}.gdp"
+        state.metric_tracker.record(
+            population_metric,
+            inputs=(population_metric, "nation.education", "nation.cohesion", "nation.perCapitaGdp"),
+            rule_ids=(Rules.NATION_POPULATION_ANNUAL_GROWTH.id, Rules.NATION_POPULATION_MONTHLY_GROWTH.id),
+            coverage="expected",
+            provenance=("meanPath", state.world_context_provenance),
+        )
+        state.metric_tracker.record(
+            gdp_metric,
+            inputs=(gdp_metric, population_metric, "nation.gdp"),
+            rule_ids=(Rules.NATION_POPULATION_MONTHLY_GROWTH.id,),
+        )
         if delta < 0:
             state.education += max(-0.005, min(0.0, delta / 100.0))
+            state.metric_tracker.record(
+                "nation.education",
+                inputs=("nation.education", population_metric),
+                rule_ids=(Rules.NATION_POPULATION_MONTHLY_GROWTH.id,),
+            )
         _refresh_economy_score(state, context, used)
         population_rows.append({
             "regionId": region.id,
@@ -1212,11 +1468,32 @@ def _run_monthly_transaction(
             "gdpDelta": gdp_delta,
         })
     state.population_mean_path = True
-    for metric in ("nation.population", "nation.gdp", "nation.research", "nation.cohesionRest", "factionContribution.research"):
-        state.metric_provenance.setdefault(metric, set()).update({"meanPath", state.world_context_provenance})
+    region_population_metrics = tuple(f"region.{region.id}.population" for region in state.regions.values())
+    region_gdp_metrics = tuple(f"region.{region.id}.gdp" for region in state.regions.values())
+    state.metric_tracker.record(
+        "nation.population",
+        inputs=region_population_metrics,
+        rule_ids=(Rules.NATION_PERIODIC_POPULATION.id, Rules.NATION_POPULATION_MONTHLY_GROWTH.id),
+    )
+    state.metric_tracker.record(
+        "nation.gdp",
+        inputs=region_gdp_metrics,
+        rule_ids=(Rules.NATION_POPULATION_MONTHLY_GROWTH.id,),
+    )
+    state.metric_tracker.record(
+        "nation.perCapitaGdp",
+        inputs=("nation.gdp", "nation.population"),
+        rule_ids=(Rules.NATION_IP_ECONOMY_SCORE.id,),
+    )
+    _refresh_economy_score(state, context, used)
     if quarterly:
         state.current_quarter += 1
         state.pcgdp_tracker[state.current_quarter] = state.gdp / (state.population_millions * 1_000_000.0) if state.population_millions else 0.0
+        state.metric_tracker.record(
+            "internal.pcgdpTracker",
+            inputs=("nation.gdp", "nation.population"),
+            rule_ids=(Rules.NATION_PERIODIC_POPULATION.id,),
+        )
     return ({
         "kind": "monthly",
         "day": day,
@@ -1235,6 +1512,8 @@ def _run_monthly_transaction(
                 "coverageResolverId": Rules.NATION_PERIODIC_CONTROL_POINTS.coverage_resolver_id,
                 "provenance": "dllReimplementation",
                 "dependencies": [],
+                "inputs": ["nation.gdp"],
+                "outputs": ["internal.controlPointCount"],
             },
             {
                 "ruleId": Rules.NATION_POPULATION_MONTHLY_GROWTH.id,
@@ -1242,6 +1521,8 @@ def _run_monthly_transaction(
                 "provenance": "meanPath",
                 "expectationGuarantee": False,
                 "dependencies": [Rules.NATION_POPULATION_ANNUAL_GROWTH.id],
+                "inputs": ["nation.education", "nation.cohesion", "nation.perCapitaGdp"],
+                "outputs": ["nation.population", "nation.gdp", "nation.perCapitaGdp"],
             }
         ],
     }, True)
@@ -1323,6 +1604,22 @@ def _refresh_rest_caches(
     hostile_unrest = hostile_total * (1.0 - state.democracy / 10.0)
     raw_unrest = float(fixed_unrest) - state.cohesion - pcgdp / float(unrest_divisor) + _own_army_unrest_impact(state, context) + hostile_unrest
     state.unrest_rest = min(10.0, max(0.0, raw_unrest))
+    state.metric_tracker.record(
+        "nation.cohesionRest",
+        inputs=(
+            "nation.inequality", "nation.education", "nation.population", "nation.perCapitaGdp",
+            "nation.democracy", "nation.unrest", "internal.hostileClaims", "internal.pcgdpTracker",
+        ),
+        rule_ids=(Rules.NATION_PERIODIC_DERIVED_CACHE.id, Rules.NATION_PERIODIC_COHESION.id),
+    )
+    state.metric_tracker.record(
+        "nation.unrestRest",
+        inputs=(
+            "nation.cohesion", "nation.perCapitaGdp", "nation.democracy", "nation.armies",
+            "internal.hostileClaims",
+        ),
+        rule_ids=(Rules.NATION_PERIODIC_DERIVED_CACHE.id, Rules.NATION_PERIODIC_UNREST.id),
+    )
     return {
         "kind": "derivedCache",
         "day": day,
@@ -1331,7 +1628,17 @@ def _refresh_rest_caches(
         "unrestRest": state.unrest_rest,
         "mechanicRules": sorted(used),
         "ruleExecutions": [
-            {"ruleId": Rules.NATION_PERIODIC_DERIVED_CACHE.id, "effectiveCoverage": "exact", "provenance": "dllReimplementation", "dependencies": []}
+            {
+                "ruleId": Rules.NATION_PERIODIC_DERIVED_CACHE.id,
+                "effectiveCoverage": "exact",
+                "provenance": "dllReimplementation",
+                "dependencies": [Rules.NATION_PERIODIC_COHESION.id, Rules.NATION_PERIODIC_UNREST.id],
+                "inputs": [
+                    "nation.inequality", "nation.education", "nation.population", "nation.perCapitaGdp",
+                    "nation.democracy", "nation.cohesion", "nation.unrest", "nation.armies",
+                ],
+                "outputs": ["nation.cohesionRest", "nation.unrestRest"],
+            }
         ],
     }
 
@@ -1447,38 +1754,11 @@ def _metric_coverage(
     blockers: Iterable[str] = (),
     affected_metrics: Iterable[str] = (),
 ) -> dict[str, dict[str, Any]]:
-    affected = set(affected_metrics)
-    blocked = list(blockers)
-    result: dict[str, dict[str, Any]] = {}
-    rule_map = {
-        "nation.population": [Rules.NATION_POPULATION_ANNUAL_GROWTH.id, Rules.NATION_POPULATION_MONTHLY_GROWTH.id],
-        "nation.gdp": [Rules.NATION_POPULATION_MONTHLY_GROWTH.id, Rules.NATION_IP_ECONOMY_SCORE.id],
-        "nation.research": [Rules.NATION_POPULATION_MONTHLY_GROWTH.id],
-        "nation.cohesionRest": [Rules.NATION_PERIODIC_DERIVED_CACHE.id],
-        "factionContribution.research": [Rules.NATION_FACTION_CONTRIBUTION.id, Rules.NATION_POPULATION_MONTHLY_GROWTH.id],
-        "factionContribution.funding": [Rules.NATION_FACTION_CONTRIBUTION.id],
-        "factionContribution.boost": [Rules.NATION_FACTION_CONTRIBUTION.id],
-        "factionContribution.missionControl": [Rules.NATION_FACTION_CONTRIBUTION.id, Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id],
-        "nation.missionControl": [Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id],
-    }
-    for metric in sorted(METRIC_NAMES):
-        provenance_values = set(state.metric_provenance.get(metric, set()))
-        if state.advisors:
-            provenance_values.add("hypotheticalPolicy")
-        provenance = sorted(provenance_values)
-        is_blocked = metric in affected or "nation.*" in affected and metric.startswith("nation.") or "factionContribution.*" in affected and metric.startswith("factionContribution.")
-        result[metric] = {
-            "coverage": "unsupported" if is_blocked else "expected" if "meanPath" in provenance else "exact",
-            "provenance": provenance,
-            "ruleIds": rule_map.get(metric, []),
-            "blockers": blocked if is_blocked else [],
-        }
-        if "meanPath" in provenance:
-            result[metric].update({
-                "stochasticTreatment": "deterministicMeanInput",
-                "expectationGuarantee": False,
-            })
-    return result
+    return state.metric_tracker.public(
+        _public_metric_names(state),
+        blockers=blockers,
+        affected=affected_metrics,
+    )
 
 
 def run_projection(
@@ -1492,9 +1772,12 @@ def run_projection(
     details: bool = False,
 ) -> dict[str, Any]:
     state = copy.deepcopy(initial_state)
+    state.metric_tracker = MetricDependencyTracker()
+    _seed_metric_evidence(state, context)
     coverage = priority_coverage(context.priorities)
     unsupported, preflight = _projection_preflight(state, plan, context, coverage)
     _apply_segment(state, plan.segments[0])
+    _refresh_advisor_evidence(state)
     initial_metrics = _metrics(state, context)
     if unsupported:
         missing_rules = sorted({COMPLETION_RULES[name].id for name in unsupported if name in COMPLETION_RULES})
@@ -1525,6 +1808,7 @@ def run_projection(
         prior = segment_index
         segment_index += 1
         _apply_segment(state, plan.segments[segment_index])
+        _refresh_advisor_evidence(state)
         transitions.append({"day": 0, "from": prior, "to": segment_index, "reason": "satisfiedAtStart"})
         advisor_transitions.append({"day": 0, "advisors": [item.output() for item in state.advisors]})
     transactions: list[dict[str, Any]] = []
@@ -1571,6 +1855,7 @@ def run_projection(
                 segment_index = pending_segment
                 pending_segment = None
                 _apply_segment(state, plan.segments[segment_index])
+                _refresh_advisor_evidence(state)
                 if state.advisors != before:
                     advisor_transitions.append({"day": investment_day, "at": moment.isoformat(), "advisors": [item.output() for item in state.advisors]})
         working = copy.deepcopy(state)
@@ -1616,6 +1901,7 @@ def run_projection(
             moment,
         )
         advisor_used = advisor_used or bool(state.advisors)
+    _refresh_public_metric_evidence(state, context)
     final_nation = _nation_snapshot(state, context)
     final_contribution = _contribution(state, context, used)
     status = "incomplete" if runtime_stop is not None else "complete"

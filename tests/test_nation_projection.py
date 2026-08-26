@@ -262,6 +262,72 @@ class NationProjectionTransactionTests(unittest.TestCase):
         self.assertIn("meanPath", result["metricCoverage"]["nation.population"]["provenance"])
         self.assertFalse(result["metricCoverage"]["nation.population"]["expectationGuarantee"])
 
+    def test_mean_path_propagates_through_executed_dependencies_only(self):
+        initial = state(
+            pips={"Knowledge": 1, "Government": 1, "Welfare": 1},
+            at=datetime(2030, 1, 2),
+            annual_growth=0.12,
+        )
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=40,
+        )
+        expected_metrics = {
+            "nation.population", "nation.gdp", "nation.perCapitaGdp", "nation.education",
+            "nation.democracy", "nation.inequality", "nation.cohesion", "nation.cohesionRest",
+            "nation.unrestRest", "nation.baseInvestmentPointsMonth", "nation.research",
+            "nation.priorityProgress.Knowledge", "factionContribution.research",
+        }
+        for metric in expected_metrics:
+            with self.subTest(metric=metric):
+                evidence = result["metricCoverage"][metric]
+                self.assertEqual(evidence["coverage"], "expected")
+                self.assertIn("meanPath", evidence["provenance"])
+                self.assertFalse(evidence["expectationGuarantee"])
+        self.assertEqual(result["metricCoverage"]["nation.funding"]["coverage"], "exact")
+        self.assertEqual(result["metricCoverage"]["nation.sustainability"]["coverage"], "exact")
+
+    def test_rule_executions_expose_actual_inputs_outputs_and_welfare_children(self):
+        initial = state(pips={"Welfare": 3}, progress={"Welfare": 0.99})
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+        )
+        welfare = [row for row in result["ruleExecutions"] if row["ruleId"].startswith("nation.priority.welfare")]
+        self.assertEqual(
+            [row["ruleId"] for row in welfare],
+            [Rules.NATION_PRIORITY_WELFARE_COMPLETE.id, Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id],
+        )
+        self.assertIn("nation.priorityProgress.Welfare", welfare[0]["inputs"])
+        self.assertEqual(welfare[0]["outputs"], ["nation.inequality"])
+        self.assertNotIn(Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION.id, result["mechanicRuleIds"])
+
+    def test_mc_rule_can_be_aggregate_only_while_nation_total_is_exact(self):
+        initial = state(pips={"MissionControl": 3}, progress={"MissionControl": 0.99})
+        second = copy.deepcopy(initial.regions[1])
+        second.id = 2
+        second.region_order = 1
+        initial.regions[1].mission_control = 0
+        second.mission_control = 0
+        initial.regions[2] = second
+        initial.mission_control = 0
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+        )
+        execution = next(
+            row for row in result["ruleExecutions"]
+            if row["ruleId"] == Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id
+        )
+        self.assertEqual(execution["effectiveCoverage"], "aggregateOnly")
+        self.assertEqual(result["metricCoverage"]["nation.missionControl"]["coverage"], "exact")
+
     @mechanic_rule_test(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
     def test_invalid_only_control_point_persistently_falls_back_to_raw_economy(self):
         initial = state(pips={"Government": 3})

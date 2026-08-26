@@ -55,7 +55,7 @@
 
 ## Progress
 
-- Pending.
+- Completed: execution-derived metric evidence, transitive mean-path propagation, public metric coverage expansion, execution I/O, and Welfare child executions are implemented and verified.
 
 ## Decision log
 
@@ -63,4 +63,8 @@
 
 ## Outcomes / Retrospective
 
-- Pending.
+- Added `MetricDependencyTracker` with transaction-safe deep copies, direct `dependsOn`, transitive rule/provenance/blocker evidence, deterministic serialization, and descendant queries.
+- Replaced `_metric_coverage()`'s static rule map with tracker evidence for per-capita GDP, rest caches, base IP, assets, every priority progress value, research, and faction contribution.
+- Synthetic mixed Knowledge/Government/Welfare coverage proves population mean input reaches education, cohesion, democracy, inequality, rest caches, base IP, progress, research, and faction research while Funding and sustainability remain exact.
+- Mission Control's equivalent multi-candidate execution remains `aggregateOnly`, while placement-independent nation MC capacity remains exact.
+- Validation: 35 focused projection/coverage tests, 4 CLI/package-only tests, 228 full tests with 6 skips, and 5 opt-in local-save observational smoke tests passed.
