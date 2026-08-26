@@ -15,8 +15,8 @@
 - Apply plan changes immediately before a verified investment transaction and evaluate segment/goal conditions only after a complete transaction.
 - Keep `nation.*` state separate from target-nation `factionContribution.*`; whole-faction future totals remain out of scope.
 - Treat advisor placement as `hypotheticalPolicy`, with successful continuous Advise renewal assumed.
-- Replace the approximate date loop with verified DLL event boundaries and execute every transaction on a clone. A newly discovered unsupported dependency discards the whole transaction and preserves `lastAuthoritativeState`.
-- Derive coverage from the rules and branches actually executed. Conditional coverage resolvers must close every branch and record effective coverage and provenance.
+- Replace the approximate date loop with verified DLL event boundaries and execute mutations on cloned state. Preserve verified authoritative prefixes while rolling back only the incomplete handler or phase that reaches an unsupported dependency.
+- Derive metric coverage and provenance from the dependencies actually read and written. Conditional rule coverage remains distinct from the coverage of each affected output metric.
 - Treat Population as a deterministic mean-input trajectory: replace each stochastic input with its mean, propagate `meanPath`, and never claim that the nonlinear trajectory equals the mathematical expectation of all stochastic paths.
 
 ## Phase Order
@@ -29,6 +29,10 @@
 6. [DLL-boundary runtime engine and priority mechanics](06-runtime-engine.md)
 7. [Runtime diagnostics and CLI contract hardening](07-cli-diagnostics.md)
 8. [Independent fixtures, real-save validation, and Graphify refresh](08-real-save-verification.md)
+9. [Execution-based metric dependency graph](09-metric-dependency-graph.md)
+10. [Authoritative-prefix fail-closed diagnostics](10-authoritative-prefix-diagnostics.md)
+11. [Shared priority validity and independent verification](11-validity-and-verification.md)
+12. [Real-save matrix, documentation, and Graphify refresh](12-real-save-graphify.md)
 
 ## Phase Dependencies
 
@@ -40,6 +44,10 @@
 - Phase 6 depends on the verified rule metadata and packaged data produced in phase 5.
 - Phase 7 depends on phase 6 exposing rule executions, runtime stops, and authoritative state boundaries.
 - Phase 8 depends on phases 5 through 7 and completes full-suite, opt-in local-save, package-only, and Graphify verification.
+- Phase 9 supersedes the static metric coverage/provenance assembly retained after phase 8.
+- Phase 10 depends on phase 9 so runtime-stop descendants and affected metrics come from the same dependency tracker.
+- Phase 11 depends on phases 9 and 10 and makes validity and registry evidence shared contracts.
+- Phase 12 depends on phases 9 through 11 and is the final observational real-save, documentation, and graph verification phase.
 
 ## Source Of Truth Decisions
 
@@ -52,6 +60,8 @@
 - The primary opt-in smoke input is the uncommitted local `ExitSave.gz` Broken Earth CAL save selected through `TI_PARSER_REAL_SAVE`; its path, object IDs, and current values are never encoded into production code or committed fixtures.
 - `coverage: "expected"` is the compatibility coverage label for Population-derived results, while `provenance: "meanPath"`, `stochasticTreatment: "deterministicMeanInput"`, and `expectationGuarantee: false` state the stricter semantics.
 - Welfare decolonization is a conditional dependency reached only by the completion that crosses its threshold. Mission Control and BuildArmy coverage is resolved per execution instance, not fixed to the lowest possible mechanic-wide coverage.
+- Phases 9 through 12 supersede phase 8 where it describes whole-transaction rollback, static metric coverage, generic registry contract evidence, or a fixed real-save placement. A verified priority completion, its cost consumption, and required CP fallback/cache repair form an authoritative prefix; a newly activated unsupported priority is gated before its next allocation.
+- Real-save placement assertions are computed from the audited deterministic selection order and current extracted state. Tijuana, a particular CP position, object count, or save value is not a regression constant.
 
 ## Global Validation Expectations
 
