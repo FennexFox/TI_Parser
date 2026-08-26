@@ -35,6 +35,28 @@ SUPPORTED_COMPLETIONS = {
     "Unity": ("aggregateOnly", Rules.NATION_PRIORITY_UNITY_COMPLETE),
     "Funding": ("exact", Rules.NATION_PRIORITY_FUNDING_COMPLETE),
 }
+COMPLETION_RULES = {
+    "Economy": Rules.NATION_PRIORITY_ECONOMY_COMPLETE,
+    "Welfare": Rules.NATION_PRIORITY_WELFARE_COMPLETE,
+    "Environment": Rules.NATION_PRIORITY_ENVIRONMENT_COMPLETE,
+    "Knowledge": Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE,
+    "Government": Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE,
+    "Unity": Rules.NATION_PRIORITY_UNITY_COMPLETE,
+    "Oppression": Rules.NATION_PRIORITY_OPPRESSION_COMPLETE,
+    "Funding": Rules.NATION_PRIORITY_FUNDING_COMPLETE,
+    "Spoils": Rules.NATION_PRIORITY_SPOILS_COMPLETE,
+    "Civilian_InitiateSpaceflightProgram": Rules.NATION_PRIORITY_SPACEFLIGHT_COMPLETE,
+    "LaunchFacilities": Rules.NATION_PRIORITY_BOOST_COMPLETE,
+    "MissionControl": Rules.NATION_PRIORITY_MISSION_CONTROL_COMPLETE,
+    "Military_FoundMilitary": Rules.NATION_PRIORITY_FOUND_MILITARY_COMPLETE,
+    "Military": Rules.NATION_PRIORITY_MILITARY_COMPLETE,
+    "Military_BuildArmy": Rules.NATION_PRIORITY_BUILD_ARMY_COMPLETE,
+    "Military_BuildNavy": Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE,
+    "Military_InitiateNuclearProgram": Rules.NATION_PRIORITY_INITIATE_NUCLEAR_COMPLETE,
+    "Military_BuildNuclearWeapons": Rules.NATION_PRIORITY_BUILD_NUCLEAR_COMPLETE,
+    "Military_BuildSpaceDefenses": Rules.NATION_PRIORITY_SPACE_DEFENSE_COMPLETE,
+    "Military_BuildSTOSquadron": Rules.NATION_PRIORITY_STO_COMPLETE,
+}
 OPS: dict[str, Callable[[float, float], bool]] = {
     ">=": operator.ge,
     "<=": operator.le,
@@ -329,7 +351,8 @@ def _global(context: ProjectionContext, name: str) -> float:
 def priority_coverage(priorities: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     result = {}
     for name in priorities:
-        completion, rule = SUPPORTED_COMPLETIONS.get(name, ("unsupported", None))
+        completion, supported_rule = SUPPORTED_COMPLETIONS.get(name, ("unsupported", None))
+        rule = COMPLETION_RULES.get(name, supported_rule)
         overall = completion
         result[name] = {
             "allocation": "exact",
@@ -597,10 +620,12 @@ def run_projection(
     unsupported = _unsupported_priorities(state, plan, coverage)
     initial_metrics = _metrics(state, context)
     if unsupported:
+        missing_rules = sorted({COMPLETION_RULES[name].id for name in unsupported if name in COMPLETION_RULES})
         return {
             "name": plan.name,
             "status": "incomplete",
             "unsupportedPriorities": unsupported,
+            "missingMechanicRules": missing_rules,
             "currentAllocation": {str(cp.position): dict(cp.pips) for cp in state.control_points.values()},
             "authoritativeFinalState": None,
             "limitations": ["Nonzero pips reference priority completion/downstream mechanics that are not audited."],
@@ -626,11 +651,39 @@ def run_projection(
     incomplete_reasons: list[str] = []
     advisor_used = bool(state.advisors)
     current_date = state.at
+    pending_segment: int | None = None
+
+    def evaluate_boundary(day: int, reason: str) -> None:
+        nonlocal pending_segment
+        metrics = _metrics(state, context)
+        for goal_name, condition in goals:
+            if goal_first[goal_name] is None and _condition_met(condition, metrics, initial_metrics):
+                goal_first[goal_name] = day
+        if pending_segment is None and segment_index < len(plan.segments) - 1 and _segment_met(
+            plan.segments[segment_index], day, metrics, initial_metrics
+        ):
+            pending_segment = segment_index + 1
+            transitions.append({
+                "day": day,
+                "effectiveDay": day + 1,
+                "from": segment_index,
+                "to": pending_segment,
+                "reason": reason,
+            })
+
     for day in range(1, days + 1):
+        if pending_segment is not None:
+            before = state.advisors
+            segment_index = pending_segment
+            pending_segment = None
+            _apply_segment(state, plan.segments[segment_index])
+            if state.advisors != before:
+                advisor_transitions.append({"day": day, "advisors": [item.output() for item in state.advisors]})
         transaction = _run_investment_transaction(state, context, day, segment_index)
         transactions.append(transaction)
         completion_events.extend(transaction["completions"])
         used.update(transaction["mechanicRules"])
+        evaluate_boundary(day, "conditionSatisfiedAfterInvestmentTransaction")
         current_date += timedelta(days=1)
         if current_date.day == 1:
             periodic, population_supported = _run_monthly_transaction(state, context, day)
@@ -638,20 +691,9 @@ def run_projection(
             used.update(periodic["mechanicRules"])
             if not population_supported and "population periodic rule is unsupported for this save" not in incomplete_reasons:
                 incomplete_reasons.append("population periodic rule is unsupported for this save")
-        metrics = _metrics(state, context)
-        for name, condition in goals:
-            if goal_first[name] is None and _condition_met(condition, metrics, initial_metrics):
-                goal_first[name] = day
+            evaluate_boundary(day, "conditionSatisfiedAfterPeriodicTransaction")
         if day in checkpoint_set:
             checkpoint_rows.append({"day": day, "nation": _nation_snapshot(state), "factionContribution": _contribution(state, context, used)})
-        if segment_index < len(plan.segments) - 1 and _segment_met(plan.segments[segment_index], day, metrics, initial_metrics):
-            prior = segment_index
-            segment_index += 1
-            transitions.append({"day": day, "effectiveDay": day + 1, "from": prior, "to": segment_index, "reason": "conditionSatisfiedAfterTransaction"})
-            before = state.advisors
-            _apply_segment(state, plan.segments[segment_index])
-            if state.advisors != before:
-                advisor_transitions.append({"day": day, "effectiveDay": day + 1, "advisors": [item.output() for item in state.advisors]})
         advisor_used = advisor_used or bool(state.advisors)
     final_nation = _nation_snapshot(state)
     final_contribution = _contribution(state, context, used)

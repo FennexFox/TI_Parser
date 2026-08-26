@@ -169,6 +169,31 @@ class NationProjectionTransactionTests(unittest.TestCase):
         self.assertEqual([event["priority"] for event in investment["completions"]], ["Knowledge", "Unity"])
         self.assertEqual(result["segmentTransitions"][-1]["effectiveDay"], 2)
 
+    def test_conditional_pips_and_advisor_apply_together_next_tick(self):
+        initial = state(pips={"Knowledge": 3})
+        advisor = projection.AdvisorProfile("virtual", "admin", 20, 0)
+        plan = projection.PriorityPlan("p", (
+            projection.PlanSegment(1, None, None, None),
+            projection.PlanSegment(None, None, (projection.ControlPointPolicy(1, {"Unity": 3}),), (advisor,)),
+        ))
+        result = projection.run_projection(initial, plan, context(), days=2, details=True)
+        investments = [row for row in result["transactions"] if row["kind"] == "investment"]
+        self.assertIn("Knowledge", investments[0]["allocation"])
+        self.assertIn("Unity", investments[1]["allocation"])
+        self.assertGreater(investments[1]["baseInvestmentPointsMonth"], investments[0]["baseInvestmentPointsMonth"])
+        self.assertEqual(result["advisorTransitions"][-1]["day"], 2)
+
+    def test_start_satisfied_segment_skips_before_first_tick(self):
+        initial = state(pips={"Knowledge": 3})
+        plan = projection.PriorityPlan("p", (
+            projection.PlanSegment(None, projection.MetricCondition("nation.cohesion", ">=", 4.0), None, None),
+            projection.PlanSegment(None, None, (projection.ControlPointPolicy(1, {"Unity": 3}),), None),
+        ))
+        result = projection.run_projection(initial, plan, context(), days=1, details=True)
+        investment = next(row for row in result["transactions"] if row["kind"] == "investment")
+        self.assertEqual(investment["segmentIndex"], 1)
+        self.assertIn("Unity", investment["allocation"])
+
     def test_monthly_cohesion_and_unrest(self):
         initial = state(at=datetime(2030, 1, 31), annual_growth=0.0)
         result = projection.run_projection(initial, projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)), context(), days=1, details=True)
@@ -187,6 +212,7 @@ class NationProjectionTransactionTests(unittest.TestCase):
         result = projection.run_projection(initial, projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)), context(), days=1)
         self.assertEqual(result["status"], "incomplete")
         self.assertIsNone(result["authoritativeFinalState"])
+        self.assertIn("nation.priority.economy.complete", result["missingMechanicRules"])
 
 
 if __name__ == "__main__":

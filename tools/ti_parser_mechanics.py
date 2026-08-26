@@ -112,6 +112,70 @@ class Rules:
         data_dependencies=("nationDevelopment.globalConfig.fundingPriorityBaseIncomeIncrease",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_funding_completion_and_contribution",),
     )
+    NATION_PRIORITY_ECONOMY_COMPLETE = MechanicRule(
+        "nation.priority.economy.complete", 1, "Apply Economy completion and all national/global downstream effects.",
+        "partial", "unsupported", ("TINationState.OnEconomyPriorityComplete",),
+    )
+    NATION_PRIORITY_WELFARE_COMPLETE = MechanicRule(
+        "nation.priority.welfare.complete", 1, "Apply Welfare inequality and greenhouse-gas effects.",
+        "partial", "unsupported", ("TINationState.OnWelfarePriorityComplete",),
+    )
+    NATION_PRIORITY_ENVIRONMENT_COMPLETE = MechanicRule(
+        "nation.priority.environment.complete", 1, "Apply Environment sustainability and decontamination effects.",
+        "partial", "unsupported", ("TINationState.OnEnvironmentPriorityComplete",),
+    )
+    NATION_PRIORITY_OPPRESSION_COMPLETE = MechanicRule(
+        "nation.priority.oppression.complete", 1, "Apply Oppression unrest, democracy and cohesion effects.",
+        "partial", "unsupported", ("TINationState.OnOppressionPriorityComplete",),
+    )
+    NATION_PRIORITY_SPOILS_COMPLETE = MechanicRule(
+        "nation.priority.spoils.complete", 1, "Apply Spoils faction payouts and national downstream effects.",
+        "partial", "unsupported", ("TINationState.OnSpoilsPriorityComplete",),
+    )
+    NATION_PRIORITY_BOOST_COMPLETE = MechanicRule(
+        "nation.priority.launch-facilities.complete", 1, "Apply Launch Facilities to an audited target region.",
+        "partial", "unsupported", ("TINationState.OnBoostPriorityComplete",),
+    )
+    NATION_PRIORITY_MISSION_CONTROL_COMPLETE = MechanicRule(
+        "nation.priority.mission-control.complete", 1, "Apply Mission Control to an audited target region.",
+        "partial", "unsupported", ("TINationState.OnMissionControlPriorityComplete",),
+    )
+    NATION_PRIORITY_FOUND_MILITARY_COMPLETE = MechanicRule(
+        "nation.priority.found-military.complete", 1, "Create the national military capability.",
+        "pending", "unsupported", ("TINationState.OnFoundMilitaryPriorityComplete",),
+    )
+    NATION_PRIORITY_MILITARY_COMPLETE = MechanicRule(
+        "nation.priority.military.complete", 1, "Apply national military technology progress.",
+        "partial", "unsupported", ("TINationState.OnMilitaryPriorityComplete",),
+    )
+    NATION_PRIORITY_BUILD_ARMY_COMPLETE = MechanicRule(
+        "nation.priority.build-army.complete", 1, "Create an army and retain its maintenance dependency.",
+        "partial", "unsupported", ("TINationState.OnBuildArmyPriorityComplete",),
+    )
+    NATION_PRIORITY_BUILD_NAVY_COMPLETE = MechanicRule(
+        "nation.priority.build-navy.complete", 1, "Upgrade an army to naval deployment and retain maintenance.",
+        "partial", "unsupported", ("TINationState.OnBuildSealiftPriorityComplete",),
+    )
+    NATION_PRIORITY_INITIATE_NUCLEAR_COMPLETE = MechanicRule(
+        "nation.priority.initiate-nuclear-program.complete", 1, "Create the national nuclear program capability.",
+        "pending", "unsupported", ("TINationState.OnInitiateNuclearProgramComplete",),
+    )
+    NATION_PRIORITY_BUILD_NUCLEAR_COMPLETE = MechanicRule(
+        "nation.priority.build-nuclear-weapons.complete", 1, "Increase the national nuclear weapon count.",
+        "partial", "unsupported", ("TINationState.OnBuildNuclearWeaponsPriorityComplete",),
+    )
+    NATION_PRIORITY_SPACE_DEFENSE_COMPLETE = MechanicRule(
+        "nation.priority.build-space-defenses.complete", 1, "Create regional space defenses with aggregate dependencies.",
+        "partial", "unsupported", ("TINationState.OnBuildSpaceDefensesPriorityComplete",),
+    )
+    NATION_PRIORITY_STO_COMPLETE = MechanicRule(
+        "nation.priority.build-sto-squadron.complete", 1, "Create a regional STO fighter squadron.",
+        "partial", "unsupported", ("TINationState.OnBuildSTOSquadronPriorityComplete",),
+    )
+    NATION_PRIORITY_SPACEFLIGHT_COMPLETE = MechanicRule(
+        "nation.priority.initiate-spaceflight.complete", 1, "Create the national spaceflight program capability.",
+        "pending", "unsupported", ("TINationState.OnSpaceFlightProgramPriorityComplete",),
+    )
     NATION_PERIODIC_COHESION = MechanicRule(
         "nation.periodic.cohesion", 1,
         "Move cohesion toward its cached resting value during the monthly nation update.",
@@ -167,6 +231,22 @@ REGISTRY = {rule.id: rule for rule in (
     Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE,
     Rules.NATION_PRIORITY_UNITY_COMPLETE,
     Rules.NATION_PRIORITY_FUNDING_COMPLETE,
+    Rules.NATION_PRIORITY_ECONOMY_COMPLETE,
+    Rules.NATION_PRIORITY_WELFARE_COMPLETE,
+    Rules.NATION_PRIORITY_ENVIRONMENT_COMPLETE,
+    Rules.NATION_PRIORITY_OPPRESSION_COMPLETE,
+    Rules.NATION_PRIORITY_SPOILS_COMPLETE,
+    Rules.NATION_PRIORITY_BOOST_COMPLETE,
+    Rules.NATION_PRIORITY_MISSION_CONTROL_COMPLETE,
+    Rules.NATION_PRIORITY_FOUND_MILITARY_COMPLETE,
+    Rules.NATION_PRIORITY_MILITARY_COMPLETE,
+    Rules.NATION_PRIORITY_BUILD_ARMY_COMPLETE,
+    Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE,
+    Rules.NATION_PRIORITY_INITIATE_NUCLEAR_COMPLETE,
+    Rules.NATION_PRIORITY_BUILD_NUCLEAR_COMPLETE,
+    Rules.NATION_PRIORITY_SPACE_DEFENSE_COMPLETE,
+    Rules.NATION_PRIORITY_STO_COMPLETE,
+    Rules.NATION_PRIORITY_SPACEFLIGHT_COMPLETE,
     Rules.NATION_PERIODIC_COHESION,
     Rules.NATION_PERIODIC_UNREST,
     Rules.NATION_PERIODIC_POPULATION,
