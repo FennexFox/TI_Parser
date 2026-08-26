@@ -1,0 +1,267 @@
+{
+  "base": {
+    "controlPointPips": {
+      "maximum": 3,
+      "minimum": 0
+    },
+    "diversityBonuses": {
+      "Economy": 0.5,
+      "Environment": 0.2,
+      "Government": 0.2,
+      "Knowledge": 0.2,
+      "Military": 0.2,
+      "Unity": 0.2,
+      "Welfare": 0.2
+    },
+    "globalConfig": {
+      "fundingPriorityBaseIncomeIncrease": {
+        "value": 10.0,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "governmentPriorityDemocracyIncrease": {
+        "value": 0.01,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "knowledgePriorityEducationIncrease": {
+        "value": 0.005,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "maxMonthlyCohesionDecrease_cap": {
+        "value": 0.25,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "maxMonthlyCohesionDecrease_normal": {
+        "value": 0.1,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "maxMonthlyCohesionIncrease_normal": {
+        "value": 0.1,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "maxMonthlyUnrestMovement_normal": {
+        "value": 0.25,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "maxMonthlyUnrestMovement_rapidIncrease": {
+        "value": 1.0,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "nationalInvestmentArmyFactorAway": {
+        "value": 1.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "nationalInvestmentArmyFactorHome": {
+        "value": 0.5,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "nationalInvestmentNavyFactor": {
+        "value": 0.5,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "populationBasedIPEffectScaling": {
+        "value": -0.35,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "unityBaseCohesionChange": {
+        "value": 0.1,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "unityMinCohesionChange": {
+        "value": 0.025,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "unityPriorityEducationChange": {
+        "value": -0.001,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      }
+    },
+    "priorities": {
+      "Civilian_InitiateSpaceflightProgram": {
+        "configField": "priority_FLI",
+        "enumValue": 9,
+        "investmentCost": 50.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Economy": {
+        "configField": "priority_ECO",
+        "enumValue": 0,
+        "investmentCost": 1.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Environment": {
+        "configField": "priority_ENV",
+        "enumValue": 2,
+        "investmentCost": 1.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Funding": {
+        "configField": "priority_DEV",
+        "enumValue": 7,
+        "investmentCost": 1.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Government": {
+        "configField": "priority_DEM",
+        "enumValue": 4,
+        "investmentCost": 1.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Knowledge": {
+        "configField": "priority_KNO",
+        "enumValue": 3,
+        "investmentCost": 1.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "LaunchFacilities": {
+        "configField": "priority_BOO",
+        "enumValue": 10,
+        "investmentCost": 2.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Military": {
+        "configField": "priority_MIL",
+        "enumValue": 13,
+        "investmentCost": 1.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Military_BuildArmy": {
+        "configField": "priority_ARM",
+        "enumValue": 14,
+        "investmentCost": 60.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Military_BuildNavy": {
+        "configField": "priority_NAV",
+        "enumValue": 15,
+        "investmentCost": 100.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Military_BuildNuclearWeapons": {
+        "configField": "priority_NUK",
+        "enumValue": 17,
+        "investmentCost": 40.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Military_BuildSTOSquadron": {
+        "configField": "priority_STO",
+        "enumValue": 19,
+        "investmentCost": 10.0,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "Military_BuildSpaceDefenses": {
+        "configField": "priority_DEF",
+        "enumValue": 18,
+        "investmentCost": 50.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Military_FoundMilitary": {
+        "configField": "priority_FMI",
+        "enumValue": 12,
+        "investmentCost": 40.0,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "Military_InitiateNuclearProgram": {
+        "configField": "priority_NUC",
+        "enumValue": 16,
+        "investmentCost": 80.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "MissionControl": {
+        "configField": "priority_MC",
+        "enumValue": 11,
+        "investmentCost": 25.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Oppression": {
+        "configField": "priority_OPP",
+        "enumValue": 6,
+        "investmentCost": 1.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Spoils": {
+        "configField": "priority_SPO",
+        "enumValue": 8,
+        "investmentCost": 1.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Unity": {
+        "configField": "priority_UNI",
+        "enumValue": 5,
+        "investmentCost": 2.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      },
+      "Welfare": {
+        "configField": "priority_WEL",
+        "enumValue": 1,
+        "investmentCost": 1.0,
+        "valueOrigin": "TIGlobalConfig.json"
+      }
+    }
+  },
+  "generator": {
+    "name": "build_runtime_catalogs",
+    "version": "1"
+  },
+  "payloadFingerprint": "117d6310c5c6893f4c7ddbe1a052df94b2f34c1c317b0993076b45c2eb75ac58",
+  "scenarioOverrides": {
+    "BrokenEarthScenario": {
+      "globalConfig": {
+        "nationalInvestmentArmyFactorHome": {
+          "value": 0.2,
+          "valueOrigin": "TIGlobalConfig.json"
+        },
+        "nationalInvestmentNavyFactor": {
+          "value": 0.4,
+          "valueOrigin": "TIGlobalConfig.json"
+        },
+        "populationBasedIPEffectScaling": {
+          "value": -0.3,
+          "valueOrigin": "TIGlobalConfig.json"
+        }
+      },
+      "priorities": {
+        "Military_BuildArmy": {
+          "configField": "priority_ARM",
+          "enumValue": 14,
+          "investmentCost": 40.0,
+          "valueOrigin": "TIGlobalConfig.json"
+        }
+      }
+    }
+  },
+  "schemaVersion": 1,
+  "sourceFiles": [
+    {
+      "name": "2003Scenario/TIMetaTemplate.json",
+      "sha256": "08924ca30930b942a018672134dceaef214befe44cef8e4d1d5d966585089482"
+    },
+    {
+      "name": "BrokenEarthScenario/TIGlobalConfig.json",
+      "sha256": "51def1f2b1188a8f89b0ffa3a7fa665944a114def663fb9ae5abcb226d803dc4"
+    },
+    {
+      "name": "BrokenEarthScenario/TIMetaTemplate.json",
+      "sha256": "635003cf1a9ac22ec9c87d188c5e8aa709d96dcc1c1ea799bac2612ef31f13d9"
+    },
+    {
+      "name": "TerraInvicta_Data/Managed/Assembly-CSharp.dll",
+      "sha256": "5ec67c601a6ce39d985aa9830a99faa9844aee7d7e12ec5e28ea46ff020ba982"
+    },
+    {
+      "name": "base/TIGlobalConfig.json",
+      "sha256": "415113fadeecb4d67fa79f34275e026396c3fe914b722d936d5adcf737b07f4e"
+    },
+    {
+      "name": "base/TIMetaTemplate.json",
+      "sha256": "46f48a2466f1ff975f76d959ff9a668f97f199637147c6aa925f85439ec15cba"
+    }
+  ],
+  "supportedScenarios": [
+    "2003Scenario",
+    "2026Scenario",
+    "2030Scenario",
+    "2070Scenario",
+    "BrokenEarthScenario",
+    "ModernScenario"
+  ]
+}

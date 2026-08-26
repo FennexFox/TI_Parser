@@ -22,6 +22,7 @@ DEFAULT_CATALOG_FILES = (
     "org_catalog.json",
     "ship_catalog.json",
     "nation_claim_catalog.json",
+    "nation_development_catalog.json",
 )
 ENVELOPE_FIELDS = {
     "schemaVersion",
@@ -253,6 +254,13 @@ class RuntimeCatalogs:
         value = self.catalogs.get("research")
         if not isinstance(value, dict):
             raise CatalogError("Loaded catalog bundle has no research payload")
+        return value
+
+    @property
+    def nation_development(self) -> dict[str, Any]:
+        value = self.catalogs.get("nation_development")
+        if not isinstance(value, dict):
+            raise CatalogError("Loaded catalog bundle has no nation development payload")
         return value
 
     @property

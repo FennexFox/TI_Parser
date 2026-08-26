@@ -18,7 +18,7 @@
     },
     {
       "name": "BrokenEarthScenario/TIGlobalConfig.json",
-      "sha256": "34b51734b07b9e4d1144e43f98db7d57cb956ea8c1badf87fcf5f9f297f8d390"
+      "sha256": "51def1f2b1188a8f89b0ffa3a7fa665944a114def663fb9ae5abcb226d803dc4"
     },
     {
       "name": "BrokenEarthScenario/TIMetaTemplate.json",
@@ -26,7 +26,7 @@
     },
     {
       "name": "TerraInvicta_Data/Managed/Assembly-CSharp.dll",
-      "sha256": "1034138fe98e17ca01c067ff2a90ab19857c600bf7a0c5f52215cacbaf7a9f56"
+      "sha256": "5ec67c601a6ce39d985aa9830a99faa9844aee7d7e12ec5e28ea46ff020ba982"
     },
     {
       "name": "base/TIGlobalConfig.json",

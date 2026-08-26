@@ -31,6 +31,7 @@ CORE_CATALOGS = {
     "trait": "trait_catalog.json",
     "org": "org_catalog.json",
     "ship": "ship_catalog.json",
+    "nation_development": "nation_development_catalog.json",
 }
 
 
