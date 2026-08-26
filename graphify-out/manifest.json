@@ -480,8 +480,8 @@
     "semantic_hash": ""
   },
   "docs/plan/nation_projection/00-master-plan.md": {
-    "mtime": 1787753013.216287,
-    "ast_hash": "c00221d0e1ba211375b385222cc0f545",
+    "mtime": 1787781296.0800118,
+    "ast_hash": "497ae028d059452568c68c33b7849eaf",
     "semantic_hash": ""
   },
   "docs/plan/nation_projection/01-audit-registry.md": {
@@ -580,8 +580,18 @@
     "semantic_hash": ""
   },
   "docs/plan/nation_projection/12-real-save-graphify.md": {
-    "mtime": 1787780318.736995,
-    "ast_hash": "e5983652b05fba35f1dab9106e4bf1f5",
+    "mtime": 1787780476.8596954,
+    "ast_hash": "f58aeeb15633cbd05e59e2c369cc662c",
+    "semantic_hash": ""
+  },
+  "tests/__init__.py": {
+    "mtime": 1787781296.0819964,
+    "ast_hash": "4029b25f1f85230b779c5e5300c08717",
+    "semantic_hash": ""
+  },
+  "docs/plan/nation_projection/13-test-id-import-compatibility.md": {
+    "mtime": 1787781326.525476,
+    "ast_hash": "3bd896e6407d1038b6e0123b0dfe28ef",
     "semantic_hash": ""
   }
 }

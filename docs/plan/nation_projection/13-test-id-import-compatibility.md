@@ -74,3 +74,6 @@
   method. Focused registry validation passes under both runners.
 - Final validation: pytest reports 233 passed, 9 skipped, and 23 subtests;
   unittest discovery reports 242 tests passed with 9 skipped.
+- Graphify was incrementally refreshed after the package marker was committed:
+  2,162 nodes, 6,208 edges, and 117 communities. Multigraph diagnostics report
+  no malformed, missing-endpoint, dangling, self-loop, or duplicate edges.
