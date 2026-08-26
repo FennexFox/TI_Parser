@@ -1,16 +1,16 @@
-# Graph Report - TI_Parser  (2026-08-26)
+# Graph Report - TI_Parser  (2026-08-27)
 
 ## Corpus Check
-- 107 files · ~652,404 words
+- 115 files · ~660,360 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2021 nodes · 5941 edges · 109 communities (100 shown, 9 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 334 edges (avg confidence: 0.61)
+- 2146 nodes · 6194 edges · 110 communities (102 shown, 8 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 390 edges (avg confidence: 0.6)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `092e956f`
+- Built from commit: `3949fce6`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -124,24 +124,25 @@
 - [[_COMMUNITY_Community 106|Community 106]]
 - [[_COMMUNITY_Community 107|Community 107]]
 - [[_COMMUNITY_Community 108|Community 108]]
+- [[_COMMUNITY_Community 109|Community 109]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `IndexedState` - 290 edges
-2. `as_float()` - 186 edges
-3. `IndexedState` - 185 edges
-4. `ref_id()` - 86 edges
+1. `IndexedState` - 291 edges
+2. `as_float()` - 187 edges
+3. `IndexedState` - 187 edges
+4. `ref_id()` - 87 edges
 5. `clean_numbers()` - 63 edges
-6. `CatalogError` - 56 edges
-7. `CalculationDependencyError` - 49 edges
-8. `CalculationDependency` - 48 edges
-9. `state_value_by_id()` - 48 edges
-10. `RuntimeCatalogs` - 47 edges
+6. `CatalogError` - 57 edges
+7. `CalculationDependencyError` - 50 edges
+8. `CalculationDependency` - 49 edges
+9. `NationProjectionState` - 49 edges
+10. `RuntimeCatalogs` - 48 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Data-Only Nation Development Catalog` --semantically_similar_to--> `Packaged Catalog Strategy`  [INFERRED] [semantically similar]
-  docs/plan/nation_projection/01-audit-registry.md → dev-docs/plan/ti-parser-reliability/00-master-plan.md
 - `Fail-Closed Calculation Dependencies` --semantically_similar_to--> `Unsupported Priority Incomplete Result`  [INFERRED] [semantically similar]
   dev-docs/plan/parser-portability-reliability-2/runtime-dependency-audit.md → docs/plan/nation_projection/02-projection-core.md
+- `Data-Only Nation Development Catalog` --semantically_similar_to--> `Packaged Catalog Strategy`  [INFERRED] [semantically similar]
+  docs/plan/nation_projection/01-audit-registry.md → dev-docs/plan/ti-parser-reliability/00-master-plan.md
 - `Missing org templates fail closed` --conceptually_related_to--> `Fail-closed calculations`  [INFERRED]
   dev-docs/plan/org-eligibility-output/06-recommendation-filtering.md → README.md
 - `Sparse Exact Scenario Overrides` --semantically_similar_to--> `Base-Plus-Overlay Named Template Merge`  [INFERRED] [semantically similar]
@@ -161,23 +162,23 @@
 - **Exact Scenario Data Selection** — dev_docs_plan_scenario_specific_rules_00_master_plan_canonical_scenario_identity, dev_docs_plan_scenario_specific_rules_02_implementation_base_plus_overlay_merge, docs_research_catalog_sparse_exact_scenario_overrides, memory_query_20260814_010906_be_visions_of_greatness_greece_broken_earth_greece_naming_query [INFERRED 0.85]
 - **Package-Only Fail-Closed Calculation Data** — dev_docs_plan_parser_portability_reliability_2_runtime_dependency_audit_package_only_runtime, dev_docs_plan_parser_portability_reliability_2_runtime_dependency_audit_fail_closed_dependency_errors, dev_docs_plan_ti_parser_reliability_00_master_plan_packaged_catalog_strategy, dev_docs_plan_ti_parser_reliability_00_master_plan_location_data_fail_closed_contract, docs_plan_nation_projection_01_audit_registry_data_only_nation_development_catalog, docs_plan_nation_projection_02_projection_core_unsupported_priority_incomplete_result [INFERRED 0.95]
 
-## Communities (109 total, 9 thin omitted)
+## Communities (110 total, 8 thin omitted)
 
 ### Community 0 - "Save Indexing Core"
-Cohesion: 0.14
-Nodes (34): candidate_save_dirs(), candidate_templates_dirs(), _catalog_module_to_template(), clean_number(), file_fingerprint(), find_latest_save(), game_root_from_templates_dir(), json_default() (+26 more)
+Cohesion: 0.13
+Nodes (35): state_value_by_id(), hab_barycenter_state(), hab_body_is_colonized(), hab_body_is_inhabited(), hab_body_is_irradiated(), hab_body_site_states(), hab_construction_surface_body(), hab_irradiated_multiplier() (+27 more)
 
 ### Community 1 - "Runtime Catalog System"
-Cohesion: 0.08
-Nodes (18): Path, RuntimeCatalogTests, write_json(), canonical_json_bytes(), envelope_payload(), _is_sha256(), _load_json(), load_runtime_catalogs() (+10 more)
+Cohesion: 0.06
+Nodes (69): Path, RuntimeCatalogTests, write_json(), build_all(), build_nation_claim_catalog(), build_nation_development_catalog(), build_row_catalog(), build_ship_catalog() (+61 more)
 
 ### Community 2 - "Nation State Calculations"
-Cohesion: 0.09
-Nodes (49): scenario_template_name(), active_owned_control_points(), active_scenario_rules(), average(), calculate_nation_ui(), cohesion_label(), democracy_label(), display_one_decimal() (+41 more)
+Cohesion: 0.07
+Nodes (58): scenario_template_name(), active_owned_control_points(), active_scenario_rules(), average(), calculate_global_public_opinion(), calculate_nation_ui(), calculate_world_atrocities(), calculate_world_ui() (+50 more)
 
 ### Community 3 - "Research Planning Pipeline"
-Cohesion: 0.06
-Nodes (75): first_value(), active_global_research_names(), active_project_names(), active_project_research_names(), active_slots_with_category(), active_slots_with_hypothetical_project_category(), available_global_research_templates(), available_project_research_templates() (+67 more)
+Cohesion: 0.11
+Nodes (38): first_value(), active_global_research_names(), active_project_names(), active_project_research_names(), active_slots_with_category(), active_slots_with_hypothetical_project_category(), available_global_research_templates(), available_project_research_templates() (+30 more)
 
 ### Community 4 - "Hab Catalog Builders"
 Cohesion: 0.26
@@ -188,16 +189,16 @@ Cohesion: 0.13
 Nodes (42): build_catalog(), build_graph_links(), build_markdown(), canonical_json_bytes(), clean_value(), context_values(), discover_scenario_template_dirs(), discover_supported_scenarios() (+34 more)
 
 ### Community 6 - "Nation Projection Engine"
-Cohesion: 0.07
-Nodes (82): MechanicsRegistryTests, adviser_attribute_bonus_from_values(), nation_monthly_research_from_values(), proportional_cp_contribution(), Return the audited nation Advise stat/100 bonus with descending rank decay., CoverageResolver, CoverageResolvers, mechanic_diagnostics() (+74 more)
+Cohesion: 0.05
+Nodes (100): MechanicsRegistryTests, ProjectionCoverageTests, adviser_attribute_bonus_from_values(), nation_monthly_research_from_values(), proportional_cp_contribution(), Return the audited nation Advise stat/100 bonus with descending rank decay., CoverageResolver, CoverageResolvers (+92 more)
 
 ### Community 7 - "Income Dependency Model"
-Cohesion: 0.22
-Nodes (34): resolve_ref(), active_owned_control_points(), councilor_is_income_active(), councilor_monthly_income(), councilor_research_and_mc(), councilor_resource_income(), councilor_yearly_income(), faction_ideology_key() (+26 more)
+Cohesion: 0.06
+Nodes (120): AdvisorProfile, CalculationDependencyError, PriorityValidityResult, ParserSnapshotTests, Path, apply_effect_modifiers(), cache_key(), CalculationDependency (+112 more)
 
 ### Community 8 - "Projection and Simulation Helpers"
-Cohesion: 0.09
-Nodes (49): apply_effect_modifiers(), as_float(), clean_numbers(), add_monthly_delta(), bottleneck_penalty_from_delta(), calculate_ship_plan(), faction_max_mission_control_components(), module_break_even_analysis() (+41 more)
+Cohesion: 0.08
+Nodes (54): as_float(), clean_numbers(), add_monthly_delta(), bottleneck_penalty_from_delta(), calculate_ship_plan(), eta_from_daily(), module_break_even_analysis(), module_count_sample() (+46 more)
 
 ### Community 9 - "Core Projection Tests"
 Cohesion: 0.16
@@ -205,47 +206,47 @@ Nodes (3): add_state(), ParserReliabilityTests, ref()
 
 ### Community 10 - "Organization Planner"
 Cohesion: 0.17
-Nodes (42): apply_conditional_attribute_mods(), calculate_org_plan(), clamp_attribute(), compare_condition(), condition_eval_unknown(), condition_nation_summary(), councilor_attribute_breakdown(), councilor_org_plan_profile() (+34 more)
+Nodes (41): apply_conditional_attribute_mods(), calculate_org_plan(), clamp_attribute(), compare_condition(), condition_eval_unknown(), condition_nation_summary(), councilor_attribute_breakdown(), councilor_org_plan_profile() (+33 more)
 
 ### Community 11 - "Habitat Mechanics"
-Cohesion: 0.16
-Nodes (41): ModuleCatalogError, Raised when authoritative hab-module data cannot be loaded safely., active_modules_in_sectors(), faction_active_org_mining_bonus(), faction_mining_multiplier(), faction_sector_states(), get_effective_module_state(), hab_administration_modifier() (+33 more)
+Cohesion: 0.15
+Nodes (44): RuntimeError, ModuleCatalogError, Raised when authoritative hab-module data cannot be loaded safely., Raised when location-aware solar output lacks authoritative location data., SolarPowerDataError, active_modules_in_sectors(), faction_active_org_mining_bonus(), faction_mining_multiplier() (+36 more)
 
 ### Community 12 - "Hab Reference Resolution"
-Cohesion: 0.08
-Nodes (84): faction_is_human_player(), find_faction_state(), IndexedState, Return whether faction is the uniquely resolved human player faction., raw_state_id(), ref_id(), state_value_by_id(), active_faction_councilors() (+76 more)
+Cohesion: 0.09
+Nodes (53): IndexedState, active_faction_councilors(), active_modules_in_sectors(), calculate_world_wars(), control_point_summary(), councilor_attribute_breakdown(), councilor_monthly_income(), councilor_resource_income() (+45 more)
 
 ### Community 13 - "Hab UI and Resources"
-Cohesion: 0.15
-Nodes (23): candidate_module_monthly_delta(), completion_datetime(), current_save_datetime(), eta_from_daily(), faction_hab_resource_at_date(), faction_queued_mission_control_changes(), faction_yearly_income_from_habs(), first_sustained_surplus_date() (+15 more)
+Cohesion: 0.21
+Nodes (8): NationPriorityValidityTests, _boolean(), evaluate_priority_validity(), _number(), Any, Shared value-only nation priority validity contract., Evaluate only validity; callers precompute mechanics-specific derived inputs., _unknown()
 
 ### Community 14 - "CLI Save Loading"
-Cohesion: 0.21
-Nodes (33): build_index(), load_save(), print_json(), resolve_scenario_templates(), match_named(), command_advise(), command_ai_fleet_diagnostics(), command_catalog_verify() (+25 more)
+Cohesion: 0.20
+Nodes (34): build_index(), load_save(), print_json(), match_named(), build_snapshot(), command_advise(), command_ai_fleet_diagnostics(), command_catalog_verify() (+26 more)
 
 ### Community 15 - "AI Fleet Diagnostics"
 Cohesion: 0.17
-Nodes (28): add_state(), AIFleetDiagnosticsTests, ref(), synthetic_index(), _age_days(), calculate_ai_fleet_diagnostics(), _entry_id(), _explicit_blockers() (+20 more)
+Nodes (30): add_state(), AIFleetDiagnosticsTests, ref(), synthetic_index(), _age_days(), calculate_ai_fleet_diagnostics(), _entry_id(), _explicit_blockers() (+22 more)
 
 ### Community 16 - "Topbar and Research UI"
-Cohesion: 0.17
-Nodes (15): effect_modifier_delta(), calculate_global_public_opinion(), calculate_world_atrocities(), calculate_world_ui(), control_point_maintenance_gdp_scale(), faction_brief(), faction_control_point_maintenance(), faction_ideology_key() (+7 more)
+Cohesion: 0.10
+Nodes (45): faction_effect_contexts(), faction_is_human_player(), find_faction_state(), load_hab_module_catalog(), Load packaged normalized hab modules; absence or corruption is fatal., Return whether faction is the uniquely resolved human player faction., raw_state_id(), ref_id() (+37 more)
 
 ### Community 17 - "Org Planner Tests"
 Cohesion: 0.18
 Nodes (5): eligibility_fixture(), org(), OrgPlanTests, profile(), ref()
 
 ### Community 18 - "Hab Module Planning"
-Cohesion: 0.09
-Nodes (48): faction_effect_contexts(), load_hab_module_catalog(), Load packaged normalized hab modules; absence or corruption is fatal., councilor_summary_maps(), annotate_candidate_opportunity_costs(), calculate_hab_ui(), calculate_nation_projection(), calculate_research_breakdown() (+40 more)
+Cohesion: 0.07
+Nodes (69): annotate_candidate_opportunity_costs(), calculate_hab_ui(), candidate_affordable(), candidate_focus_score(), candidate_module_monthly_delta(), completion_datetime(), councilor_is_income_active(), current_save_datetime() (+61 more)
 
 ### Community 19 - "Research UI Tests"
 Cohesion: 0.21
 Nodes (6): add_human_player(), add_state(), build_mission_control_fixture(), build_research_fixture(), ref(), ResearchUiTests
 
 ### Community 20 - "Module Construction Analysis"
-Cohesion: 0.13
-Nodes (25): active_modules_in_sectors(), faction_hab_category_modifier(), faction_has_helium3_access(), faction_sector_states(), faction_stockpile(), hab_module_build_materials(), hab_module_construction_analysis(), hab_module_current_mission_control() (+17 more)
+Cohesion: 0.21
+Nodes (15): faction_stockpile(), module_affordable_with_materials(), module_affordable_with_template_weights(), module_balanced_score(), module_build_cost_map(), module_candidate_row(), module_category_bonus_score(), module_project_score() (+7 more)
 
 ### Community 21 - "Hab Plan Tests"
 Cohesion: 0.18
@@ -268,16 +269,16 @@ Cohesion: 0.18
 Nodes (15): Org eligibility output master plan, Shared owner eligibility contract, Org eligibility rule discovery, Faction-scoped nation interest, Councilor owner trait rules, Enriched candidate eligibility contract, Org eligibility diagnostics implementation, Broken Earth eligibility evidence (+7 more)
 
 ### Community 26 - "Nation Projection Audit"
-Cohesion: 0.15
-Nodes (14): Fail-Closed Calculation Dependencies, Package-Only Runtime, Runtime Dependency and Silent-Fallback Audit, Fail-Closed Priority Coverage, Transactional Policy Observation, Audited Package-Only Projection, Nation Priority and Conditional Advisor Projection, Cloned Projection State (+6 more)
+Cohesion: 0.40
+Nodes (5): Fail-Closed Calculation Dependencies, Package-Only Runtime, Runtime Dependency and Silent-Fallback Audit, Audited Package-Only Projection, Strict Runtime Research Rows
 
 ### Community 27 - "Catalog Verification Tests"
-Cohesion: 0.13
-Nodes (22): CatalogVerifyTests, Path, write_json(), _compare_values(), _comparison_check(), _display(), _load_json(), _parity_check() (+14 more)
+Cohesion: 0.27
+Nodes (3): CatalogVerifyTests, Path, write_json()
 
 ### Community 28 - "Nation Claims Tests"
 Cohesion: 0.12
-Nodes (18): NationClaimsTests, IndexedState, calculate_nation_claims(), _catalog_claim_metadata(), _catalog_for_scenario(), _deep_merge(), _nation_summary(), _number_or_none() (+10 more)
+Nodes (21): NationClaimsTests, IndexedState, calculate_nation_claims(), _catalog_claim_metadata(), _catalog_for_scenario(), _deep_merge(), _nation_summary(), _number_or_none() (+13 more)
 
 ### Community 29 - "Org Parity Tests"
 Cohesion: 0.29
@@ -348,20 +349,20 @@ Cohesion: 0.83
 Nodes (4): Broken Earth Greece Naming Query, Dominion of Hellas, Owned-Region Union Naming Trigger, Visions of Greatness Claim Activation
 
 ### Community 51 - "CLI Namespace"
-Cohesion: 0.19
-Nodes (32): cache_key(), campaign_code(), ref_summary(), region_nation_summary(), short_type(), type_entries(), average(), build_snapshot() (+24 more)
+Cohesion: 0.14
+Nodes (13): Acceptance criteria, Affected files, Decision log, Goal, Implementation steps, Manual smoke tests, Non-goals, Outcomes / Retrospective (+5 more)
 
 ### Community 52 - "Community 52"
-Cohesion: 0.17
+Cohesion: 0.14
 Nodes (4): context(), NationProjectionPlanTests, NationProjectionTransactionTests, state()
 
 ### Community 53 - "Community 53"
-Cohesion: 0.23
-Nodes (30): build_all(), build_nation_claim_catalog(), build_nation_development_catalog(), build_row_catalog(), build_ship_catalog(), deterministic_json(), discover_supported_scenarios(), _global_config() (+22 more)
+Cohesion: 0.14
+Nodes (13): Acceptance criteria, Affected files, Decision log, Goal, Implementation steps, Manual smoke tests, Non-goals, Outcomes / Retrospective (+5 more)
 
 ### Community 54 - "Community 54"
-Cohesion: 0.27
-Nodes (23): AdvisorProfile, CalculationDependencyError, NationProjectionState, RuntimeError, CatalogError, A packaged catalog is absent, corrupt, or incompatible., CalculationDependency, CalculationDependencyError (+15 more)
+Cohesion: 0.14
+Nodes (13): Acceptance criteria, Affected files, Decision log, Goal, Implementation steps, Manual smoke tests, Non-goals, Outcomes / Retrospective (+5 more)
 
 ### Community 55 - "Community 55"
 Cohesion: 0.33
@@ -520,8 +521,8 @@ Cohesion: 0.27
 Nodes (11): main(), parse_args(), Namespace, compact_number(), parse_languages(), Any, Path, read_localization_file() (+3 more)
 
 ### Community 94 - "Community 94"
-Cohesion: 0.18
-Nodes (10): Audited build, Completion-specific boundaries, Fail-closed completion rules, Nation projection mechanics audit, Rule index, User-facing transaction and metric semantics, Validation boundary, Strict and Observational Validation Boundary (+2 more)
+Cohesion: 0.14
+Nodes (14): Audited build, Completion-specific boundaries, Fail-closed completion rules, Fail-Closed Priority Coverage, Metric dependency evidence, Nation projection mechanics audit, Rule index, Shared live priority validity (+6 more)
 
 ### Community 95 - "Community 95"
 Cohesion: 0.20
@@ -559,29 +560,37 @@ Nodes (6): Packaged Catalog Strategy, Player Identity and Packaged Module Catalo
 Cohesion: 0.33
 Nodes (5): Allowed raw IO, Final audit result, Normal-runtime raw sources, Runtime dependency and silent-fallback audit, Silent correctness degradation
 
+### Community 106 - "Community 106"
+Cohesion: 0.14
+Nodes (13): Acceptance criteria, Affected files, Decision log, Goal, Implementation steps, Manual smoke tests, Non-goals, Outcomes / Retrospective (+5 more)
+
 ### Community 107 - "Community 107"
 Cohesion: 0.50
 Nodes (3): Answer, Q: BE 시나리오에서 Visions of Greatness 이후 Greece 국명이 바뀌고 모든 클레임 지역을 획득하면 다시 바뀌는가?, Source Nodes
 
+### Community 109 - "Community 109"
+Cohesion: 0.29
+Nodes (7): Strict and Observational Validation Boundary, Nation Priority and Conditional Advisor Projection, CLI Faction Contribution and Diagnostics Integration, Hypothetical Advisor Policy, Target-Nation Faction Contribution, Projection Regression Verification, Rule-Linked One-Tick Fixtures
+
 ## Knowledge Gaps
-- **538 isolated node(s):** `IndexedState`, `Counter`, `Namespace`, `Namespace`, `Namespace` (+533 more)
+- **588 isolated node(s):** `IndexedState`, `Counter`, `Namespace`, `Namespace`, `Namespace` (+583 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **9 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **8 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `IndexedState` connect `Hab Reference Resolution` to `Scenario Rules Tests`, `Save Indexing Core`, `Nation State Calculations`, `Research Planning Pipeline`, `Income Dependency Model`, `Projection and Simulation Helpers`, `Organization Planner`, `Habitat Mechanics`, `Hab UI and Resources`, `CLI Save Loading`, `AI Fleet Diagnostics`, `Topbar and Research UI`, `Hab Module Planning`, `CLI Namespace`, `Module Construction Analysis`, `Community 54`, `Nation Claims Tests`?**
-  _High betweenness centrality (0.060) - this node is a cross-community bridge._
-- **Why does `CatalogError` connect `Community 54` to `Runtime Catalog System`, `Nation State Calculations`, `Research Planning Pipeline`, `Organization Planner`, `Hab Reference Resolution`, `Hab UI and Resources`, `CLI Save Loading`, `CLI Namespace`, `Community 53`, `Catalog Verification Tests`?**
-  _High betweenness centrality (0.033) - this node is a cross-community bridge._
-- **Why does `Any` connect `Research Planning Pipeline` to `Runtime Catalog System`, `Nation State Calculations`, `Nation Projection Engine`, `Projection and Simulation Helpers`, `Hab Reference Resolution`, `Hab UI and Resources`, `CLI Save Loading`, `Topbar and Research UI`, `Hab Module Planning`, `Module Construction Analysis`, `Community 54`?**
-  _High betweenness centrality (0.019) - this node is a cross-community bridge._
-- **Are the 10 inferred relationships involving `Any` (e.g. with `CatalogError` and `RuntimeCatalogs`) actually correct?**
-  _`Any` has 10 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 33 inferred relationships involving `IndexedState` (e.g. with `AdvisorProfile` and `CalculationDependencyError`) actually correct?**
-  _`IndexedState` has 33 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 10 inferred relationships involving `IndexedState` (e.g. with `CatalogError` and `RuntimeCatalogs`) actually correct?**
-  _`IndexedState` has 10 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `IndexedState` connect `Hab Reference Resolution` to `Scenario Rules Tests`, `Save Indexing Core`, `Nation State Calculations`, `Research Planning Pipeline`, `Income Dependency Model`, `Projection and Simulation Helpers`, `Organization Planner`, `Habitat Mechanics`, `CLI Save Loading`, `AI Fleet Diagnostics`, `Topbar and Research UI`, `Hab Module Planning`, `Module Construction Analysis`, `Nation Claims Tests`?**
+  _High betweenness centrality (0.045) - this node is a cross-community bridge._
+- **Why does `Rules` connect `Nation Projection Engine` to `Income Dependency Model`, `Hab Reference Resolution`, `Hab UI and Resources`, `CLI Save Loading`, `Hab Module Planning`, `Community 52`?**
+  _High betweenness centrality (0.039) - this node is a cross-community bridge._
+- **Why does `NationProjectionTransactionTests` connect `Community 52` to `Nation Projection Engine`?**
+  _High betweenness centrality (0.030) - this node is a cross-community bridge._
+- **Are the 11 inferred relationships involving `Any` (e.g. with `CatalogError` and `RuntimeCatalogs`) actually correct?**
+  _`Any` has 11 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 34 inferred relationships involving `IndexedState` (e.g. with `AdvisorProfile` and `CalculationDependencyError`) actually correct?**
+  _`IndexedState` has 34 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 11 inferred relationships involving `IndexedState` (e.g. with `CatalogError` and `RuntimeCatalogs`) actually correct?**
+  _`IndexedState` has 11 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `IndexedState`, `Counter`, `Namespace` to the rest of the system?**
-  _597 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _654 weakly-connected nodes found - possible documentation gaps or missing edges._

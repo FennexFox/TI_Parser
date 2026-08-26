@@ -60,9 +60,9 @@
 
 ## Progress
 
-- Implementation, documentation, full-suite validation, and opt-in real-save
-  validation are complete. The final Graphify refresh and graph diagnostics are
-  pending the stabilized source commit.
+- Completed: implementation, documentation, full-suite and opt-in real-save
+  validation, Graphify refresh, multigraph diagnostics, and focused dependency
+  queries all passed.
 
 ## Decision log
 
@@ -96,3 +96,9 @@
   environment-dependent skips, and 8 opt-in local-save observational tests all
   pass. The local save remains an observational smoke input, not strict A-to-B
   validation.
+- Graphify rebuilt the stabilized source into 2,146 nodes, 6,194 edges, and 110
+  communities. Multigraph diagnostics report zero malformed, missing-endpoint,
+  dangling, self-loop, or duplicate edges. Focused queries connect
+  `MetricDependencyTracker`, `ProjectionRuntimeStop`, shared
+  `PriorityValidityResult`, projection transactions, nation UI, direct tests,
+  and the mechanics registry in the refreshed graph.
