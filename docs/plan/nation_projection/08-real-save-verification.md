@@ -63,7 +63,7 @@
 - $env:TI_PARSER_REAL_SAVE = 'C:\Users\techn\OneDrive\문서\My Games\TerraInvicta\Saves\ExitSave.gz'; py -3 -m unittest tests.test_nation_projection_real_save; Remove-Item Env:TI_PARSER_REAL_SAVE
 - py -3 -m unittest discover -s tests -p 'test_*.py'
 - graphify update
-- graphify status
+- graphify diagnose multigraph --graph graphify-out/graph.json --json
 - graphify query "nation projection population government welfare mission control build army runtime stop metric coverage"
 
 ## Manual smoke tests
@@ -81,7 +81,7 @@
 
 ## Progress
 
-- In progress: independent fixtures and opt-in local-save smoke tests pass; Graphify refresh and final phase validation remain.
+- Completed: independent fixtures, full regression, opt-in local-save smoke, phased-plan validation, and Graphify refresh all pass.
 
 ## Decision log
 
@@ -94,3 +94,4 @@
 - Current automated regression: `214 passed, 6 skipped, 10 subtests passed`.
 - Opt-in local `ExitSave.gz` smoke: 5 tests passed, including full-CP Knowledge replacement, conditional Government/Welfare paths, MC/BuildArmy execution, and long-horizon monthly/quarterly Population handling. This is smoke/observational evidence, not a controlled strict A-to-B pair.
 - No local save path, object ID, or current numeric state is encoded in production code or committed fixtures.
+- Graphify was rebuilt from the completed tree: 2,021 nodes, 5,941 edges, 109 communities. The focused query reaches the scheduler, runtime stop, registry, completion handlers, metric coverage, extraction layer, and tests; multigraph diagnostics report no dangling, duplicate, collapsed, or self-loop edges.

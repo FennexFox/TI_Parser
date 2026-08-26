@@ -60,7 +60,7 @@
 - py -3 -m unittest tests.test_mechanics_registry tests.test_catalog_generators tests.test_runtime_catalogs
 - py -3 -m unittest tests.test_nation_projection tests.test_nation_projection_cli tests.test_package_only_runtime
 - $env:TI_PARSER_REAL_SAVE = '<local ExitSave.gz>'; py -3 -m unittest tests.test_nation_projection_real_save; Remove-Item Env:TI_PARSER_REAL_SAVE
-- graphify update; graphify status; graphify query "nation projection runtime dependency population government welfare mission control build army"
+- graphify update .; graphify diagnose multigraph --graph graphify-out/graph.json --json; graphify query "nation projection runtime dependency population government welfare mission control build army"
 
 ## Known Risks And Assumptions
 
