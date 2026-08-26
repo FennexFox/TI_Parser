@@ -68,6 +68,7 @@ class MechanicsRegistryTests(unittest.TestCase):
         "nation.periodic.control-points",
         "nation.population.annual-growth",
         "nation.population.monthly-growth",
+        evidence="contract",
     )
     def test_real_save_rule_contracts_are_registered(self):
         required = set(self.test_real_save_rule_contracts_are_registered.mechanic_rule_ids)
@@ -113,18 +114,28 @@ class MechanicsRegistryTests(unittest.TestCase):
             test_ids=("fixture",),
         )
 
-        @mechanic_rule_test(rule.id)
+        @mechanic_rule_test(rule.id, evidence="expectedValue")
         def declared_fixture():
             pass
 
         validate_test_metadata(lambda _test_id: declared_fixture, (rule,))
 
-        @mechanic_rule_test(Rules.NATION_IP_PRIORITY_BONUS.id)
+        @mechanic_rule_test(Rules.NATION_IP_PRIORITY_BONUS.id, evidence="expectedValue")
         def mismatched_fixture():
             pass
 
         with self.assertRaisesRegex(ValueError, "does not declare"):
             validate_test_metadata(lambda _test_id: mismatched_fixture, (rule,))
+
+        @mechanic_rule_test(rule.id, evidence="contract")
+        def contract_only_fixture():
+            pass
+
+        with self.assertRaisesRegex(ValueError, "no direct non-contract evidence"):
+            validate_test_metadata(lambda _test_id: contract_only_fixture, (rule,))
+
+        with self.assertRaisesRegex(ValueError, "Invalid mechanic test evidence"):
+            mechanic_rule_test(rule.id, evidence="directional")
 
     def test_nation_development_catalog_is_data_only_and_scenario_aware(self):
         modern = RuntimeCatalogs.load("ModernScenario").nation_development

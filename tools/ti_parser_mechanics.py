@@ -13,6 +13,7 @@ from typing import Callable, Iterable
 COVERAGE_LEVELS = frozenset({"exact", "expected", "aggregateOnly", "unsupported"})
 COVERAGE_MODES = frozenset({"static", "conditional"})
 AUDIT_STATUSES = frozenset({"verified", "partial", "pending", "deprecated"})
+TEST_EVIDENCE_TYPES = frozenset({"expectedValue", "stateTransition", "ordering", "coverageBranch", "contract"})
 ASSEMBLY_CSHARP_SHA256 = "5ec67c601a6ce39d985aa9830a99faa9844aee7d7e12ec5e28ea46ff020ba982"
 REGISTRY_CONTRACT_TEST_ID = (
     "tests.test_mechanics_registry.MechanicsRegistryTests."
@@ -108,7 +109,7 @@ class Rules:
         ("TINationState.ModifyGDP", "TINationState.SetEconomyScore"),
         ("TIRegionState.GrowPopulationByMonth", "TINationState.SetBaseInvestmentPoints_month"),
         ("nationDevelopment.globalConfig.controlPointIPScaling", "nationDevelopment.globalConfig.controlPointIPFactor"),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_economy_score_recomputes_from_literal_gdp",),
     )
     NATION_IP_CONTROL_POINT_ALLOCATION = MechanicRule(
         "nation.ip.control-point-allocation", 1,
@@ -135,7 +136,7 @@ class Rules:
         ("TIControlPoint.RecordAndFixControlPointValues", "TIControlPoint.SetControlPointPriority"),
         ("TINationState.ProcessPrioritySpending",),
         ("nationDevelopment.controlPointPips",),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_invalid_only_control_point_persistently_falls_back_to_raw_economy",),
     )
     NATION_PRIORITY_VALIDITY = MechanicRule(
         "nation.priority.validity", 1,
@@ -143,7 +144,7 @@ class Rules:
         "verified", "exact",
         ("TINationState.ValidPriority", "TIControlPoint.RecordAndFixControlPointValues"),
         ("TINationState.DailyNationUpdate", "TIControlPoint.SetControlPointPriority"),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_validity.NationPriorityValidityTests.test_government_cap_requires_hostile_region",),
     )
     NATION_PRIORITY_COMPLETION_ORDER = MechanicRule(
         "nation.priority.completion-order", 1,
@@ -183,7 +184,7 @@ class Rules:
             "nationDevelopment.globalConfig.governmentPriorityLegitimizeClaimThreshold",
             "nationDevelopment.regions.*.adjacency",
         ),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_government_at_cap_applies_knowledge_and_legitimizes_claim",),
     )
     NATION_PRIORITY_UNITY_COMPLETE = MechanicRule(
         "nation.priority.unity.complete", 2,
@@ -208,7 +209,7 @@ class Rules:
         "nation.priority.welfare.complete", 2,
         "Coordinate Welfare inequality and the conditionally activated colony/decolonization child rules.",
         "verified", "exact", ("TINationState.OnWelfarePriorityComplete",),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_welfare_children_activate_only_on_the_executed_path",),
     )
     NATION_PRIORITY_WELFARE_INEQUALITY = MechanicRule(
         "nation.priority.welfare.inequality", 1,
@@ -216,7 +217,7 @@ class Rules:
         "verified", "exact",
         ("TINationState.OnWelfarePriorityComplete", "TINationState.welfarePriorityInequalityChange"),
         data_dependencies=("nationDevelopment.globalConfig.welfarePriorityInequalityDecrease",),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_welfare_children_activate_only_on_the_executed_path",),
     )
     NATION_PRIORITY_WELFARE_COLONY_TRIGGER = MechanicRule(
         "nation.priority.welfare.colony-trigger", 1,
@@ -224,7 +225,7 @@ class Rules:
         "verified", "exact",
         ("TINationState.OnWelfarePriorityComplete", "TINationState.GetNextRegionToDecolonize"),
         data_dependencies=("nationDevelopment.regions.*.colony",),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_welfare_children_activate_only_on_the_executed_path",),
     )
     NATION_PRIORITY_WELFARE_DECOLONIZATION = MechanicRule(
         "nation.priority.welfare.decolonization", 1,
@@ -232,7 +233,7 @@ class Rules:
         "verified", "exact",
         ("TINationState.OnWelfarePriorityComplete", "TIRegionState.SetColonialStatus"),
         data_dependencies=("nationDevelopment.globalConfig.welfarePriorityDecolonizationThreshold",),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_welfare_children_activate_only_on_the_executed_path",),
     )
     NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM = MechanicRule(
         "nation.priority.welfare.decolonization-downstream", 1,
@@ -240,7 +241,7 @@ class Rules:
         "verified", "exact",
         ("TINationState.CacheRegionValues", "TINationState.ValidPriority", "TINationState.cohesionRestState"),
         data_dependencies=("nationDevelopment.regions.*",),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_welfare_children_activate_only_on_the_executed_path",),
     )
     NATION_PRIORITY_ENVIRONMENT_COMPLETE = MechanicRule(
         "nation.priority.environment.complete", 1, "Apply Environment sustainability and decontamination effects.",
@@ -262,7 +263,7 @@ class Rules:
         "nation.priority.mission-control.complete", 2,
         "Apply Mission Control, including the no-candidate raw-pip mutation order.",
         "verified", "unsupported", ("TINationState.OnMissionControlPriorityComplete",),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_mission_control_no_candidate_preserves_dll_mutation_order",),
         coverage_mode="conditional",
         allowed_coverages=CoverageResolvers.MISSION_CONTROL_PLACEMENT.allowed_coverages,
         coverage_resolver_id=CoverageResolvers.MISSION_CONTROL_PLACEMENT.id,
@@ -274,7 +275,10 @@ class Rules:
         ("TINationState.OnMissionControlPriorityComplete", "TINationState.ValidPriority"),
         data_dependencies=("nationDevelopment.regions.*.missionControl",),
         deterministic=False,
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=(
+            "tests.test_nation_projection.NationProjectionTransactionTests.test_mission_control_no_candidate_preserves_dll_mutation_order",
+            "tests.test_nation_projection.NationProjectionTransactionTests.test_mission_control_non_equivalent_candidates_stop_before_mutation",
+        ),
         coverage_mode="conditional",
         allowed_coverages=CoverageResolvers.MISSION_CONTROL_PLACEMENT.allowed_coverages,
         coverage_resolver_id=CoverageResolvers.MISSION_CONTROL_PLACEMENT.id,
@@ -291,7 +295,7 @@ class Rules:
         "nation.priority.build-army.complete", 2,
         "Create an army using the deterministic DLL region and control-point selection path.",
         "verified", "unsupported", ("TINationState.OnBuildArmyPriorityComplete",),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_build_army_deterministic_selection_and_next_tick_maintenance",),
         coverage_mode="conditional",
         allowed_coverages=CoverageResolvers.BUILD_ARMY_PLACEMENT.allowed_coverages,
         coverage_resolver_id=CoverageResolvers.BUILD_ARMY_PLACEMENT.id,
@@ -309,7 +313,7 @@ class Rules:
             "nationDevelopment.regions.*.coreEconomicRegion",
             "nationDevelopment.regions.*.population",
         ),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_build_army_deterministic_selection_and_next_tick_maintenance",),
         coverage_mode="conditional",
         allowed_coverages=CoverageResolvers.BUILD_ARMY_PLACEMENT.allowed_coverages,
         coverage_resolver_id=CoverageResolvers.BUILD_ARMY_PLACEMENT.id,
@@ -324,7 +328,7 @@ class Rules:
         "verified", "exact",
         ("TINationState.SetBaseInvestmentPoints_month", "TIArmyState.GetInvestmentPointsMaintenance"),
         data_dependencies=("nationDevelopment.globalConfig.nationalInvestmentArmyFactor*",),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_build_army_deterministic_selection_and_next_tick_maintenance",),
     )
     NATION_PRIORITY_INITIATE_NUCLEAR_COMPLETE = MechanicRule(
         "nation.priority.initiate-nuclear-program.complete", 1, "Create the national nuclear program capability.",
@@ -368,14 +372,14 @@ class Rules:
         "verified", "exact",
         ("TINationState.CacheRegionValues", "TINationState.DailyNationUpdate2"),
         ("TINationState.DailyNationUpdate", "TINationState.NationPeriodicUpdate"),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_daily_rest_cache_matches_literal_formula",),
     )
     NATION_PERIODIC_CONTROL_POINTS = MechanicRule(
         "nation.periodic.control-points", 1,
         "Run monthly control-point reconciliation; v1 stops before a projected CP-count mutation.",
         "partial", "unsupported",
         ("TINationState.UpdateControlPoints", "TINationState.MonthlyNationUpdate"),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_monthly_control_point_count_change_rolls_back_before_population",),
         coverage_mode="conditional",
         allowed_coverages=CoverageResolvers.PERIODIC_CONTROL_POINTS.allowed_coverages,
         coverage_resolver_id=CoverageResolvers.PERIODIC_CONTROL_POINTS.id,
@@ -399,7 +403,7 @@ class Rules:
             "nationDevelopment.regions.*.environment",
             "nationDevelopment.regions.*.latitude",
         ),
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_population_formula_uses_deterministic_mean_input_not_trajectory_expectation",),
     )
     NATION_POPULATION_MONTHLY_GROWTH = MechanicRule(
         "nation.population.monthly-growth", 1,
@@ -408,7 +412,7 @@ class Rules:
         ("TIRegionState.GrowPopulationByMonth",),
         data_dependencies=("nationDevelopment.daysPerYear",),
         deterministic=False,
-        test_ids=(REGISTRY_CONTRACT_TEST_ID,),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_monthly_population_expected",),
     )
     NATION_ADVISOR_ATTRIBUTE_SOURCE = MechanicRule(
         "nation.advisor.attribute-source", 1,
@@ -554,15 +558,21 @@ def validate_rule_execution(
     return rule
 
 
-def mechanic_rule_test(*rule_ids: str) -> Callable[[Callable[..., object]], Callable[..., object]]:
-    """Attach stable mechanic rule IDs to an expected-value test assertion."""
+def mechanic_rule_test(
+    *rule_ids: str,
+    evidence: str,
+) -> Callable[[Callable[..., object]], Callable[..., object]]:
+    """Attach stable mechanic rule IDs and the assertion evidence kind."""
 
     unknown = sorted(set(rule_ids) - set(REGISTRY))
     if unknown:
         raise ValueError(f"Unregistered mechanic rule ID: {', '.join(unknown)}")
+    if evidence not in TEST_EVIDENCE_TYPES:
+        raise ValueError(f"Invalid mechanic test evidence: {evidence}")
 
     def decorate(test: Callable[..., object]) -> Callable[..., object]:
         setattr(test, "mechanic_rule_ids", tuple(dict.fromkeys(rule_ids)))
+        setattr(test, "mechanic_rule_evidence", evidence)
         return test
 
     return decorate
@@ -580,11 +590,19 @@ def validate_test_metadata(
         )
         if not has_supported_path:
             continue
+        has_direct_evidence = False
         for test_id in rule.test_ids:
             test = resolve_test(test_id)
             declared = set(getattr(test, "mechanic_rule_ids", ()))
             if rule.id not in declared:
                 raise ValueError(f"Test {test_id} does not declare mechanic rule {rule.id}")
+            evidence = getattr(test, "mechanic_rule_evidence", None)
+            if evidence not in TEST_EVIDENCE_TYPES:
+                raise ValueError(f"Test {test_id} has no valid mechanic evidence kind")
+            if evidence != "contract" and test_id != REGISTRY_CONTRACT_TEST_ID:
+                has_direct_evidence = True
+        if not has_direct_evidence:
+            raise ValueError(f"Supported mechanic rule has no direct non-contract evidence: {rule.id}")
 
 
 def mechanic_diagnostics(rule_ids: Iterable[str]) -> list[dict[str, object]]:

@@ -80,6 +80,7 @@ import ti_parser_hab as hab_layer
 import ti_parser_org as org_layer
 import ti_parser_nation_projection as nation_projection_layer
 from ti_parser_mechanics import Rules
+from ti_parser_nation_validity import PriorityValidityResult, evaluate_priority_validity
 from ti_parser_snapshot import SnapshotConfig
 
 
@@ -8202,7 +8203,135 @@ def first_control_point(indexed: IndexedState, nation: dict[str, Any]) -> dict[s
     return points[0] if points else None
 
 
-def nation_priority_rows(indexed: IndexedState, nation: dict[str, Any]) -> list[dict[str, Any]]:
+def _nation_ui_priority_validity(
+    indexed: IndexedState,
+    nation: dict[str, Any],
+    development: dict[str, Any],
+    *,
+    population: float,
+    allowed_armies: int,
+    current_armies: int,
+) -> dict[str, PriorityValidityResult]:
+    priorities = development.get("priorities") if isinstance(development.get("priorities"), dict) else {}
+    global_config = development.get("globalConfig") if isinstance(development.get("globalConfig"), dict) else {}
+    region_values: list[dict[str, Any]] = []
+    region_refs = nation.get("regions") if isinstance(nation.get("regions"), list) else None
+    regions_complete = region_refs is not None
+    for region_ref in region_refs or []:
+        found = resolve_ref(indexed, region_ref)
+        if found is None:
+            regions_complete = False
+            continue
+        region_values.append(found[2])
+
+    def config_number(name: str) -> float | None:
+        row = global_config.get(name)
+        value = row.get("value") if isinstance(row, dict) else None
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    mission_capacity: bool | None = None
+    required_config = {
+        name: config_number(name)
+        for name in ("coreEcoRegionGDPModifier", "coreResourceRegionGDPModifier", "colonyRegionGDPModifier")
+    }
+    required_region_fields = (
+        "populationInMillions", "coreEconomicRegion", "resourceRegion", "oilRegion", "colonyRegion", "missionControl",
+    )
+    if regions_complete and region_values and all(value is not None for value in required_config.values()) and all(
+        all(field in region for field in required_region_fields) for region in region_values
+    ):
+        weights: list[float] = []
+        for region in region_values:
+            weight = float(region["populationInMillions"])
+            if region["coreEconomicRegion"]:
+                weight *= float(required_config["coreEcoRegionGDPModifier"])
+            if region["resourceRegion"] or region["oilRegion"]:
+                weight *= float(required_config["coreResourceRegionGDPModifier"])
+            if region["colonyRegion"]:
+                weight *= float(required_config["colonyRegionGDPModifier"])
+            weights.append(weight)
+        total_weight = sum(weights)
+        education = nation.get("education")
+        gdp = nation.get("GDP")
+        if total_weight > 0 and isinstance(education, (int, float)) and isinstance(gdp, (int, float)):
+            divisor = max(200.0, 300.0 - 6.0 * float(education))
+            mission_capacity = any(
+                int(region["missionControl"]) < max(
+                    int(region["missionControl"]),
+                    1 + int(((float(gdp) * weight / total_weight) / 1_000_000_000.0) / divisor),
+                )
+                for region, weight in zip(region_values, weights)
+            )
+
+    hostile = nation.get("hostileClaims")
+    hostile_known = isinstance(hostile, list)
+    boost_known = regions_complete and bool(region_values) and all(
+        isinstance(region.get("boostPerYear_dekatons"), (int, float)) for region in region_values
+    )
+    view = {
+        "democracy": nation.get("democracy"),
+        "hasHostileRegion": bool(hostile) if hostile_known else None,
+        "fundingYear": nation.get("spaceFunding_year"),
+        "gdp": nation.get("GDP"),
+        "spaceFlightProgram": nation.get("spaceFlightProgram") if isinstance(nation.get("spaceFlightProgram"), bool) else None,
+        "missionControlHasCapacity": mission_capacity,
+        "allowedArmies": allowed_armies if regions_complete else None,
+        "currentArmies": current_armies,
+        "military": nation.get("military") if isinstance(nation.get("military"), bool) else None,
+        "nuclearProgram": nation.get("nuclearProgram") if isinstance(nation.get("nuclearProgram"), bool) else None,
+        "canBuildSpaceDefenses": nation.get("canBuildSpaceDefenses") if isinstance(nation.get("canBuildSpaceDefenses"), bool) else None,
+        "canBuildSTO": nation.get("canBuildSTOSquadrons") if isinstance(nation.get("canBuildSTOSquadrons"), bool) else None,
+        "hasBoostRegion": any(float(region["boostPerYear_dekatons"]) > 0 for region in region_values) if boost_known else None,
+    }
+    raw_names = {
+        str(priority)
+        for cp in nation_control_points(indexed, nation)
+        for priority in ((cp.get("controlPointPriorities") or {}) if isinstance(cp.get("controlPointPriorities"), dict) else {})
+    }
+    return {
+        name: evaluate_priority_validity(name, view)
+        for name in sorted(set(priorities) | raw_names)
+    }
+
+
+def _nation_ui_control_point_weights(
+    control_points: list[dict[str, Any]],
+    validity: dict[str, PriorityValidityResult],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, cp in enumerate(control_points):
+        raw = cp.get("controlPointPriorities") if isinstance(cp.get("controlPointPriorities"), dict) else {}
+        raw_weights = {str(name): int(as_float(value, 0.0)) for name, value in raw.items()}
+        effective = {
+            name: value for name, value in raw_weights.items()
+            if value > 0 and validity.get(name, PriorityValidityResult(None, "missing validity result")).valid is True
+        }
+        unknown = sorted(
+            name for name, value in raw_weights.items()
+            if value > 0 and validity.get(name, PriorityValidityResult(None, "missing validity result")).valid is None
+        )
+        serialized = int(as_float(cp.get("totalWeightsForControlPoint"), 0.0))
+        recomputed = sum(effective.values())
+        rows.append({
+            "id": ref_id(cp.get("ID")),
+            "position": int(as_float(cp.get("positionInNation"), index)),
+            "rawWeights": raw_weights,
+            "effectiveWeights": effective,
+            "serializedTotalWeight": serialized,
+            "recomputedTotalWeight": recomputed,
+            "serializedNumPrioritiesWithWeight": cp.get("numPrioritiesWithWeight"),
+            "recomputedNumPrioritiesWithWeight": len(effective),
+            "consistent": None if unknown else serialized == recomputed,
+            "unknownPriorities": unknown,
+        })
+    return rows
+
+
+def nation_priority_rows(
+    indexed: IndexedState,
+    nation: dict[str, Any],
+    validity: dict[str, PriorityValidityResult] | None = None,
+) -> list[dict[str, Any]]:
     scenario_rules = active_scenario_rules(indexed)
     ip_multiplier = national_ip_multiplier(indexed)
     control_points = nation_control_points(indexed, nation)
@@ -8227,18 +8356,22 @@ def nation_priority_rows(indexed: IndexedState, nation: dict[str, Any]) -> list[
                 "cost": required_cost,
             }
         )
-    inactive_with_weights = {
+    inactive_with_weights = ({
+        key: int(as_float(value, 0.0))
+        for key, value in priorities.items()
+        if int(as_float(value, 0.0)) > 0 and validity.get(key, PriorityValidityResult(None, "missing validity result")).valid is False
+    } if validity is not None else {
         key: int(as_float(priorities.get(key), 0.0))
         for key in NATION_INACTIVE_PRIORITY_KEYS
         if int(as_float(priorities.get(key), 0.0)) > 0
-    }
+    })
     if inactive_with_weights:
         rows.append(
             {
                 "key": "_inactiveRawWeights",
                 "label": "UI 비활성 원시 weight",
                 "weights": inactive_with_weights,
-                "note": "Raw save keeps these requested weights, but UI/controlPoint totalWeights excludes them because the priority is complete, capped, or unavailable.",
+                "note": "Raw save keeps these requested weights, but live shared validity marks them unavailable.",
             }
         )
     return rows
@@ -8256,6 +8389,7 @@ def calculate_nation_ui(
     nation_id, nation = found
     faction_id, faction = find_faction_state(indexed, faction_name)
     runtime_catalogs = calculation_catalogs(indexed, "nation-ui")
+    development_catalog = runtime_catalogs.nation_development
     trait_templates = runtime_catalogs.traits
     effect_templates = runtime_catalogs.effects
     effect_contexts = faction_effect_contexts(indexed, faction_id)
@@ -8290,6 +8424,15 @@ def calculate_nation_ui(
     max_navies = allowed_armies if can_have_navy else 0
     navies_can_build = max(0, armies["count"] - armies["navies"]) if can_have_navy else 0
     control_points = nation_control_points(indexed, nation)
+    priority_validity = _nation_ui_priority_validity(
+        indexed,
+        nation,
+        development_catalog,
+        population=population,
+        allowed_armies=allowed_armies,
+        current_armies=armies["standardArmies"],
+    )
+    control_point_weights = _nation_ui_control_point_weights(control_points, priority_validity)
     representative_cp = first_control_point(indexed, nation) or {}
     total_weight = int(as_float(representative_cp.get("totalWeightsForControlPoint"), 0.0))
     scenario_name = scenario_template_name(indexed)
@@ -8364,7 +8507,11 @@ def calculate_nation_ui(
         "priorities": {
             "totalWeightPerControlPoint": total_weight,
             "numPrioritiesWithWeight": representative_cp.get("numPrioritiesWithWeight"),
-            "rows": nation_priority_rows(indexed, nation),
+            "rows": nation_priority_rows(indexed, nation, priority_validity),
+            "validityByPriority": {
+                name: result.output() for name, result in sorted(priority_validity.items())
+            },
+            "controlPoints": control_point_weights,
         },
         "diplomacy": {
             "allies": [ref_summary(indexed, item) for item in nation.get("allies", [])],

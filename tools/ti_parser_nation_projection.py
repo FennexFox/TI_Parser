@@ -16,6 +16,7 @@ from ti_parser_income import (
     proportional_cp_contribution,
 )
 from ti_parser_mechanics import Rules, mechanic_diagnostics, validate_rule_execution
+from ti_parser_nation_validity import evaluate_priority_validity
 from ti_parser_projection_coverage import MetricDependencyTracker
 
 
@@ -544,31 +545,52 @@ def _allowed_armies(state: NationProjectionState, context: ProjectionContext) ->
 
 
 def _priority_valid(state: NationProjectionState, priority: str, context: ProjectionContext) -> bool:
-    if priority in {"Economy", "Welfare", "Environment", "Knowledge", "Unity", "Oppression", "Spoils", "LaunchFacilities", "Military"}:
-        return True
-    if priority == "Government":
-        return state.democracy < 10.0 or any(region_id in state.regions for region_id in state.hostile_region_ids)
-    if priority == "Funding":
-        return state.funding_year < 0.005 * (state.gdp / 1_000_000.0)
-    if priority == "MissionControl":
-        if not state.space_flight_program:
-            return False
-        return any(region.mission_control < _region_mc_cap(state, region, context) for region in state.regions.values())
-    if priority == "Military_BuildArmy":
-        return _allowed_armies(state, context) > len(state.standard_armies)
-    if priority == "Military_FoundMilitary":
-        return not state.military
-    if priority == "Civilian_InitiateSpaceflightProgram":
-        return not state.space_flight_program
-    if priority == "Military_InitiateNuclearProgram":
-        return state.military and not state.nuclear_program
-    if priority == "Military_BuildNuclearWeapons":
-        return state.nuclear_program
-    if priority == "Military_BuildSpaceDefenses":
-        return state.military and state.can_build_space_defenses
-    if priority == "Military_BuildSTOSquadron":
-        return state.military and state.can_build_sto and any(region.boost_per_year > 0 for region in state.regions.values())
-    return False
+    mission_control_capacity: bool | None = None
+    allowed_armies: int | None = None
+    try:
+        if priority == "MissionControl":
+            mission_control_capacity = any(
+                region.mission_control < _region_mc_cap(state, region, context)
+                for region in state.regions.values()
+            )
+        if priority == "Military_BuildArmy":
+            allowed_armies = _allowed_armies(state, context)
+    except ProjectionRuntimeStop as exc:
+        raise ProjectionRuntimeStop(
+            exc.reason,
+            rule_ids=(Rules.NATION_PRIORITY_VALIDITY.id, *exc.rule_ids),
+            dependencies=exc.dependencies,
+            affected_metrics=exc.affected_metrics,
+            phase="priorityValidity",
+            priority=priority,
+            mechanic="ValidPriority",
+        ) from exc
+    result = evaluate_priority_validity(priority, {
+        "democracy": state.democracy,
+        "hasHostileRegion": any(region_id in state.regions for region_id in state.hostile_region_ids),
+        "fundingYear": state.funding_year,
+        "gdp": state.gdp,
+        "spaceFlightProgram": state.space_flight_program,
+        "missionControlHasCapacity": mission_control_capacity,
+        "allowedArmies": allowed_armies,
+        "currentArmies": len(state.standard_armies),
+        "military": state.military,
+        "nuclearProgram": state.nuclear_program,
+        "canBuildSpaceDefenses": state.can_build_space_defenses,
+        "canBuildSTO": state.can_build_sto,
+        "hasBoostRegion": any(region.boost_per_year > 0 for region in state.regions.values()),
+    })
+    if result.valid is None:
+        raise ProjectionRuntimeStop(
+            result.reason,
+            rule_ids=(Rules.NATION_PRIORITY_VALIDITY.id,),
+            dependencies=result.dependencies,
+            affected_metrics=("nation.*", "factionContribution.*"),
+            phase="priorityValidity",
+            priority=priority,
+            mechanic="ValidPriority",
+        )
+    return result.valid
 
 
 def _effective_pips(state: NationProjectionState, cp: ControlPointProjectionState, context: ProjectionContext) -> dict[str, int]:
@@ -1460,6 +1482,13 @@ def _run_investment_transaction(
         "mechanicRules": sorted(used),
         "ruleExecutions": rule_executions,
         "mutationTrace": trace,
+        "phaseTrace": [{
+            "phase": "investment.segmentAndAllocation",
+            "segmentIndex": segment_index,
+            "baseInvestmentPointsMonth": base_ip,
+            "allocation": {name: value for name, value in allocation.items() if value},
+            "completedPriorities": [event["priority"] for event in completions],
+        }],
     }
 
 
@@ -1664,6 +1693,26 @@ def _run_monthly_transaction(
         "expectationGuarantee": False,
         "populationUpdates": population_rows,
         "quarterlyTrackerUpdated": quarterly,
+        "phaseTrace": [
+            {
+                "phase": "monthly.controlPointsAndMovement",
+                "currentControlPointCount": state.num_control_points,
+                "requiredControlPointCount": expected_cps,
+                "cohesion": state.cohesion,
+                "unrest": state.unrest,
+            },
+            {
+                "phase": "monthly.population",
+                "populationMillions": state.population_millions,
+                "gdp": state.gdp,
+                "regionOrder": [row["regionId"] for row in population_rows],
+            },
+            *([{
+                "phase": "monthly.quarterlyTracker",
+                "quarter": state.current_quarter,
+                "perCapitaGdp": state.pcgdp_tracker[state.current_quarter],
+            }] if quarterly else []),
+        ],
         "ruleExecutions": [
             {
                 "ruleId": Rules.NATION_PERIODIC_CONTROL_POINTS.id,
@@ -1786,6 +1835,11 @@ def _refresh_rest_caches(
         "cohesionRest": state.cohesion_rest,
         "unrestRest": state.unrest_rest,
         "mechanicRules": sorted(used),
+        "phaseTrace": [{
+            "phase": "rest.cache",
+            "cohesionRest": state.cohesion_rest,
+            "unrestRest": state.unrest_rest,
+        }],
         "ruleExecutions": [
             {
                 "ruleId": Rules.NATION_PERIODIC_DERIVED_CACHE.id,
@@ -1983,6 +2037,7 @@ def run_projection(
         transitions.append({"day": 0, "from": prior, "to": segment_index, "reason": "satisfiedAtStart"})
         advisor_transitions.append({"day": 0, "advisors": [item.output() for item in state.advisors]})
     transactions: list[dict[str, Any]] = []
+    phase_trace: list[dict[str, Any]] = []
     completion_events: list[dict[str, Any]] = []
     checkpoint_rows: list[dict[str, Any]] = []
     used: set[str] = set()
@@ -2020,6 +2075,15 @@ def run_projection(
         state.days_in_campaign = initial_state.days_in_campaign + (moment - initial_state.at).total_seconds() / 86400.0
         if kind == "checkpoint":
             checkpoint_rows.append({"day": day_value, "at": moment.isoformat(), **_state_snapshot(state, context)})
+            phase_trace.append({
+                "at": moment.isoformat(),
+                "day": day_value,
+                "phase": "checkpoint.capture",
+                "populationMillions": state.population_millions,
+                "baseInvestmentPointsMonth": _base_ip(state, context),
+                "cohesionRest": state.cohesion_rest,
+                "unrestRest": state.unrest_rest,
+            })
             continue
         if kind == "investment":
             investment_day = day_value
@@ -2077,11 +2141,29 @@ def run_projection(
         completion_events.extend(transaction.get("completions", []))
         used.update(transaction.get("mechanicRules", []))
         rule_executions.extend(transaction.get("ruleExecutions", []))
+        for phase_row in transaction.get("phaseTrace", []):
+            phase_trace.append({
+                "at": moment.isoformat(),
+                "day": investment_day,
+                **phase_row,
+            })
         evaluate_boundary(
             investment_day,
             "conditionSatisfiedAfterInvestmentTransaction" if kind == "investment" else "conditionSatisfiedAfterPeriodicTransaction",
             moment,
         )
+        condition_phase = {
+            "monthly": "condition.afterMonthly",
+            "investment": "condition.afterInvestment",
+            "rest": "condition.afterRest",
+        }[kind]
+        phase_trace.append({
+            "at": moment.isoformat(),
+            "day": investment_day,
+            "phase": condition_phase,
+            "segmentIndex": segment_index,
+            "pendingSegmentIndex": pending_segment,
+        })
         advisor_used = advisor_used or bool(state.advisors)
     _refresh_public_metric_evidence(state, context)
     final_nation = _nation_snapshot(state, context)
@@ -2172,6 +2254,7 @@ def run_projection(
     }
     if details:
         result["transactions"] = transactions
+        result["phaseTrace"] = phase_trace
     return result
 
 
