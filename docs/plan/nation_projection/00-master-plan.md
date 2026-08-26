@@ -33,6 +33,7 @@
 10. [Authoritative-prefix fail-closed diagnostics](10-authoritative-prefix-diagnostics.md)
 11. [Shared priority validity and independent verification](11-validity-and-verification.md)
 12. [Real-save matrix, documentation, and Graphify refresh](12-real-save-graphify.md)
+13. [Cross-runner mechanics test-ID resolution](13-test-id-import-compatibility.md)
 
 ## Phase Dependencies
 
@@ -48,6 +49,9 @@
 - Phase 10 depends on phase 9 so runtime-stop descendants and affected metrics come from the same dependency tracker.
 - Phase 11 depends on phases 9 and 10 and makes validity and registry evidence shared contracts.
 - Phase 12 depends on phases 9 through 11 and is the final observational real-save, documentation, and graph verification phase.
+- Phase 13 depends on phase 11's registry evidence contract and preserves its
+  canonical dotted test IDs across both unittest discovery and pytest import
+  modes.
 
 ## Source Of Truth Decisions
 
@@ -62,11 +66,15 @@
 - Welfare decolonization is a conditional dependency reached only by the completion that crosses its threshold. Mission Control and BuildArmy coverage is resolved per execution instance, not fixed to the lowest possible mechanic-wide coverage.
 - Phases 9 through 12 supersede phase 8 where it describes whole-transaction rollback, static metric coverage, generic registry contract evidence, or a fixed real-save placement. A verified priority completion, its cost consumption, and required CP fallback/cache repair form an authoritative prefix; a newly activated unsupported priority is gated before its next allocation.
 - Real-save placement assertions are computed from the audited deterministic selection order and current extracted state. Tijuana, a particular CP position, object count, or save value is not a regression constant.
+- Registry `test_ids` remain canonical `tests.<module>.<class>.<method>` paths;
+  the repository test tree is an explicit package so test runners do not change
+  their meaning.
 
 ## Global Validation Expectations
 
 - Pre-extension baseline: 198 tests passed, 1 skipped, and 10 subtests passed.
 - py -3 -m unittest discover -s tests -p 'test_*.py'
+- pytest -q
 - py -3 -m unittest tests.test_mechanics_registry tests.test_catalog_generators tests.test_runtime_catalogs
 - py -3 -m unittest tests.test_nation_projection tests.test_nation_projection_cli tests.test_package_only_runtime
 - $env:TI_PARSER_REAL_SAVE = '<local ExitSave.gz>'; py -3 -m unittest tests.test_nation_projection_real_save; Remove-Item Env:TI_PARSER_REAL_SAVE
