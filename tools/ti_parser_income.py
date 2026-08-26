@@ -374,8 +374,14 @@ def nation_adviser_science_bonus(
         sciences.append(as_float(final_attributes.get("Science"), 0.0))
     if extra_advisor and extra_advisor[0] not in existing_ids:
         sciences.append(extra_advisor[1])
-    sciences.sort(reverse=True)
-    return sum(science / 100.0 / (index + 1.0) for index, science in enumerate(sciences))
+    return adviser_attribute_bonus_from_values(sciences)
+
+
+def adviser_attribute_bonus_from_values(values: list[float] | tuple[float, ...]) -> float:
+    """Return the audited nation Advise stat/100 bonus with descending rank decay."""
+
+    ordered = sorted((float(value) for value in values), reverse=True)
+    return sum(value / 100.0 / (index + 1.0) for index, value in enumerate(ordered))
 
 
 def state_adviser_attribute_bonus(
@@ -394,24 +400,20 @@ def state_adviser_attribute_bonus(
             continue
         final_attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
         values.append(as_float(final_attributes.get(attribute), 0.0))
-    values.sort(reverse=True)
-    return sum(value / 100.0 / (index + 1.0) for index, value in enumerate(values))
+    return adviser_attribute_bonus_from_values(values)
 
 
-def nation_monthly_research(
-    indexed: IndexedState,
-    nation: dict[str, Any],
-    councilor_by_id: dict[int, dict[str, Any]],
-    extra_advisor: tuple[int, float] | None = None,
+def nation_monthly_research_from_values(
+    *,
+    population_millions: float,
+    gdp: float,
+    education: float,
+    democracy: float,
+    cohesion: float,
+    unrest: float,
+    num_control_points: int,
+    advisor_sciences: list[float] | tuple[float, ...] = (),
 ) -> float:
-    population_millions = nation_population_millions(indexed, nation)
-    gdp = as_float(nation.get("GDP"), 0.0)
-    education = as_float(nation.get("education"), 0.0)
-    democracy = as_float(nation.get("democracy"), 0.0)
-    cohesion = as_float(nation.get("cohesion"), 5.0)
-    unrest = as_float(nation.get("unrest"), 0.0)
-    num_control_points = int(as_float(nation.get("numControlPoints"), len(nation_control_points(indexed, nation))))
-
     per_capita_gdp = gdp / (population_millions * 1_000_000.0) if population_millions > 0 else 0.0
     if per_capita_gdp <= 0.0 or population_millions <= 0.0 or education <= 0.0:
         population_component = 0.0
@@ -431,8 +433,61 @@ def nation_monthly_research(
     base += min(population_millions * 1_000_000.0 / 5000.0, num_control_points + education + democracy / 2.0)
     base *= 1.25 - abs(cohesion - 5.0) / 10.0
     base *= 1.0 - unrest * unrest * 0.01
-    base *= 1.0 + nation_adviser_science_bonus(nation, councilor_by_id, extra_advisor)
+    base *= 1.0 + adviser_attribute_bonus_from_values(advisor_sciences)
     return base
+
+
+def nation_monthly_research(
+    indexed: IndexedState,
+    nation: dict[str, Any],
+    councilor_by_id: dict[int, dict[str, Any]],
+    extra_advisor: tuple[int, float] | None = None,
+) -> float:
+    population_millions = nation_population_millions(indexed, nation)
+    gdp = as_float(nation.get("GDP"), 0.0)
+    education = as_float(nation.get("education"), 0.0)
+    democracy = as_float(nation.get("democracy"), 0.0)
+    cohesion = as_float(nation.get("cohesion"), 5.0)
+    unrest = as_float(nation.get("unrest"), 0.0)
+    num_control_points = int(as_float(nation.get("numControlPoints"), len(nation_control_points(indexed, nation))))
+
+    sciences: list[float] = []
+    refs = nation.get("advisingCouncilors") if isinstance(nation.get("advisingCouncilors"), list) else []
+    existing_ids: set[int] = set()
+    for councilor_ref in refs:
+        councilor_id = ref_id(councilor_ref)
+        if councilor_id is None:
+            continue
+        existing_ids.add(councilor_id)
+        summary = councilor_by_id.get(councilor_id, {})
+        attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
+        sciences.append(as_float(attributes.get("Science"), 0.0))
+    if extra_advisor and extra_advisor[0] not in existing_ids:
+        sciences.append(extra_advisor[1])
+    return nation_monthly_research_from_values(
+        population_millions=population_millions,
+        gdp=gdp,
+        education=education,
+        democracy=democracy,
+        cohesion=cohesion,
+        unrest=unrest,
+        num_control_points=num_control_points,
+        advisor_sciences=sciences,
+    )
+
+
+def proportional_cp_contribution(total: float, owned_count: int, num_control_points: int, *, sector_bonus: float = 1.0) -> float:
+    if total <= 0.0 or owned_count <= 0 or num_control_points <= 0:
+        return 0.0
+    return total * sector_bonus / num_control_points * owned_count
+
+
+def mission_control_contribution_from_values(total_mc: int, owned_positions: list[int], num_control_points: int) -> int:
+    if total_mc <= 0 or not owned_positions or num_control_points <= 0:
+        return 0
+    remainder = total_mc % num_control_points
+    threshold = num_control_points - remainder
+    return sum(total_mc // num_control_points + (1 if position >= threshold else 0) for position in owned_positions)
 
 
 def nation_has_owned_knowledge_sector(indexed: IndexedState, nation: dict[str, Any], faction_id: int) -> bool:
@@ -476,15 +531,10 @@ def nation_mission_control_contribution(indexed: IndexedState, nation: dict[str,
     if current_mc <= 0 or num_control_points <= 0:
         return 0
     owned_points = active_owned_control_points(indexed, nation, faction_id)
-    remainder = current_mc % num_control_points
-    threshold = num_control_points - remainder
-    total = 0
+    positions: list[int] = []
     for index, cp in enumerate(owned_points):
         position = cp.get("positionInNation")
         if not isinstance(position, int):
             position = index
-        value = current_mc // num_control_points
-        if position >= threshold:
-            value += 1
-        total += value
-    return total
+        positions.append(position)
+    return mission_control_contribution_from_values(current_mc, positions, num_control_points)
