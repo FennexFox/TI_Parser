@@ -27,8 +27,9 @@ constants.
 Coverage is attached to an executed path, not only to a mechanic name. Static
 rules have one registry coverage. Conditional rules name a registered resolver
 and enumerate every result it may return. A runtime rule execution records the
-resolver, effective coverage, provenance, and dependency rule IDs. An outcome
-outside that closed set is an error rather than an implicit downgrade.
+resolver, effective coverage, inputs, outputs, provenance, and direct dependency
+rule IDs. An outcome outside that closed set is an error rather than an implicit
+downgrade.
 
 ## Rule index
 
@@ -88,14 +89,34 @@ stochastic trajectories after nonlinear feedback. Diagnostics therefore also
 record `stochasticTreatment: "deterministicMeanInput"` and
 `expectationGuarantee: false`.
 
+## Metric dependency evidence
+
+`MetricDependencyTracker` records each calculated output against only the
+metrics it actually read. Evidence carries direct `dependsOn` edges and
+transitive rule IDs, provenance, blockers, and the least-authoritative coverage
+on that path (`exact < expected < aggregateOnly < unsupported`). Public coverage
+therefore includes per-capita GDP, cohesion/unrest rest caches, base IP, every
+asset count, research, every priority's progress, and each target-nation faction
+contribution. A metric unaffected by Population stays exact; a completion whose
+timing depends on mean-path allocation inherits `expected/meanPath` as a control
+dependency. Any public mean-path row also states deterministic mean input and
+`expectationGuarantee: false`.
+
+Rule execution coverage and metric coverage answer different questions. For
+example, equivalent multi-candidate MC placement is `aggregateOnly`, while the
+nation-level MC `+1` may remain exact because every candidate gives the same
+aggregate. Mean-path completion timing can independently lower that aggregate
+metric to expected.
+
 ## Completion-specific boundaries
 
 Welfare activates child rules only as the executed path needs them. Inequality
 and colony-candidate handling do not depend on reaching decolonization. A
 completion that would reach the threshold checks both decolonization and every
 downstream dependency before mutation; a missing dependency rolls back only
-that transaction. This keeps ordinary Welfare paths authoritative without
-silently approximating the distant state transition.
+that incomplete completion to its start boundary. This keeps ordinary Welfare
+paths authoritative without silently approximating the distant state
+transition.
 
 Mission Control's no-candidate path is an audited exact mutation order: the
 handler finds no candidate, sets each CP's raw MC pip to zero, each setter
@@ -133,10 +154,34 @@ The following completion/downstream rules remain non-authoritative:
 A raw nonzero pip for an unsupported completion remains a preflight blocker,
 even if it is currently dormant or invalid; diagnostics separate active and
 dormant pips. Conditional or newly activated dependencies are checked again
-before use. A blocker rolls back the cloned transaction, retains
-`lastAuthoritativeState`, reports the dependency trace, sets
-`authoritativeFinalState` to null, and excludes the plan from comparison.
+before use. CP revalidation/fallback, a fully successful priority handler plus
+cost consumption, and a fully successful periodic phase are authoritative
+boundaries. Only mutations after the last verified boundary roll back. Thus a
+Government completion that reaches the cap preserves its state effect, consumed
+cost, Economy raw pip 1, and repaired cache; the following investment tick stops
+at `beforeAllocation` without ever running Economy allocation/effect. An
+interrupted multi-completion transaction records prior successful completions as
+`authoritativePrefix` under `runtimeStop.attemptedTransaction`. Every blocker
+sets `authoritativeFinalState` to null and excludes the plan from comparison.
 Unsupported effects are never silently treated as zero.
+
+`runtimeStop` retains the compatibility fields `at`, `reason`, and `ruleIds` and
+also records timestamp, simulation day, transaction kind, phase, trigger,
+last-authoritative transaction, authoritative mutations, unsupported next step,
+state context, dependency descendants, and affected metrics. The unsupported
+monthly CP-count path reports current, required, and unclamped counts plus GDP
+and scaling inputs before mutation.
+
+## Shared live priority validity
+
+Projection and `nation-ui` use the same value-only tri-state validity evaluator.
+An unresolved input yields `valid: null` with dependencies and stops projection
+before use; nation UI does not convert it to false. Nation UI reports every CP's
+raw/effective weights, serialized/recomputed total and count, consistency, and
+unknown priorities. `_inactiveRawWeights` remains for compatibility but contains
+only positive raw pips whose live validity is explicitly false. The static key
+grouping that previously mislabeled active Government/MC pips is not used for
+the nation-UI result.
 
 ## User-facing transaction and metric semantics
 
@@ -158,10 +203,12 @@ Unsupported effects are never silently treated as zero.
 ## Validation boundary
 
 One-tick expected-value fixtures keyed by the same registry IDs are the primary
-regression evidence. A save A to save B comparison is strict only when B was
-created by advancing A through a controlled number of updates with no other
-actions or external events. Ordinary campaign endpoints are observational
-validation only; matching tolerances do not prove the intervening policy was
-unchanged. Metric tolerances must be derived from the DLL numeric types,
+regression evidence. Registry links classify tests as `expectedValue`,
+`stateTransition`, `ordering`, `coverageBranch`, or `contract`; a supported rule
+must have direct non-contract evidence. A save A to save B comparison is strict
+only when B was created by advancing A through a controlled number of updates
+with no other actions or external events. Ordinary campaign endpoints are
+observational validation only; matching tolerances do not prove the intervening
+policy was unchanged. Metric tolerances must be derived from the DLL numeric types,
 serialization precision, cadence, and controlled pairs rather than fixed in
 advance.

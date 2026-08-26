@@ -70,8 +70,13 @@
 
 - Added a value-only `PriorityValidityResult` evaluator shared by projection and nation UI. Projection converts unknown to a structured stop; nation UI preserves `valid: null` and dependency details.
 - Nation UI now emits `validityByPriority` and every CP's raw/effective weights, serialized/recomputed totals and counts, consistency, and unknown priority list. `_inactiveRawWeights` contains only live-invalid positive pips.
-- The current CAL save reports Mission Control valid on all four CPs, includes its 3 pips in each effective total, and matches serialized total 10; only the actually invalid spaceflight/space-defense/STO raw pips remain inactive.
+- The opt-in CAL save reports Mission Control as live-valid, includes its raw
+  pips in every CP's recomputed effective total, and matches each serialized
+  cache; only actually invalid positive raw pips remain inactive. No current
+  save count, pip value, or serialized total is a committed fixture.
 - Registry test metadata now requires one of `expectedValue`, `stateTransition`, `ordering`, `coverageBranch`, or `contract`; supported rules fail validation unless at least one linked test is direct and non-contract.
 - Literal fixtures now cover exact Knowledge/Government/rest-cache/economy-score deltas, monthly Population/GDP compound and floor, MC branches/order, BuildArmy selection and maintenance, and CP fallback state.
 - `--details` now exposes transaction-local and flattened phase traces. A single timestamp fixture proves monthly movement, region-order population/GDP, quarterly tracking, condition evaluation, investment/segment application, noon rest cache, rest condition, and checkpoint capture order and state transfer.
-- Validation: 53 focused registry/validity/projection/nation-UI tests, 238 full tests with 6 skips, and 5 opt-in local-save observational smoke tests passed.
+- Validation at the phase boundary: focused registry/validity/projection and
+  nation-UI tests, the full suite, and the opt-in local-save observational smoke
+  suite passed. Phase 12 records the final aggregate counts.

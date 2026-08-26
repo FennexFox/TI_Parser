@@ -14,7 +14,9 @@ Implementation layout:
 - `tools/ti_parser_cli.py` owns argument parsing and command dispatch.
 - `tools/ti_parser_catalogs.py` validates the packaged runtime bundle, manifest, exact scenario overlays, and fingerprints.
 - `tools/ti_parser_mechanics.py` owns stable mechanics rule IDs and DLL/catalog/test provenance.
+- `tools/ti_parser_nation_validity.py` owns the shared value-only, tri-state priority-validity evaluator.
 - `tools/ti_parser_nation_projection.py` owns cloned projection state, plan parsing, transactional updates, and fail-closed coverage.
+- `tools/ti_parser_projection_coverage.py` owns execution-derived metric evidence and dependency propagation.
 - `tools/ti_save_parser.py` keeps the public script entrypoint and thin compatibility wrappers.
 - `tools/catalog_utils.py` contains shared catalog-generator helpers.
 
@@ -189,10 +191,24 @@ unsupported, and Unity remains unsupported until its public-opinion downstream
 effect is projected. Population uses a deterministic mean-input (`meanPath`)
 trajectory: the per-update random input is replaced by zero, but the result is
 not claimed to equal the mathematical expectation across nonlinear stochastic
-trajectories. Unsupported priorities or newly activated dependencies return an
-`incomplete` plan, preserve `lastAuthoritativeState`, and are excluded from
-comparison/ranking. See `docs/nation_projection_mechanics_audit.md` for the
-current rule index, coverage resolvers, and validation boundary.
+trajectories. `metricCoverage` is built from the inputs and outputs actually
+executed, so mean-path provenance reaches only dependent completion effects,
+rest caches, base IP, progress, research, and faction contribution. Rule-level
+placement coverage remains separate from placement-independent aggregate metric
+coverage.
+
+Unsupported priorities or newly activated dependencies return an `incomplete`
+plan and are excluded from comparison/ranking. A completed handler, its cost,
+and CP fallback/cache repair remain in the authoritative prefix; an unsupported
+next allocation/effect is never executed. `runtimeStop` identifies the exact
+timestamp/day/transaction/phase, trigger, authoritative mutations, unsupported
+next step, state context, affected metrics, and attempted transaction.
+`lastAuthoritativeState` and successful `authoritativeFinalState` include CP raw
+and effective pips plus weight caches. `nation-ui` uses the same tri-state live
+priority-validity evaluator and reports every CP's serialized/recomputed weight
+consistency; missing inputs remain `valid: null`, not silently false. See
+`docs/nation_projection_mechanics_audit.md` for the current rule index, coverage
+resolvers, and validation boundary.
 
 The `hab-ui` command reconstructs a hab panel from raw sector/module state and
 module templates, including crew, location-adjusted solar power with active

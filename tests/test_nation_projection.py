@@ -299,6 +299,21 @@ class NationProjectionTransactionTests(unittest.TestCase):
         self.assertEqual(result["metricCoverage"]["nation.funding"]["coverage"], "exact")
         self.assertEqual(result["metricCoverage"]["nation.sustainability"]["coverage"], "exact")
 
+    @mechanic_rule_test(
+        Rules.NATION_POPULATION_MONTHLY_GROWTH.id,
+        Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE.id,
+        evidence="expectedValue",
+    )
+    def test_population_update_changes_next_completion_scaling_by_literal(self):
+        initial = state(annual_growth=0.12, progress={"Knowledge": 0.99})
+        projection._run_monthly_transaction(initial, context(), 0)
+        population = 50.0 * (1.12 ** 0.0833333358168602)
+        scale = (population * 1_000_000.0 / 50_000_000.0) ** -0.35
+        expected_delta = scale * 0.005 * 8.5 / 8.0
+        projection._run_investment_transaction(initial, context(), 1, 0)
+        self.assertAlmostEqual(initial.population_millions, population)
+        self.assertAlmostEqual(initial.education, 8.0 + expected_delta)
+
     def test_rule_executions_expose_actual_inputs_outputs_and_welfare_children(self):
         initial = state(pips={"Welfare": 3}, progress={"Welfare": 0.99})
         result = projection.run_projection(

@@ -39,7 +39,7 @@
 3. Test `meanPath` propagation through Population, GDP, PCGDP, research, cohesion-rest, and contribution results. Assert that no nonlinear dependent metric claims mathematical expectation equivalence.
 4. Add opt-in `TI_PARSER_REAL_SAVE` discovery with a skip when unset; never derive an installation or save path in production code.
 5. Against CAL, inspect current active/dormant/default blockers, then run all-CP replacement scenarios for Knowledge-only; Government/Knowledge/mixed checkpoints; relative-democracy Government-to-Knowledge switching; Knowledge/Welfare; Government-to-Knowledge/Welfare; MC/Knowledge; Army/Knowledge; and a one-year Population/monthly/quarterly/condition path.
-6. Assert CAL's next MC completion is exact at the sole eligible candidate and its next Army completion deterministically selects Tijuana/CP position 1 with 0.2 home maintenance beginning on the next daily investment.
+6. Derive CAL's current MC and Army candidates from extracted state and the audited selection order, then assert the execution selects that result and applies the scenario's packaged home-maintenance value on the next daily investment. Do not freeze a region name, CP position, or maintenance number from one mutable save snapshot.
 7. Run the entire suite plus package-only and scenario-parity checks; document any external installed-source drift separately from repository failures.
 8. Read the Graphify update procedure, update the graph from the finished working tree, verify graph status, and query the new runtime dependencies and output contract.
 9. Update progress, decision logs, and outcomes with exact automated and manual validation results.

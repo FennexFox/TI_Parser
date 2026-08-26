@@ -60,7 +60,9 @@
 
 ## Progress
 
-- Pending.
+- Implementation, documentation, full-suite validation, and opt-in real-save
+  validation are complete. The final Graphify refresh and graph diagnostics are
+  pending the stabilized source commit.
 
 ## Decision log
 
@@ -68,4 +70,29 @@
 
 ## Outcomes / Retrospective
 
-- Pending.
+- The original behavior was reproduced before the fix: Population/GDP/research
+  were `expected/meanPath`, while dependent education/cohesion incorrectly
+  remained exact and rest-cache metrics were absent. Execution-derived evidence
+  now propagates `expected/meanPath` through only the metrics that consume the
+  mean-input trajectory, while unrelated Funding and sustainability remain
+  exact.
+- The static nation-UI inactive-key grouping was the MC false-positive root
+  cause. Shared live validity now keeps valid MC pips effective and reports
+  serialized/recomputed consistency for every current CP without freezing save
+  counts or values.
+- A long Government observational run now stops before the next Economy
+  allocation and preserves the completed Government effect, consumed progress,
+  persistent Economy fallback, and repaired CP caches in
+  `lastAuthoritativeState`. No Economy completion execution is emitted.
+- Ordinary Welfare completions emit the parent and inequality child execution;
+  decolonization rules are absent until their threshold path is actually
+  reached. Synthetic fixtures separately prove completion-local rollback when
+  downstream data is unavailable.
+- Independent fixtures cover Population-to-next-tick scaling, literal priority
+  deltas, rest-cache values, MC branch/mutation ordering, deterministic Army
+  placement/next-tick maintenance, registry evidence, and the complete
+  same-timestamp scheduler phase order.
+- Validation before Graphify: 70 focused tests, 242 full tests with 9 opt-in or
+  environment-dependent skips, and 8 opt-in local-save observational tests all
+  pass. The local save remains an observational smoke input, not strict A-to-B
+  validation.
