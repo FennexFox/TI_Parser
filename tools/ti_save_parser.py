@@ -78,6 +78,7 @@ import ti_parser_snapshot as snapshot_layer
 import ti_parser_income as income_layer
 import ti_parser_hab as hab_layer
 import ti_parser_org as org_layer
+import ti_parser_nation_projection as nation_projection_layer
 from ti_parser_snapshot import SnapshotConfig
 
 
@@ -135,6 +136,7 @@ def calculation_catalogs(indexed: IndexedState, context: str) -> RuntimeCatalogs
                 "research_catalog.json",
                 "ship_catalog.json",
                 "nation_claim_catalog.json",
+                "nation_development_catalog.json",
             ),
         )
     except CatalogError as exc:
@@ -8383,6 +8385,276 @@ def command_nation_ui(save_path: Path, templates_dir: Path | None, args: argpars
     indexed = build_index(data)
     result = calculate_nation_ui(indexed, templates_dir, args.name, args.faction)
     print_json(result, compact=args.compact)
+
+
+PRIORITY_BONUS_ORG_FIELDS = {
+    "Economy": "economyBonus", "Welfare": "welfareBonus", "Environment": "environmentBonus",
+    "Knowledge": "knowledgeBonus", "Government": "governmentBonus", "Unity": "unityBonus",
+    "Oppression": "oppressionBonus", "Funding": "spaceDevBonus", "Spoils": "spoilsBonus",
+    "Civilian_InitiateSpaceflightProgram": "spaceflightBonus", "LaunchFacilities": "spaceflightBonus",
+    "MissionControl": "MCBonus", "Military_FoundMilitary": "militaryBonus", "Military": "militaryBonus",
+    "Military_BuildArmy": "militaryBonus", "Military_BuildNavy": "militaryBonus",
+    "Military_BuildSpaceDefenses": "militaryBonus", "Military_BuildSTOSquadron": "spaceflightBonus",
+}
+PRIORITY_BONUS_EFFECT_CONTEXTS = {
+    "Economy": "EconomyPriority", "Welfare": "WelfarePriority", "Environment": "EnvironmentPriority",
+    "Knowledge": "KnowledgePriority", "Government": "GovernmentPriority", "Unity": "UnityPriority",
+    "Oppression": "OppressionPriority", "Funding": "SpaceDevPriority", "Spoils": "SpoilsPriority",
+    "Civilian_InitiateSpaceflightProgram": "SpaceflightPriority", "LaunchFacilities": "LaunchFacilitiesPriority",
+    "MissionControl": "MissionControlPriority", "Military": "MilitaryPriority",
+    "Military_BuildArmy": "BuildArmyPriority", "Military_BuildNavy": "UpgradeArmyPriority",
+    "Military_InitiateNuclearProgram": "BuildNuclearWeaponsPriority",
+    "Military_BuildNuclearWeapons": "BuildNuclearWeaponsPriority",
+    "Military_BuildSpaceDefenses": "BuildSpaceDefensesPriority", "Military_BuildSTOSquadron": "BuildSTOSquadronPriority",
+}
+
+
+def faction_priority_bonuses_for_projection(
+    indexed: IndexedState,
+    faction_id: int,
+    faction: dict[str, Any],
+    priorities: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    effect_templates: dict[str, dict[str, Any]],
+) -> dict[str, float]:
+    bonuses = {name: 0.0 for name in priorities}
+    for councilor_id in faction_councilor_ids(faction):
+        councilor = state_value_by_id(indexed, councilor_id) or {}
+        for org_ref in councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []:
+            org = state_value_by_id(indexed, ref_id(org_ref)) or {}
+            if not org.get("applyingBonuses"):
+                continue
+            for priority, field in PRIORITY_BONUS_ORG_FIELDS.items():
+                if priority in bonuses:
+                    bonuses[priority] += as_float(org.get(field), 0.0)
+        for trait_name in councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []:
+            trait = trait_templates.get(str(trait_name), {})
+            for row in trait.get("priorityBonuses") if isinstance(trait.get("priorityBonuses"), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                priority = str(row.get("priority") or "")
+                if priority in bonuses:
+                    bonuses[priority] += as_float(row.get("bonus"), 0.0)
+    for _, hab in faction_hab_states(indexed, faction):
+        for priority, value in hab_leo_priority_bonuses(hab, hab_module_records(indexed, hab, load_hab_module_catalog())).items():
+            if priority in bonuses:
+                bonuses[priority] += as_float(value, 0.0)
+    contexts = faction_effect_contexts(indexed, faction_id)
+    for priority, context_name in PRIORITY_BONUS_EFFECT_CONTEXTS.items():
+        if priority in bonuses:
+            bonuses[priority] = apply_effect_modifiers(contexts, effect_templates, context_name, bonuses[priority])
+    return bonuses
+
+
+def projection_advisor_profiles(
+    indexed: IndexedState,
+    faction_id: int,
+    faction: dict[str, Any],
+    councilor_by_id: dict[int, dict[str, Any]],
+) -> tuple[dict[int, nation_projection_layer.AdvisorProfile], dict[int, nation_projection_layer.AdvisorProfile]]:
+    all_profiles: dict[int, nation_projection_layer.AdvisorProfile] = {}
+    available: dict[int, nation_projection_layer.AdvisorProfile] = {}
+    roster = set(faction_councilor_ids(faction))
+    for entry in type_entries(indexed, "TICouncilorState"):
+        councilor = entry.get("Value") or {}
+        councilor_id = raw_state_id(entry)
+        if councilor_id is None:
+            continue
+        summary = councilor_by_id.get(councilor_id, {})
+        attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
+        profile = nation_projection_layer.AdvisorProfile(
+            "saved",
+            str(councilor.get("displayName") or councilor.get("templateName") or councilor_id),
+            as_float(attributes.get("Administration"), 0.0),
+            as_float(attributes.get("Science"), 0.0),
+            councilor_id,
+        )
+        active = councilor.get("status") == "Active" and councilor.get("exists", True) and not councilor.get("archived")
+        if active:
+            all_profiles[councilor_id] = profile
+        if councilor_id in roster and ref_id(councilor.get("faction")) == faction_id and active:
+            available[councilor_id] = profile
+    return all_profiles, available
+
+
+def extract_nation_projection_state(
+    indexed: IndexedState,
+    nation_id: int,
+    nation: dict[str, Any],
+    all_advisors: dict[int, nation_projection_layer.AdvisorProfile],
+    owner_bonuses: dict[int, dict[str, float]],
+    global_config: dict[str, Any],
+) -> nation_projection_layer.NationProjectionState:
+    time_state = first_value(indexed, "TITimeState") or {}
+    start = ti_datetime(time_state.get("currentDateTime"))
+    if start is None:
+        raise nation_projection_layer.ProjectionInputError("Save has no valid TITimeState.currentDateTime")
+    points = nation_control_points(indexed, nation)
+    control_points: dict[int, nation_projection_layer.ControlPointProjectionState] = {}
+    positions: set[int] = set()
+    for index, cp in enumerate(points):
+        cp_id = int(as_float((cp.get("ID") or {}).get("value"), -1))
+        position = cp.get("positionInNation")
+        if cp_id < 0 or not isinstance(position, int) or position in positions:
+            raise nation_projection_layer.ProjectionInputError("Target nation has invalid or duplicate control-point identity/position")
+        if ref_id(cp.get("nation")) not in {None, nation_id}:
+            raise nation_projection_layer.ProjectionInputError("Control point nation reference does not match target nation")
+        positions.add(position)
+        owner_id = ref_id(cp.get("faction"))
+        raw_pips = cp.get("controlPointPriorities") if isinstance(cp.get("controlPointPriorities"), dict) else {}
+        control_points[cp_id] = nation_projection_layer.ControlPointProjectionState(
+            cp_id, position, owner_id, bool(cp.get("benefitsDisabled")), cp.get("controlPointType"),
+            {str(key): int(as_float(value, 0.0)) for key, value in raw_pips.items()},
+            dict(owner_bonuses.get(owner_id or -1, {})),
+        )
+    regions: dict[int, nation_projection_layer.RegionProjectionState] = {}
+    total_population = nation_population_millions(indexed, nation)
+    pcgdp = as_float(nation.get("GDP"), 0.0) / (total_population * 1_000_000.0) if total_population else 0.0
+    space_defenses = 0
+    sto_fighters = 0
+    for region_ref in nation.get("regions") if isinstance(nation.get("regions"), list) else []:
+        region_id = ref_id(region_ref)
+        region = state_value_by_id(indexed, region_id)
+        if region_id is None or not isinstance(region, dict):
+            raise nation_projection_layer.ProjectionInputError("Target nation contains an unresolved region reference")
+        regions[region_id] = nation_projection_layer.RegionProjectionState(
+            region_id,
+            as_float(region.get("populationInMillions") or region.get("population_Millions"), 0.0),
+            as_float(region.get("boostPerYear_dekatons"), 0.0),
+            int(as_float(region.get("missionControl"), 0.0)),
+            as_float(region.get("annualPopulationGrowth"), 0.0) if isinstance(region.get("annualPopulationGrowth"), (int, float)) else None,
+            pcgdp,
+        )
+        defense = state_value_by_id(indexed, ref_id(region.get("spaceDefenseFacility"))) or {}
+        space_defenses += 1 if defense.get("weaponTemplateName") else 0
+        sto_fighters += int(as_float(region.get("numSTOFighters"), 0.0))
+    army_maintenance = 0.0
+    army_count = 0
+    navy_count = 0
+    for army_ref in nation.get("armies") if isinstance(nation.get("armies"), list) else []:
+        army = state_value_by_id(indexed, ref_id(army_ref)) or {}
+        if army.get("destroyed"):
+            continue
+        army_count += 1
+        home = ref_id(army.get("homeRegion")) == ref_id(army.get("currentRegion"))
+        army_maintenance += float(global_config["nationalInvestmentArmyFactorHome"]["value"] if home else global_config["nationalInvestmentArmyFactorAway"]["value"])
+        if army.get("deploymentType") == "Naval":
+            navy_count += 1
+            army_maintenance += float(global_config["nationalInvestmentNavyFactor"]["value"])
+    current_advisors = tuple(all_advisors[councilor_id] for councilor_id in (ref_id(value) for value in nation.get("advisingCouncilors", [])) if councilor_id in all_advisors)
+    admin = income_layer.adviser_attribute_bonus_from_values([profile.administration for profile in current_advisors])
+    economy_score = as_float(nation.get("economyScore"), 0.0)
+    unrest_factor = 1.0 - max(as_float(nation.get("unrest"), 0.0) - 2.0, 0.0) / 10.0
+    denominator = economy_score * (1.0 + admin) * unrest_factor
+    occupation_factor = (as_float(nation.get("baseInvestmentPoints_month"), 0.0) + army_maintenance) / denominator if denominator > 0 else 1.0
+    occupation_factor = min(max(occupation_factor, 0.0), 1.0)
+    progress = nation.get("_accumulatedInvestmentPoints") if isinstance(nation.get("_accumulatedInvestmentPoints"), dict) else {}
+    return nation_projection_layer.NationProjectionState(
+        nation_id=nation_id, at=start, gdp=as_float(nation.get("GDP"), 0.0),
+        inequality=as_float(nation.get("inequality"), 0.0), education=as_float(nation.get("education"), 0.0),
+        democracy=as_float(nation.get("democracy"), 0.0), cohesion=as_float(nation.get("cohesion"), 0.0),
+        cohesion_rest=as_float(nation.get("cohesionRestState_dailyCache"), as_float(nation.get("cohesion"), 0.0)),
+        unrest=as_float(nation.get("unrest"), 0.0), unrest_rest=as_float(nation.get("unrestRestState_dailyCache"), as_float(nation.get("unrest"), 0.0)),
+        sustainability=as_float(nation.get("sustainability"), 0.0), military_tech=as_float(nation.get("militaryTechLevel"), 0.0),
+        funding_year=as_float(nation.get("spaceFunding_year"), 0.0), economy_score=economy_score,
+        occupation_factor=occupation_factor, army_maintenance=army_maintenance,
+        progress={str(key): as_float(value, 0.0) for key, value in progress.items()}, regions=regions,
+        control_points=control_points, advisors=current_advisors, mission_control=nation_current_mission_control(indexed, nation),
+        army_count=army_count, navy_count=navy_count, nuclear_weapons=int(as_float(nation.get("numNuclearWeapons"), 0.0)),
+        space_defenses=space_defenses, sto_fighters=sto_fighters,
+    )
+
+
+def calculate_nation_projection(
+    indexed: IndexedState,
+    nation_name: str,
+    faction_name: str | None,
+    plan_payload: Any,
+    *,
+    days: int,
+    checkpoints: list[int],
+    details: bool,
+    diagnostics: bool,
+) -> dict[str, Any]:
+    found = match_raw_state(indexed, "TINationState", nation_name)
+    if not found or found[0] is None:
+        raise SystemExit(f"Nation not found: {nation_name}")
+    nation_id, nation = found
+    faction_id, faction = find_faction_state(indexed, faction_name)
+    catalogs = calculation_catalogs(indexed, "nation-projection")
+    development = catalogs.nation_development
+    priorities = development.get("priorities") if isinstance(development.get("priorities"), dict) else {}
+    global_config = development.get("globalConfig") if isinstance(development.get("globalConfig"), dict) else {}
+    _, councilor_by_id = councilor_summary_maps(indexed, catalogs.traits)
+    all_advisors, available_advisors = projection_advisor_profiles(indexed, faction_id, faction, councilor_by_id)
+    owner_bonuses: dict[int, dict[str, float]] = {}
+    for cp in nation_control_points(indexed, nation):
+        owner_id = ref_id(cp.get("faction"))
+        owner = state_value_by_id(indexed, owner_id)
+        if owner_id is not None and isinstance(owner, dict) and owner_id not in owner_bonuses:
+            owner_bonuses[owner_id] = faction_priority_bonuses_for_projection(indexed, owner_id, owner, priorities, catalogs.traits, catalogs.effects)
+    state = extract_nation_projection_state(indexed, nation_id, nation, all_advisors, owner_bonuses, global_config)
+    plans, goals = nation_projection_layer.parse_projection_document(plan_payload, state=state, councilors=available_advisors, priorities=priorities)
+    contexts = faction_effect_contexts(indexed, faction_id)
+    research_factor = apply_effect_modifiers(contexts, catalogs.effects, "ControlPointResearch", 1.0)
+    context = nation_projection_layer.ProjectionContext(
+        faction_id=faction_id, priorities=priorities, global_config=global_config,
+        diversity_bonuses=development.get("diversityBonuses") or {}, national_ip_multiplier=national_ip_multiplier(indexed),
+        initial_funding_pool_year=nation_federation_pooled_year(indexed, nation, "Money"),
+        initial_own_funding_year=as_float(nation.get("spaceFunding_year"), 0.0),
+        initial_boost_pool_year=nation_federation_pooled_year(indexed, nation, "Boost"),
+        knowledge_sector_owned=income_layer.nation_has_owned_knowledge_sector(indexed, nation, faction_id),
+        financial_sector_owned=income_layer.nation_financial_sector_owned(indexed, nation, faction_id),
+        knowledge_sector_bonus=INCOME_CONFIG.knowledge_sector_research_bonus,
+        financial_sector_bonus=INCOME_CONFIG.financial_sector_funding_bonus,
+        research_effect_factor=research_factor,
+    )
+    topbar = calculate_topbar(indexed, None, faction_name, include_details=False)
+    observed = {
+        "researchMonthly": ((topbar.get("resources") or {}).get("Research") or {}).get("monthly"),
+        "fundingMonthly": ((topbar.get("resources") or {}).get("Money") or {}).get("monthly"),
+        "boostMonthly": ((topbar.get("resources") or {}).get("Boost") or {}).get("monthly"),
+        "missionControlCapacity": ((topbar.get("resources") or {}).get("MissionControl") or {}).get("capacity"),
+    }
+    faction_context = {
+        "id": faction_id, "template": faction.get("templateName"), "display": faction.get("displayName"),
+        "observedTotalAtStart": observed,
+        "scope": "observed whole-faction context only; excluded from conditions, comparison and future projection",
+    }
+    source_notes = [
+        "Runtime mechanics use packaged, hash-verified catalog data; raw templates and DLL are generator/audit inputs only.",
+        "factionContribution.* is only the selected faction's contribution from the target nation.",
+        "Advisor policy assumes successful continuous Advise renewal without travel, failure or opportunity cost.",
+        "Existing save-to-save comparisons are observational unless produced by a controlled no-action validation run.",
+    ]
+    return nation_projection_layer.projection_output(
+        state, plans, context, days=days, checkpoints=checkpoints, goals=goals, details=details,
+        diagnostics=diagnostics, faction_context=faction_context, source_notes=source_notes,
+    )
+
+
+def command_nation_projection(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    plan_payload = None
+    if args.plan_file:
+        try:
+            plan_payload = json.loads(Path(args.plan_file).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise nation_projection_layer.ProjectionInputError(f"Unable to read plan file: {exc}") from exc
+    checkpoints = []
+    if args.checkpoints:
+        try:
+            checkpoints = sorted({int(value) for value in args.checkpoints.split(",") if value.strip()})
+        except ValueError as exc:
+            raise nation_projection_layer.ProjectionInputError("--checkpoints must be comma-separated integer days") from exc
+        if any(value < 0 or value > args.days for value in checkpoints):
+            raise nation_projection_layer.ProjectionInputError("Checkpoint days must be inside the projection horizon")
+    result = calculate_nation_projection(
+        indexed, args.name, args.faction, plan_payload, days=args.days, checkpoints=checkpoints,
+        details=args.details, diagnostics=args.diagnostics,
+    )
+    print_json(clean_numbers(result, 6), compact=args.compact)
 
 
 def command_summary(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
