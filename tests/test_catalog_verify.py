@@ -67,6 +67,35 @@ class CatalogVerifyTests(unittest.TestCase):
             self.templates / "TIGlobalConfig.json",
             {"dataName": "globalConfig", "democracyDecreaseToMakeHostileClaim": 1.5},
         )
+        write_json(
+            self.templates / "TINationTemplate.json",
+            [{"dataName": "Nation_Test", "popGrowthModifier": 0.0}],
+        )
+        write_json(
+            self.templates / "TIRegionTemplate.json",
+            [
+                {
+                    "dataName": "Region_Test",
+                    "mapRegionName": "map_Region_Test",
+                    "annualPopGrowthModifier": 0.5,
+                    "environment": "Standard",
+                    "mineCapable": False,
+                    "oilCapable": False,
+                }
+            ],
+        )
+        write_json(
+            self.templates / "TIMapRegionTemplate.json",
+            [{"dataName": "map_Region_Test", "latitude": 1.0, "longitude": 2.0}],
+        )
+        write_json(
+            self.templates / "TIStartTimeTemplate.json",
+            [{"dataName": "Start_Test", "populationRegressionPeriod_years": 20.0}],
+        )
+        write_json(
+            self.templates / "TIBilateralTemplate.json",
+            [{"dataName": "Adj_Test", "relationType": "PhysicalAdjacency", "region1": "map_Region_Test", "region2": "map_Region_Test"}],
+        )
         for collection, (filename, _kind, _fields) in runtime_builder.SHIP_COLLECTIONS.items():
             row = {
                 "dataName": f"{collection}_Test",

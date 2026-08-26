@@ -1,5 +1,5 @@
 {
-  "bundleFingerprint": "ecee2a6b754f0877ffc47a8d8ac127380defe87574441d9e5d10670d263acba0",
+  "bundleFingerprint": "516a50b098b2b8f02b6ed573422942d453c83169f90f642ebae8611e4f471066",
   "catalogs": {
     "effect_catalog.json": {
       "payloadFingerprint": "b913b2d945d30d2b63e12844cc3a02bfb1ceabd5ca992a4662d3cf4f44380ebe",
@@ -12,9 +12,9 @@
       "sha256": "2178103106ac40d14981f918a52121dab12b357c85fe6b857912c347be29aa84"
     },
     "nation_development_catalog.json": {
-      "payloadFingerprint": "117d6310c5c6893f4c7ddbe1a052df94b2f34c1c317b0993076b45c2eb75ac58",
+      "payloadFingerprint": "992b874388ea7efccb7b512638360be875071b4599c3af0a064e34c6cdb16f00",
       "schemaVersion": 1,
-      "sha256": "3d074422ae660f6380e64b2180d70d66d6c26afd07caa83799479596dd5b9acd"
+      "sha256": "9917f9f6160a4c9d34701c5b4de8e0c14d14b290e7525d12cd72b37a280e5aeb"
     },
     "org_catalog.json": {
       "payloadFingerprint": "62c90f9eeb27c558ad99ee7997eb1f36ec49d2c85ab9e19da43537d612135cca",

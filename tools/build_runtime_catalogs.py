@@ -44,11 +44,37 @@ PRIORITY_CONFIG_FIELDS = (
     ("Military_BuildSpaceDefenses", 18, "priority_DEF", 50.0),
     ("Military_BuildSTOSquadron", 19, "priority_STO", 10.0),
 )
-COMPILED_NATION_GLOBALS: dict[str, float] = {
+COMPILED_NATION_GLOBALS: dict[str, int | float] = {
+    "numEcosForCoreEcoRegion": 1200,
+    "numEcosForCoreMiningRegion": 750,
+    "numEcosForCoreOilRegion": 500,
+    "numPrioritiesForLegitimize": 200,
     "nationalInvestmentArmyFactorHome": 0.5,
     "nationalInvestmentArmyFactorAway": 1.0,
     "nationalInvestmentNavyFactor": 0.5,
+    "maxCombinedImpactFromHostileClaims": 16.0,
+    "badInequality": 4.0,
+    "severeInequality": 4.75,
+    "cohesionImpactPerKMtoPopCenter": 0.0025,
+    "maxDistanceImpactOnCohesion": -7.5,
+    "cohesionImpactMultiplierIfSeparatistMovement": 1.0,
+    "inequalityCohesionMultiplier": 2.25,
+    "populationCohesionImpactPower": 0.2,
+    "publicEliteIdeologicalDistanceCohesionMultiplier": 2.0,
+    "publicOpinionDispersionCohesionMultiplier": 6.0,
+    "controlPointIPScaling": 0.35,
+    "controlPointIPFactor": 1.0,
+    "controlPointCountScaling": 0.18,
+    "controlPointScalingDivisor": 1.09,
+    "coreEcoRegionGDPModifier": 1.25,
+    "coreResourceRegionGDPModifier": 1.25,
+    "colonyRegionGDPModifier": 0.5,
+    "coreMineralBuildMilitaryModifier": 0.05,
+    "federationGDPEconomyBonus": 0.01,
     "populationBasedIPEffectScaling": -0.35,
+    "minPopulationForFirstArmy_millions": 5.0,
+    "minPopulationForAdditionalArmiesPer_millions": 25.0,
+    "welfarePriorityInequalityChange": -0.005,
     "knowledgePriorityEducationIncrease": 0.005,
     "governmentPriorityDemocracyIncrease": 0.01,
     "unityPriorityEducationChange": -0.001,
@@ -60,6 +86,53 @@ COMPILED_NATION_GLOBALS: dict[str, float] = {
     "maxMonthlyCohesionDecrease_cap": 0.25,
     "maxMonthlyUnrestMovement_normal": 0.25,
     "maxMonthlyUnrestMovement_rapidIncrease": 1.0,
+}
+NATION_DEVELOPMENT_TEMPLATE_FIELDS: dict[str, tuple[str, tuple[str, ...], dict[str, Any]]] = {
+    "nationTemplates": (
+        "TINationTemplate.json",
+        ("dataName", "popGrowthModifier"),
+        {"popGrowthModifier": 0.0},
+    ),
+    "regionTemplates": (
+        "TIRegionTemplate.json",
+        (
+            "dataName",
+            "mapRegionName",
+            "annualPopGrowthModifier",
+            "environment",
+            "mineCapable",
+            "oilCapable",
+        ),
+        {
+            "annualPopGrowthModifier": 0.0,
+            "environment": "Standard",
+            "mineCapable": False,
+            "oilCapable": False,
+        },
+    ),
+    "mapRegionTemplates": (
+        "TIMapRegionTemplate.json",
+        ("dataName", "latitude", "longitude"),
+        {},
+    ),
+    "startTimeTemplates": (
+        "TIStartTimeTemplate.json",
+        ("dataName", "populationRegressionPeriod_years"),
+        {"populationRegressionPeriod_years": 20.0},
+    ),
+    "bilateralTemplates": (
+        "TIBilateralTemplate.json",
+        ("dataName", "relationType", "region1", "region2", "projectUnlockName", "friendlyOnly"),
+        {},
+    ),
+}
+NATION_DEVELOPMENT_TEMPLATE_DEFAULT_ORIGINS = {
+    "nationTemplates.popGrowthModifier": "TINationTemplate compiled field default",
+    "regionTemplates.annualPopGrowthModifier": "TIRegionTemplate compiled field default",
+    "regionTemplates.environment": "TIRegionTemplate compiled field initializer",
+    "regionTemplates.mineCapable": "TIRegionTemplate compiled field default",
+    "regionTemplates.oilCapable": "TIRegionTemplate compiled field default",
+    "startTimeTemplates.populationRegressionPeriod_years": "TIStartTimeTemplate compiled field initializer",
 }
 PRIORITY_DIVERSITY_BONUSES = {
     "Economy": 0.5,
@@ -505,6 +578,21 @@ def normalized_collection(
     return result
 
 
+def normalized_development_collection(
+    rows: dict[str, dict[str, Any]],
+    fields: Iterable[str],
+    compiled_defaults: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Resolve serialized template rows against audited CLR field defaults."""
+
+    result: dict[str, dict[str, Any]] = {}
+    for name in sorted(rows):
+        row = deepcopy(compiled_defaults)
+        row.update(normalize_fields(rows[name], fields))
+        result[name] = row
+    return result
+
+
 def resolved_override(
     base_rows: dict[str, dict[str, Any]],
     overlay_path: Path | None,
@@ -715,8 +803,13 @@ def _nation_development_payload(config: dict[str, Any]) -> dict[str, Any]:
     global_config: dict[str, dict[str, Any]] = {}
     for field, compiled_default in COMPILED_NATION_GLOBALS.items():
         configured = config.get(field)
+        value = configured if isinstance(configured, (int, float)) else compiled_default
+        if isinstance(compiled_default, int):
+            value = int(value)
+        else:
+            value = float(value)
         global_config[field] = {
-            "value": float(configured) if isinstance(configured, (int, float)) else compiled_default,
+            "value": value,
             "valueOrigin": "TIGlobalConfig.json" if isinstance(configured, (int, float)) else "TIGlobalConfig compiled field initializer",
         }
     return {
@@ -724,6 +817,7 @@ def _nation_development_payload(config: dict[str, Any]) -> dict[str, Any]:
         "globalConfig": global_config,
         "controlPointPips": {"minimum": 0, "maximum": 3},
         "diversityBonuses": dict(PRIORITY_DIVERSITY_BONUSES),
+        "templateDefaultOrigins": dict(NATION_DEVELOPMENT_TEMPLATE_DEFAULT_ORIGINS),
     }
 
 
@@ -735,24 +829,42 @@ def build_nation_development_catalog(
 ) -> dict[str, Any]:
     config_path = templates_dir / "TIGlobalConfig.json"
     base = _nation_development_payload(_global_config(config_path))
+    base_template_rows: dict[str, dict[str, dict[str, Any]]] = {}
+    for collection, (filename, fields, compiled_defaults) in NATION_DEVELOPMENT_TEMPLATE_FIELDS.items():
+        rows = index_raw_rows(templates_dir / filename)
+        base_template_rows[collection] = rows
+        base[collection] = normalized_development_collection(rows, fields, compiled_defaults)
     sources = [
         source_entry(config_path, "base/TIGlobalConfig.json"),
         *scenario_metadata_sources(templates_dir, scenario_dirs),
     ]
+    for filename, _fields, _compiled_defaults in NATION_DEVELOPMENT_TEMPLATE_FIELDS.values():
+        sources.append(source_entry(templates_dir / filename, f"base/{filename}"))
     if assembly_path.is_file():
         sources.append(source_entry(assembly_path, "TerraInvicta_Data/Managed/Assembly-CSharp.dll"))
     overrides: dict[str, dict[str, Any]] = {}
     for scenario, directory in scenario_dirs.items():
         overlay_path = directory / "TIGlobalConfig.json"
-        if not overlay_path.is_file():
-            continue
-        sources.append(source_entry(overlay_path, f"{scenario}/TIGlobalConfig.json"))
         merged_config = deepcopy(_global_config(config_path))
-        merged_config.update(_global_config(overlay_path))
+        if overlay_path.is_file():
+            sources.append(source_entry(overlay_path, f"{scenario}/TIGlobalConfig.json"))
+            merged_config.update(_global_config(overlay_path))
         selected = _nation_development_payload(merged_config)
         changed: dict[str, Any] = {}
         for collection in ("priorities", "globalConfig"):
             rows = {name: row for name, row in selected[collection].items() if base[collection].get(name) != row}
+            if rows:
+                changed[collection] = rows
+        for collection, (filename, fields, compiled_defaults) in NATION_DEVELOPMENT_TEMPLATE_FIELDS.items():
+            template_overlay_path = directory / filename
+            if template_overlay_path.is_file():
+                sources.append(source_entry(template_overlay_path, f"{scenario}/{filename}"))
+            resolved = normalized_development_collection(
+                merge_raw_rows(base_template_rows[collection], template_overlay_path),
+                fields,
+                compiled_defaults,
+            )
+            rows = {name: row for name, row in resolved.items() if base[collection].get(name) != row}
             if rows:
                 changed[collection] = rows
         if changed:
