@@ -426,6 +426,38 @@ class NationProjectionTransactionTests(unittest.TestCase):
         self.assertEqual(result["lastAuthoritativeState"]["nation"]["missionControl"], 0)
         self.assertEqual(initial.progress["MissionControl"], 0.99)
 
+    def test_interrupted_transaction_keeps_completed_authoritative_prefix(self):
+        initial = state(
+            pips={"Knowledge": 1, "MissionControl": 1},
+            progress={"Knowledge": 0.99, "MissionControl": 0.99},
+        )
+        second = copy.deepcopy(initial.regions[1])
+        second.id = 2
+        second.region_order = 1
+        second.colony = True
+        initial.regions[1].mission_control = 0
+        second.mission_control = 0
+        initial.regions[2] = second
+        initial.mission_control = 0
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+            details=True,
+        )
+        self.assertEqual(result["status"], "incomplete")
+        self.assertGreater(result["lastAuthoritativeState"]["nation"]["education"], 8.0)
+        event = result["completionEvents"][0]
+        self.assertEqual(event["priority"], "Knowledge")
+        self.assertEqual(event["transactionStatus"], "authoritativePrefix")
+        self.assertEqual(result["transactions"], [])
+        attempted = result["runtimeStop"]["attemptedTransaction"]
+        self.assertEqual(attempted["phase"], "priorityCompletion")
+        self.assertEqual(attempted["completions"][0]["priority"], "Knowledge")
+        self.assertEqual(result["runtimeStop"]["lastAuthoritativeTransaction"]["transactionStatus"], "authoritativePrefix")
+        self.assertEqual(result["runtimeStop"]["trigger"]["priority"], "MissionControl")
+
     @mechanic_rule_test(
         Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id,
         Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id,
@@ -463,17 +495,62 @@ class NationProjectionTransactionTests(unittest.TestCase):
         self.assertIn(Rules.NATION_PERIODIC_CONTROL_POINTS.id, result["missingMechanicRules"])
         self.assertEqual(result["lastAuthoritativeState"]["nation"]["populationMillions"], 50.0)
         self.assertEqual(result["runtimeStop"]["at"], "2030-02-01T00:00:00")
+        self.assertEqual(result["runtimeStop"]["phase"], "beforeControlPointCountMutation")
+        self.assertEqual(result["runtimeStop"]["stateContext"]["currentControlPointCount"], 1)
+        self.assertGreater(result["runtimeStop"]["stateContext"]["requiredControlPointCount"], 1)
+        self.assertEqual(result["runtimeStop"]["transactionKind"], "monthly")
 
-    def test_runtime_unsupported_economy_fallback_rolls_back_transaction(self):
+    def test_government_cap_effect_cost_and_economy_fallback_are_authoritative(self):
+        initial = state(pips={"Government": 3}, progress={"Government": 0.99})
+        initial.democracy = 9.999
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=2,
+            details=True,
+        )
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["lastAuthoritativeState"]["nation"]["democracy"], 10.0)
+        self.assertLess(result["lastAuthoritativeState"]["nation"]["priorityProgress"]["Government"], 1.0)
+        control_point = result["lastAuthoritativeState"]["controlPoints"][0]
+        self.assertEqual(control_point["rawPips"]["Government"], 3)
+        self.assertEqual(control_point["rawPips"]["Economy"], 1)
+        self.assertEqual(control_point["effectivePips"], {"Economy": 1})
+        government_event = next(event for event in result["completionEvents"] if event["priority"] == "Government")
+        self.assertEqual(government_event["remainingProgress"], result["lastAuthoritativeState"]["nation"]["priorityProgress"]["Government"])
+        self.assertEqual(result["runtimeStop"]["phase"], "beforeAllocation")
+        self.assertTrue(any(
+            row["operation"] == "defaultEconomy"
+            for row in result["runtimeStop"]["authoritativeMutations"]
+        ))
+        self.assertFalse(any(
+            row["ruleId"] == Rules.NATION_PRIORITY_ECONOMY_COMPLETE.id
+            for row in result["ruleExecutions"]
+        ))
+
+    def test_runtime_unsupported_economy_fallback_preserves_authoritative_prefix(self):
         initial = state(pips={"MissionControl": 3}, progress={"MissionControl": 0.99})
         initial.regions[1].mission_control = 0
         initial.regions[1].fully_occupied = True
         initial.mission_control = 0
         plan = projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),))
-        result = projection.run_projection(initial, plan, context(), days=1)
+        result = projection.run_projection(initial, plan, context(), days=2, details=True)
         self.assertEqual(result["status"], "incomplete")
         self.assertIn("nation.priority.economy.complete", result["missingMechanicRules"])
         self.assertEqual(result["lastAuthoritativeState"]["nation"]["missionControl"], 0)
+        control_point = result["lastAuthoritativeState"]["controlPoints"][0]
+        self.assertEqual(control_point["rawPips"]["MissionControl"], 0)
+        self.assertEqual(control_point["rawPips"]["Economy"], 1)
+        self.assertEqual(control_point["effectivePips"], {"Economy": 1})
+        self.assertEqual(result["runtimeStop"]["phase"], "beforeAllocation")
+        self.assertEqual(result["runtimeStop"]["trigger"]["priority"], "Economy")
+        self.assertEqual(result["runtimeStop"]["unsupportedNextStep"]["mechanic"], "priorityAllocation")
+        self.assertTrue(any(event["priority"] == "MissionControl" for event in result["completionEvents"]))
+        self.assertFalse(any(
+            row["ruleId"] == Rules.NATION_PRIORITY_ECONOMY_COMPLETE.id
+            for row in result["ruleExecutions"]
+        ))
         self.assertEqual(initial.control_points[1].pips["MissionControl"], 3)
 
     def test_scheduler_runs_monthly_before_daily_investment_and_noon_cache(self):

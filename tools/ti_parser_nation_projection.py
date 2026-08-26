@@ -85,6 +85,14 @@ class ProjectionRuntimeStop(RuntimeError):
         dependencies: Iterable[Mapping[str, Any]] = (),
         affected_metrics: Iterable[str] = (),
         trace: Iterable[Mapping[str, Any]] = (),
+        phase: str = "dependencyGate",
+        priority: str | None = None,
+        mechanic: str | None = None,
+        authoritative_state: NationProjectionState | None = None,
+        authoritative_mutations: Iterable[Mapping[str, Any]] = (),
+        unsupported_next_step: Mapping[str, Any] | None = None,
+        state_context: Mapping[str, Any] | None = None,
+        attempted_transaction: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(reason)
         self.reason = reason
@@ -92,6 +100,14 @@ class ProjectionRuntimeStop(RuntimeError):
         self.dependencies = tuple(dict(item) for item in dependencies)
         self.affected_metrics = tuple(affected_metrics)
         self.trace = tuple(dict(item) for item in trace)
+        self.phase = phase
+        self.priority = priority
+        self.mechanic = mechanic
+        self.authoritative_state = authoritative_state
+        self.authoritative_mutations = tuple(dict(item) for item in authoritative_mutations)
+        self.unsupported_next_step = dict(unsupported_next_step or {})
+        self.state_context = dict(state_context or {})
+        self.attempted_transaction = dict(attempted_transaction or {})
 
 
 @dataclass
@@ -1004,6 +1020,42 @@ def _nation_snapshot(state: NationProjectionState, context: ProjectionContext | 
     }
 
 
+def _control_point_snapshot(state: NationProjectionState, context: ProjectionContext) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for cp in sorted(state.control_points.values(), key=lambda value: value.position):
+        try:
+            effective = _effective_pips(state, cp, context)
+            error = None
+        except ProjectionRuntimeStop as exc:
+            effective = {}
+            error = {
+                "reason": exc.reason,
+                "ruleIds": list(exc.rule_ids),
+                "dependencies": list(exc.dependencies),
+            }
+        row: dict[str, Any] = {
+            "id": cp.id,
+            "position": cp.position,
+            "rawPips": dict(cp.pips),
+            "effectivePips": effective,
+            "totalWeight": cp.total_weight,
+            "numPrioritiesWithWeight": cp.num_priorities_with_weight,
+            "diversityBonus": dict(cp.diversity_bonus_cache),
+        }
+        if error is not None:
+            row["validityError"] = error
+        rows.append(row)
+    return rows
+
+
+def _state_snapshot(state: NationProjectionState, context: ProjectionContext) -> dict[str, Any]:
+    return {
+        "nation": _nation_snapshot(state, context),
+        "controlPoints": _control_point_snapshot(state, context),
+        "factionContribution": _contribution(state, context),
+    }
+
+
 METRIC_NAMES = frozenset({
     "nation.gdp", "nation.population", "nation.inequality", "nation.education", "nation.democracy",
     "nation.cohesion", "nation.unrest", "nation.sustainability", "nation.militaryTech", "nation.funding",
@@ -1164,24 +1216,102 @@ def _run_investment_transaction(
     }
     trace: list[dict[str, Any]] = []
     rule_executions: list[dict[str, Any]] = []
+    completions: list[dict[str, Any]] = []
     allocation = {name: 0.0 for name in context.priorities}
+    coverage = priority_coverage(context.priorities)
+
+    def attempted(phase: str, *, attempted_trace: Iterable[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+        return {
+            "sequence": day,
+            "kind": "investment",
+            "day": day,
+            "at": (at or state.at).isoformat(),
+            "segmentIndex": segment_index,
+            "phase": phase,
+            "allocation": {name: value for name, value in allocation.items() if value},
+            "completions": [dict(event, transactionStatus="authoritativePrefix") for event in completions],
+            "mechanicRules": sorted(used),
+            "ruleExecutions": list(rule_executions),
+            "mutationTrace": [dict(row) for row in (attempted_trace if attempted_trace is not None else trace)],
+        }
+
+    def stop(
+        reason: str,
+        *,
+        phase: str,
+        priority: str | None,
+        rule_ids: Iterable[str],
+        affected_metrics: Iterable[str],
+        dependencies: Iterable[Mapping[str, Any]] = (),
+        attempted_trace: Iterable[Mapping[str, Any]] | None = None,
+        mechanic: str = "priority",
+    ) -> ProjectionRuntimeStop:
+        return ProjectionRuntimeStop(
+            reason,
+            rule_ids=rule_ids,
+            dependencies=dependencies,
+            affected_metrics=affected_metrics,
+            trace=attempted_trace if attempted_trace is not None else trace,
+            phase=phase,
+            priority=priority,
+            mechanic=mechanic,
+            authoritative_state=copy.deepcopy(state),
+            authoritative_mutations=trace,
+            unsupported_next_step={
+                "priority": priority,
+                "mechanic": mechanic,
+                "phase": phase,
+                "ruleIds": list(rule_ids),
+            },
+            state_context={
+                "activePriorities": sorted({
+                    name
+                    for cp in state.control_points.values()
+                    for name, pip in cp.pips.items()
+                    if pip > 0
+                }),
+                "controlPointCount": state.num_control_points,
+            },
+            attempted_transaction=attempted(phase, attempted_trace=attempted_trace),
+        )
+
+    # Policy/validity repair is authoritative. Any resulting unsupported priority
+    # is gated before this tick's allocation.
+    effective_by_cp: dict[int, dict[str, int]] = {}
+    for cp in sorted(state.control_points.values(), key=lambda value: value.position):
+        before_economy = cp.pips.get("Economy", 0)
+        effective = _record_and_fix_control_point(state, cp, context, trace=trace)
+        effective_by_cp[cp.id] = effective
+        if cp.pips.get("Economy", 0) and not before_economy:
+            used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
+    active_unsupported = sorted({
+        priority
+        for effective in effective_by_cp.values()
+        for priority, pip in effective.items()
+        if pip > 0 and (priority not in coverage or coverage[priority]["overall"] == "unsupported")
+    })
+    if active_unsupported and fail_on_unsupported_fallback:
+        priority = active_unsupported[0]
+        rule = COMPLETION_RULES.get(priority)
+        rule_ids = [Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id] if priority == "Economy" else []
+        if rule is not None:
+            rule_ids.append(rule.id)
+        raise stop(
+            f"Active priority requires unsupported allocation/downstream mechanics: {priority}",
+            phase="beforeAllocation",
+            priority=priority,
+            rule_ids=rule_ids,
+            affected_metrics=("nation.*", "factionContribution.*"),
+            mechanic="priorityAllocation",
+        )
+
     _refresh_advisor_evidence(state)
     _refresh_economy_score(state, context, used)
     base_ip = _base_ip(state, context)
     cp_ip = base_ip / state.num_control_points if state.num_control_points else 0.0
     for cp in sorted(state.control_points.values(), key=lambda value: value.position):
-        before_economy = cp.pips.get("Economy", 0)
-        effective = _record_and_fix_control_point(state, cp, context, trace=trace)
+        effective = effective_by_cp[cp.id]
         total = sum(effective.values())
-        if cp.pips.get("Economy", 0) and not before_economy:
-            used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
-            if fail_on_unsupported_fallback:
-                raise ProjectionRuntimeStop(
-                    "Control-point validation generated a nonzero unsupported Economy fallback",
-                    rule_ids=(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id, Rules.NATION_PRIORITY_ECONOMY_COMPLETE.id),
-                    affected_metrics=("nation.gdp", "nation.inequality", "nation.cohesion", "nation.unrest"),
-                    trace=trace,
-                )
         for priority, pip in effective.items():
             bonus = cp.priority_bonuses.get(priority, 0.0)
             bonus += _diversity_bonus(cp, priority, effective, context)
@@ -1221,28 +1351,42 @@ def _run_investment_transaction(
         "inputs": ["nation.baseInvestmentPointsMonth"],
         "outputs": nonzero_allocations,
     })
-    completions: list[dict[str, Any]] = []
     ordered = sorted(context.priorities, key=lambda name: int(context.priorities[name]["enumValue"]))
     for priority in ordered:
         cost = float(context.priorities[priority]["investmentCost"]) / max(context.national_ip_multiplier, 1e-12)
         while state.progress.get(priority, 0.0) + 1e-12 >= cost and _priority_valid(state, priority, context):
             if priority not in STATIC_COMPLETIONS or priority == "Unity":
-                raise ProjectionRuntimeStop(
+                raise stop(
                     f"Reached unsupported priority completion: {priority}",
+                    phase="priorityCompletion",
+                    priority=priority,
                     rule_ids=(COMPLETION_RULES[priority].id,),
                     affected_metrics=("nation.*", "factionContribution.*"),
-                    trace=trace,
+                    mechanic="priorityCompletion",
                 )
             trace.append({"operation": "completionGuard", "priority": priority, "progress": state.progress[priority], "cost": cost})
             trace_start = len(trace)
-            execution = _apply_completion(state, priority, context, used, trace=trace)
-            if fail_on_unsupported_fallback and any(row.get("operation") == "defaultEconomy" for row in trace[trace_start:]):
-                raise ProjectionRuntimeStop(
-                    "Priority completion generated a nonzero unsupported Economy fallback",
-                    rule_ids=(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id, Rules.NATION_PRIORITY_ECONOMY_COMPLETE.id),
-                    affected_metrics=("nation.gdp", "nation.inequality", "nation.cohesion", "nation.unrest"),
-                    trace=trace,
-                )
+            completion_start = copy.deepcopy(state)
+            used_start = set(used)
+            try:
+                execution = _apply_completion(state, priority, context, used, trace=trace)
+            except ProjectionRuntimeStop as exc:
+                attempted_trace = list(trace)
+                state.__dict__.clear()
+                state.__dict__.update(copy.deepcopy(completion_start.__dict__))
+                used.clear()
+                used.update(used_start)
+                del trace[trace_start:]
+                raise stop(
+                    exc.reason,
+                    phase=exc.phase if exc.phase != "dependencyGate" else "priorityCompletion",
+                    priority=priority,
+                    rule_ids=exc.rule_ids or (COMPLETION_RULES[priority].id,),
+                    dependencies=exc.dependencies,
+                    affected_metrics=exc.affected_metrics or ("nation.*", "factionContribution.*"),
+                    attempted_trace=attempted_trace,
+                    mechanic=exc.mechanic or "priorityCompletion",
+                ) from exc
             validate_rule_execution(
                 str(execution["ruleId"]),
                 str(execution["effectiveCoverage"]),
@@ -1294,18 +1438,16 @@ def _run_investment_transaction(
             child_executions = execution.pop("childExecutions", [])
             rule_executions.append(execution)
             rule_executions.extend(child_executions)
+            # DLL revalidates weights after each successful completion. A newly
+            # generated fallback is authoritative but is not allocated until the
+            # next investment transaction.
+            for cp in sorted(state.control_points.values(), key=lambda value: value.position):
+                before = cp.pips.get("Economy", 0)
+                _record_and_fix_control_point(state, cp, context, trace=trace)
+                if cp.pips.get("Economy", 0) and not before:
+                    used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
     for cp in sorted(state.control_points.values(), key=lambda value: value.position):
-        before = cp.pips.get("Economy", 0)
         _record_and_fix_control_point(state, cp, context, trace=trace)
-        if cp.pips.get("Economy", 0) and not before:
-            used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
-            if fail_on_unsupported_fallback:
-                raise ProjectionRuntimeStop(
-                    "Priority completion generated a nonzero unsupported Economy fallback",
-                    rule_ids=(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id, Rules.NATION_PRIORITY_ECONOMY_COMPLETE.id),
-                    affected_metrics=("nation.gdp", "nation.inequality", "nation.cohesion", "nation.unrest"),
-                    trace=trace,
-                )
     return {
         "sequence": day,
         "kind": "investment",
@@ -1397,10 +1539,27 @@ def _run_monthly_transaction(
     }
     expected_cps = _expected_control_point_count(state, context)
     if expected_cps != state.num_control_points:
+        unclamped = max(round((state.gdp / 1_000_000_000.0) ** _global(context, "controlPointCountScaling") / _global(context, "controlPointScalingDivisor")), 1)
         raise ProjectionRuntimeStop(
             "Monthly UpdateControlPoints would change the target nation's control-point count",
             rule_ids=(Rules.NATION_PERIODIC_CONTROL_POINTS.id,),
             affected_metrics=("nation.*", "factionContribution.*"),
+            phase="beforeControlPointCountMutation",
+            mechanic="UpdateControlPoints",
+            authoritative_state=copy.deepcopy(state),
+            unsupported_next_step={
+                "mechanic": "UpdateControlPoints",
+                "phase": "beforeControlPointCountMutation",
+                "ruleIds": [Rules.NATION_PERIODIC_CONTROL_POINTS.id],
+            },
+            state_context={
+                "currentControlPointCount": state.num_control_points,
+                "requiredControlPointCount": expected_cps,
+                "unclampedControlPointCount": unclamped,
+                "gdp": state.gdp,
+                "controlPointCountScaling": _global(context, "controlPointCountScaling"),
+                "controlPointScalingDivisor": _global(context, "controlPointScalingDivisor"),
+            },
         )
     state.num_control_points_unclamped = max(round((state.gdp / 1_000_000_000.0) ** _global(context, "controlPointCountScaling") / _global(context, "controlPointScalingDivisor")), 1)
     if state.cohesion < state.cohesion_rest:
@@ -1761,6 +1920,18 @@ def _metric_coverage(
     )
 
 
+def _expanded_affected_metrics(state: NationProjectionState, affected_metrics: Iterable[str]) -> list[str]:
+    public = _public_metric_names(state)
+    seeds: set[str] = set()
+    for value in affected_metrics:
+        if value.endswith(".*"):
+            seeds.update(metric for metric in public if metric.startswith(value[:-1]))
+        else:
+            seeds.add(value)
+    reached = seeds | state.metric_tracker.descendants(seeds)
+    return sorted(metric for metric in reached if metric in public)
+
+
 def run_projection(
     initial_state: NationProjectionState,
     plan: PriorityPlan,
@@ -1781,7 +1952,7 @@ def run_projection(
     initial_metrics = _metrics(state, context)
     if unsupported:
         missing_rules = sorted({COMPLETION_RULES[name].id for name in unsupported if name in COMPLETION_RULES})
-        initial_snapshot = {"nation": _nation_snapshot(state, context), "factionContribution": _contribution(state, context)}
+        initial_snapshot = _state_snapshot(state, context)
         return {
             "name": plan.name,
             "status": "incomplete",
@@ -1822,6 +1993,8 @@ def run_projection(
     pending_segment: int | None = None
     runtime_stop: ProjectionRuntimeStop | None = None
     runtime_stop_at: datetime | None = None
+    runtime_stop_kind: str | None = None
+    runtime_stop_day: int | None = None
     investment_day = 0
 
     def evaluate_boundary(day: int, reason: str, at: datetime) -> None:
@@ -1846,7 +2019,7 @@ def run_projection(
     for moment, _order, kind, day_value in _event_schedule(state.at, days, checkpoints):
         state.days_in_campaign = initial_state.days_in_campaign + (moment - initial_state.at).total_seconds() / 86400.0
         if kind == "checkpoint":
-            checkpoint_rows.append({"day": day_value, "at": moment.isoformat(), "nation": _nation_snapshot(state, context), "factionContribution": _contribution(state, context, used)})
+            checkpoint_rows.append({"day": day_value, "at": moment.isoformat(), **_state_snapshot(state, context)})
             continue
         if kind == "investment":
             investment_day = day_value
@@ -1882,6 +2055,15 @@ def run_projection(
         except ProjectionRuntimeStop as exc:
             runtime_stop = exc
             runtime_stop_at = moment
+            runtime_stop_kind = kind
+            runtime_stop_day = day_value
+            if exc.authoritative_state is not None:
+                state = exc.authoritative_state
+            if exc.attempted_transaction:
+                attempted_completions = list(exc.attempted_transaction.get("completions", []))
+                completion_events.extend(attempted_completions)
+                rule_executions.extend(exc.attempted_transaction.get("ruleExecutions", []))
+                used.update(exc.attempted_transaction.get("mechanicRules", []))
             incomplete_reasons.append(exc.reason)
             break
         for execution in transaction.get("ruleExecutions", []):
@@ -1906,15 +2088,49 @@ def run_projection(
     final_contribution = _contribution(state, context, used)
     status = "incomplete" if runtime_stop is not None else "complete"
     blockers = list(runtime_stop.rule_ids) if runtime_stop else []
-    affected = list(runtime_stop.affected_metrics) if runtime_stop else []
+    affected = _expanded_affected_metrics(state, runtime_stop.affected_metrics) if runtime_stop else []
+    state_snapshot = _state_snapshot(state, context)
+    last_transaction = transactions[-1] if transactions else None
+    last_mutating_transaction = next((
+        transaction for transaction in reversed(transactions)
+        if transaction.get("mutationTrace") or transaction.get("completions")
+    ), None)
+    authoritative_mutations = list(runtime_stop.authoritative_mutations) if runtime_stop else []
+    if runtime_stop and not authoritative_mutations and last_mutating_transaction is not None:
+        authoritative_mutations = list(last_mutating_transaction.get("mutationTrace", []))
+    attempted_transaction = dict(runtime_stop.attempted_transaction) if runtime_stop and runtime_stop.attempted_transaction else None
+    if runtime_stop and attempted_transaction is None:
+        attempted_transaction = {
+            "kind": runtime_stop_kind,
+            "day": runtime_stop_day,
+            "at": runtime_stop_at.isoformat() if runtime_stop_at else state.at.isoformat(),
+            "phase": runtime_stop.phase,
+            "mutationTrace": list(runtime_stop.trace),
+            "completions": [],
+        }
+    last_authoritative_transaction = None
+    if attempted_transaction and attempted_transaction.get("completions"):
+        last_authoritative_transaction = {
+            "kind": attempted_transaction.get("kind"),
+            "day": attempted_transaction.get("day"),
+            "at": attempted_transaction.get("at"),
+            "transactionStatus": "authoritativePrefix",
+        }
+    elif last_transaction:
+        last_authoritative_transaction = {
+            "kind": last_transaction.get("kind"),
+            "day": last_transaction.get("day"),
+            "at": last_transaction.get("at"),
+            "transactionStatus": "committed",
+        }
     result = {
         "name": plan.name,
         "status": status,
         "preflight": preflight,
         "nationProjection": final_nation,
         "factionContribution": final_contribution,
-        "authoritativeFinalState": {"nation": final_nation, "factionContribution": final_contribution} if status == "complete" else None,
-        "lastAuthoritativeState": {"nation": final_nation, "factionContribution": final_contribution},
+        "authoritativeFinalState": state_snapshot if status == "complete" else None,
+        "lastAuthoritativeState": state_snapshot,
         "segmentTransitions": transitions,
         "advisorTransitions": advisor_transitions,
         "completionEvents": completion_events,
@@ -1926,8 +2142,23 @@ def run_projection(
         "mechanicRuleIds": sorted(used),
         "runtimeStop": ({
             "at": runtime_stop_at.isoformat() if runtime_stop_at is not None else state.at.isoformat(),
+            "timestamp": runtime_stop_at.isoformat() if runtime_stop_at is not None else state.at.isoformat(),
+            "simulationDay": runtime_stop_day,
+            "transactionKind": runtime_stop_kind,
+            "phase": runtime_stop.phase,
             "reason": runtime_stop.reason,
             "ruleIds": list(runtime_stop.rule_ids),
+            "trigger": {
+                "ruleId": runtime_stop.rule_ids[0] if runtime_stop.rule_ids else None,
+                "priority": runtime_stop.priority,
+                "mechanic": runtime_stop.mechanic,
+            },
+            "lastAuthoritativeTransaction": last_authoritative_transaction,
+            "authoritativeMutations": authoritative_mutations,
+            "unsupportedNextStep": dict(runtime_stop.unsupported_next_step),
+            "stateContext": dict(runtime_stop.state_context),
+            "affectedMetrics": affected,
+            "attemptedTransaction": attempted_transaction,
         } if runtime_stop else None),
         "missingMechanicRules": blockers,
         "missingDependencies": list(runtime_stop.dependencies) if runtime_stop else [],

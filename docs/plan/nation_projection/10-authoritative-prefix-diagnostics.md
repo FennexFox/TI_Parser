@@ -56,7 +56,7 @@
 
 ## Progress
 
-- Pending.
+- Completed: verified prefix boundaries, delayed unsupported-fallback gate, atomic handler rollback, CP snapshots, and structured runtime-stop diagnostics are implemented and verified.
 
 ## Decision log
 
@@ -64,4 +64,9 @@
 
 ## Outcomes / Retrospective
 
-- Pending.
+- Dynamic priority validation now commits raw-pip/cache repair and gates unsupported priorities before allocation. A fallback produced by a successful completion remains dormant until the next investment transaction and is then stopped before Economy allocation/effect.
+- Each completion is cloned independently. A failed Welfare decolonization or non-equivalent MC placement restores the completion-start state while retaining prior allocation and any earlier successful completions as an authoritative prefix.
+- `runtimeStop` now includes timestamp/day/kind/phase, trigger, last authoritative transaction, authoritative mutations, unsupported next step, state context, descendant-expanded affected metrics, and attempted transaction details.
+- State snapshots now include every CP's raw/effective pips, weights, count cache, and diversity cache alongside nation and faction contribution.
+- Direct regressions cover Government cap/effect/cost/fallback preservation, MC fallback on the next allocation gate, multi-completion authoritative prefixes, Welfare atomic rollback, and pre-mutation CP-count diagnostics.
+- Validation: 34 focused projection/CLI tests, 230 full tests with 6 skips, and 5 opt-in local-save observational smoke tests passed.
