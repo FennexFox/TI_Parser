@@ -57,8 +57,7 @@
 
 ## Progress
 
-- Mechanics, tests, real-save smoke, README, and audit updates are complete.
-- Graphify refresh and final graph diagnostics remain before phase completion.
+- Completed.
 
 ## Decision log
 
@@ -89,3 +88,9 @@
   aggregate `catalog-verify` command remains failed because three unrelated
   research-catalog source hashes have drifted; this phase did not regenerate
   unrelated research artifacts.
+- Graphify was rebuilt after all source commits and now contains 2,286 nodes,
+  6,466 edges, and 125 communities. Multigraph diagnostics report no malformed
+  edges, missing or dangling endpoints, self-loops, or exact duplicates.
+  Targeted queries resolve the Economy market/scope dependency path and the
+  Unity public-opinion, stochastic-policy, and cohesion-rest path into the new
+  projection engine and direct mechanic fixtures.
