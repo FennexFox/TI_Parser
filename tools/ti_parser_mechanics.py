@@ -85,6 +85,11 @@ class CoverageResolvers:
         ("expected", "unsupported"),
         "Require explicit mean-path policy before applying sequential conditional expected propaganda transitions.",
     )
+    MARKET_MEAN_INPUT = CoverageResolver(
+        "world-market.mean-input.v1",
+        ("expected", "unsupported"),
+        "Apply midpoint market mutations when values exist, otherwise isolate the missing world branch.",
+    )
 
 
 COVERAGE_RESOLVERS = {
@@ -94,6 +99,7 @@ COVERAGE_RESOLVERS = {
         CoverageResolvers.BUILD_ARMY_PLACEMENT,
         CoverageResolvers.PERIODIC_CONTROL_POINTS,
         CoverageResolvers.UNITY_PUBLIC_OPINION,
+        CoverageResolvers.MARKET_MEAN_INPUT,
     )
 }
 
@@ -243,45 +249,56 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_funding_completion_and_contribution",),
     )
     NATION_PRIORITY_ECONOMY_COMPLETE = MechanicRule(
-        "nation.priority.economy.complete", 1, "Apply Economy completion and all national/global downstream effects.",
-        "partial", "unsupported", ("TINationState.OnEconomyPriorityComplete",),
+        "nation.priority.economy.complete", 2,
+        "Coordinate authoritative Economy nation/region effects and the independent world-market branch.",
+        "verified", "exact", ("TINationState.OnEconomyPriorityComplete",),
+        test_ids=("tests.test_nation_projection.NationProjectionEconomyTests.test_economy_gdp_inequality_and_executive_effect_source",),
     )
     NATION_PRIORITY_ECONOMY_GDP = MechanicRule(
         "nation.priority.economy.gdp", 1,
         "Apply Economy per-capita GDP and national GDP changes with live executive-faction effects.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.OnEconomyPriorityComplete", "TINationState.economyPriorityPerCapitaIncomeChange", "TINationState.ModifyGDP"),
+        test_ids=("tests.test_nation_projection.NationProjectionEconomyTests.test_economy_gdp_inequality_and_executive_effect_source",),
     )
     NATION_PRIORITY_ECONOMY_INEQUALITY = MechanicRule(
         "nation.priority.economy.inequality", 1,
         "Apply Economy inequality and above-cap cohesion/unrest spillover.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.OnEconomyPriorityComplete", "TINationState.AddToInequality"),
+        test_ids=("tests.test_nation_projection.NationProjectionEconomyTests.test_economy_gdp_inequality_and_executive_effect_source",),
     )
     NATION_PRIORITY_ECONOMY_MARKET = MechanicRule(
         "nation.priority.economy.market", 1,
         "Project Economy's Metals and Noble Metals market mutation as a deterministic mean-input branch.",
-        "partial", "unsupported",
+        "verified", "expected",
         ("TIGlobalValuesState.ModifyMarketValuesForEconomyPriority",),
         deterministic=False,
+        coverage_mode="conditional",
+        allowed_coverages=CoverageResolvers.MARKET_MEAN_INPUT.allowed_coverages,
+        coverage_resolver_id=CoverageResolvers.MARKET_MEAN_INPUT.id,
+        test_ids=("tests.test_nation_projection.NationProjectionEconomyTests.test_market_only_missing_is_nonblocking",),
     )
     NATION_PRIORITY_ECONOMY_REGION_TRIGGER = MechanicRule(
         "nation.priority.economy.region-trigger", 1,
         "Select and increment the cached Oil, Mining, or Core Economy trigger branch.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.OnEconomyPriorityComplete", "TINationState.GetNextCoreOilRegion", "TINationState.GetNextCoreMiningRegion", "TINationState.GetNextCoreEcoRegion"),
+        test_ids=("tests.test_nation_projection.NationProjectionEconomyTests.test_economy_region_branch_precedence_and_transition",),
     )
     NATION_PRIORITY_ECONOMY_REGION_TRANSITION = MechanicRule(
         "nation.priority.economy.region-transition", 1,
         "Apply the threshold Oil, Mining, or Core Economy region state transition.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.OnCoreOilRegionPriorityComplete", "TINationState.OnCoreMiningRegionComplete", "TINationState.OnCoreEconomicRegionPriorityComplete"),
+        test_ids=("tests.test_nation_projection.NationProjectionEconomyTests.test_economy_region_branch_precedence_and_transition",),
     )
     NATION_PRIORITY_ECONOMY_DOWNSTREAM_CACHE = MechanicRule(
         "nation.priority.economy.downstream-cache", 1,
         "Propagate Economy GDP and regional changes to live validity while preserving daily region caches.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.ModifyGDP", "TINationState.CacheRegionValues", "TINationState.PossiblePriorityValidationChange"),
+        test_ids=("tests.test_nation_projection.NationProjectionEconomyTests.test_economy_region_branch_precedence_and_transition",),
     )
     NATION_PERIODIC_REGION_CACHE = MechanicRule(
         "nation.periodic.region-cache", 1,
@@ -416,6 +433,17 @@ class Rules:
         coverage_mode="conditional",
         allowed_coverages=CoverageResolvers.BUILD_ARMY_PLACEMENT.allowed_coverages,
         coverage_resolver_id=CoverageResolvers.BUILD_ARMY_PLACEMENT.id,
+    )
+    NATION_PRIORITY_BUILD_ARMY_MARKET = MechanicRule(
+        "nation.priority.build-army.market", 1,
+        "Project the Army completion Metals and Noble Metals mutation as an independent mean-input branch.",
+        "verified", "expected",
+        ("TINationState.OnBuildArmyPriorityComplete", "TIGlobalValuesState.ModifyMarketValuesForArmyPriority"),
+        deterministic=False,
+        test_ids=("tests.test_nation_projection.NationProjectionEconomyTests.test_build_army_market_branch_does_not_lower_army_coverage",),
+        coverage_mode="conditional",
+        allowed_coverages=CoverageResolvers.MARKET_MEAN_INPUT.allowed_coverages,
+        coverage_resolver_id=CoverageResolvers.MARKET_MEAN_INPUT.id,
     )
     NATION_PRIORITY_BUILD_NAVY_COMPLETE = MechanicRule(
         "nation.priority.build-navy.complete", 1, "Upgrade an army to naval deployment and retain maintenance.",
@@ -579,6 +607,7 @@ REGISTRY = {rule.id: rule for rule in (
     Rules.NATION_PRIORITY_MILITARY_COMPLETE,
     Rules.NATION_PRIORITY_BUILD_ARMY_COMPLETE,
     Rules.NATION_PRIORITY_BUILD_ARMY_PLACEMENT,
+    Rules.NATION_PRIORITY_BUILD_ARMY_MARKET,
     Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE,
     Rules.NATION_ASSET_ARMY_MAINTENANCE,
     Rules.NATION_PRIORITY_INITIATE_NUCLEAR_COMPLETE,

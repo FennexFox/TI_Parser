@@ -48,7 +48,7 @@
 
 ## Progress
 
-- Pending.
+- Complete.
 
 ## Decision log
 
@@ -56,4 +56,24 @@
 
 ## Outcomes / Retrospective
 
-- Pending.
+- Economy completion now applies the audited executive-faction effect source,
+  PCGDP/GDP change, economy-score refresh, inequality clamp/overshoot, and
+  cached Oil-before-Mining-before-Core trigger path.
+- Region selection preserves the daily cached branch while using live candidate
+  state and stable region ordering. A depleted cached branch does not fall
+  through to another transformation type during the same day.
+- Economy and BuildArmy market mutations use separate conditional child rules.
+  Available Metals/Noble Metals values receive midpoint mean-input changes;
+  missing values mark only `worldMarket` unsupported and do not lower nation,
+  faction, army-placement, or maintenance coverage.
+- Default Economy pips created by Government/MC invalidation now allocate and
+  complete on later investment ticks instead of causing the previous runtime
+  stop.
+- The pre-existing catalog-verify synthetic fixture was updated with the
+  faction/ideology sources made mandatory in phase 14; this repaired five
+  full-suite fixture failures without changing runtime behavior.
+- A 10-day Economy-only observational CAL smoke completed 14 Economy
+  completions, increased GDP, retained complete nation/faction/world scopes,
+  and reported market evidence as expected/meanPath/deterministicMeanInput.
+  No CP-count blocker occurred in that window.
+- Validation: the full suite passes 242 tests with 9 skips and 23 subtests.

@@ -96,6 +96,28 @@ class CatalogVerifyTests(unittest.TestCase):
             self.templates / "TIBilateralTemplate.json",
             [{"dataName": "Adj_Test", "relationType": "PhysicalAdjacency", "region1": "map_Region_Test", "region2": "map_Region_Test"}],
         )
+        write_json(
+            self.templates / "TIFactionTemplate.json",
+            [{"dataName": "ResistCouncil", "ideologyName": "resist", "isAlien": False}],
+        )
+        write_json(
+            self.templates / "TIFactionIdeologyTemplate.json",
+            [
+                {
+                    "dataName": "resist",
+                    "ideology": "Resist",
+                    "sortOrder": 1,
+                    "ideologyCoordinates": {"x": 1, "y": 0, "z": 0},
+                },
+                {
+                    "dataName": "undecided",
+                    "ideology": "Undecided",
+                    "sortOrder": 2,
+                    "undecided": True,
+                    "ideologyCoordinates": {"x": 0, "y": 0, "z": 0},
+                },
+            ],
+        )
         for collection, (filename, _kind, _fields) in runtime_builder.SHIP_COLLECTIONS.items():
             row = {
                 "dataName": f"{collection}_Test",

@@ -33,6 +33,7 @@ PRIORITY_ALIASES = {
     "InitiateSpaceflightProgram": "Civilian_InitiateSpaceflightProgram",
 }
 STATIC_COMPLETIONS = {
+    "Economy": ("exact", Rules.NATION_PRIORITY_ECONOMY_COMPLETE),
     "Knowledge": ("exact", Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE),
     "Government": ("exact", Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE),
     "Welfare": ("exact", Rules.NATION_PRIORITY_WELFARE_COMPLETE),
@@ -519,12 +520,18 @@ def _global(context: ProjectionContext, name: str) -> float:
 def _apply_effect_context(
     state: NationProjectionState,
     context: ProjectionContext,
-    faction_id: int,
+    faction_id: int | None,
     effect_context: str,
     base_value: float,
+    *,
+    rule_id: str | None = None,
+    affected_metrics: Iterable[str] = ("nation.*", "factionContribution.*"),
 ) -> float:
     """Apply the current save-backed faction effect list to a scalar value."""
 
+    if faction_id is None:
+        return float(base_value)
+    dependency_rule = rule_id or Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id
     result = float(base_value)
     names = state.faction_effect_contexts.get(faction_id, {}).get(effect_context, [])
     for effect_name in names:
@@ -532,9 +539,9 @@ def _apply_effect_context(
         if not isinstance(row, Mapping):
             raise ProjectionRuntimeStop(
                 f"Effect template is unavailable: {effect_name}",
-                rule_ids=(Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,),
+                rule_ids=(dependency_rule,),
                 dependencies=({"field": effect_name, "source": "effectsCatalog"},),
-                affected_metrics=("nation.*", "factionContribution.*"),
+                affected_metrics=affected_metrics,
                 mechanic="effectContext",
             )
         operation = row.get("operation")
@@ -542,17 +549,17 @@ def _apply_effect_context(
         if operation not in {"Additive", "Multiplicative", "SetToFixedValue", "IncreaseToValue", "DecreaseToValue"}:
             raise ProjectionRuntimeStop(
                 f"Effect operation is unsupported: {effect_name}",
-                rule_ids=(Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,),
+                rule_ids=(dependency_rule,),
                 dependencies=({"field": "operation", "source": f"effectsCatalog.{effect_name}"},),
-                affected_metrics=("nation.*", "factionContribution.*"),
+                affected_metrics=affected_metrics,
                 mechanic="effectContext",
             )
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
             raise ProjectionRuntimeStop(
                 f"Effect value is unavailable: {effect_name}",
-                rule_ids=(Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,),
+                rule_ids=(dependency_rule,),
                 dependencies=({"field": "value", "source": f"effectsCatalog.{effect_name}"},),
-                affected_metrics=("nation.*", "factionContribution.*"),
+                affected_metrics=affected_metrics,
                 mechanic="effectContext",
             )
         amount = float(value)
@@ -1021,6 +1028,182 @@ def _next_army_control_point_position(state: NationProjectionState) -> int:
     return selected
 
 
+def _add_cohesion(state: NationProjectionState, value: float, context: ProjectionContext) -> None:
+    state.cohesion += value
+    democracy_loss = 0.0
+    unrest_gain = 0.0
+    if state.cohesion < 0.0:
+        deficit = -state.cohesion
+        unrest_gain = deficit * 0.5
+        if state.democracy > 5.0:
+            democracy_loss = min(deficit, state.democracy - 5.0) * 0.5
+            unrest_gain -= democracy_loss
+    state.cohesion = min(10.0, max(0.0, state.cohesion))
+    if democracy_loss > 0.0:
+        state.democracy = min(10.0, max(0.0, state.democracy - democracy_loss * _population_scaling(state, context)))
+    if unrest_gain > 0.0:
+        state.unrest = min(10.0, max(0.0, state.unrest + unrest_gain * _population_scaling(state, context)))
+
+
+def _apply_market_mean_path(
+    state: NationProjectionState,
+    rule: Any,
+    *,
+    metals_increase: float,
+    noble_metals_increase: float,
+) -> dict[str, Any]:
+    values = state.world_context.get("resourceMarketValues")
+    valid = isinstance(values, dict) and all(
+        isinstance(values.get(name), (int, float))
+        and not isinstance(values.get(name), bool)
+        and math.isfinite(float(values[name]))
+        for name in ("Metals", "NobleMetals")
+    )
+    if not valid:
+        state.world_market_blockers.add(rule.id)
+        for metric in ("world.market.metals", "world.market.nobleMetals"):
+            state.metric_tracker.record(
+                metric,
+                coverage="unsupported",
+                rule_ids=(rule.id,),
+                blockers=(rule.id,),
+            )
+        return {
+            "ruleId": rule.id,
+            "effectiveCoverage": "unsupported",
+            "coverageResolverId": rule.coverage_resolver_id,
+            "provenance": "heldMissingWorldContext",
+            "dependencies": [],
+            "inputs": ["world.market.metals", "world.market.nobleMetals"],
+            "outputs": ["world.market.metals", "world.market.nobleMetals"],
+            "nonBlockingScope": "worldMarket",
+        }
+    state.world_market_blockers.discard(rule.id)
+    values["Metals"] = float(values["Metals"]) * (1.0 + metals_increase)
+    values["NobleMetals"] = float(values["NobleMetals"]) * (1.0 + noble_metals_increase)
+    for metric in ("world.market.metals", "world.market.nobleMetals"):
+        state.metric_tracker.record(
+            metric,
+            inputs=(metric,),
+            coverage="expected",
+            provenance=("meanPath",),
+            stochastic_treatments=("deterministicMeanInput",),
+            rule_ids=(rule.id,),
+        )
+    return {
+        "ruleId": rule.id,
+        "effectiveCoverage": "expected",
+        "coverageResolverId": rule.coverage_resolver_id,
+        "provenance": "meanPath",
+        "stochasticTreatment": "deterministicMeanInput",
+        "expectationGuarantee": False,
+        "dependencies": [],
+        "inputs": ["world.market.metals", "world.market.nobleMetals"],
+        "outputs": ["world.market.metals", "world.market.nobleMetals"],
+        "marketValues": {
+            "Metals": float(values["Metals"]),
+            "NobleMetals": float(values["NobleMetals"]),
+        },
+    }
+
+
+def _economy_region_candidates(
+    state: NationProjectionState,
+    context: ProjectionContext,
+    branch: str,
+) -> list[RegionProjectionState]:
+    ordered = sorted(state.regions.values(), key=lambda value: value.region_order)
+    if branch == "Oil":
+        candidates = [
+            region for region in ordered
+            if not state.world_context.get("endOfOil")
+            and not region.core_economic_region
+            and not (region.resource_region or region.oil_region)
+            and region.nuclear_detonations == 0
+            and region.oil_capable
+        ]
+        return sorted(candidates, key=lambda region: (
+            -int(region.economy_region_counters.get("oil", 0)),
+            -_region_gdp_value(state, region, context),
+            region.region_order,
+        ))
+    if branch == "Mining":
+        candidates = [
+            region for region in ordered
+            if not region.core_economic_region
+            and not (region.resource_region or region.oil_region)
+            and region.nuclear_detonations == 0
+            and region.mine_capable
+        ]
+        return sorted(candidates, key=lambda region: (
+            -int(region.economy_region_counters.get("mining", 0)),
+            -_region_gdp_value(state, region, context),
+            region.region_order,
+        ))
+    candidates = [
+        region for region in ordered
+        if not region.core_economic_region
+        and not region.colony
+        and region.nuclear_detonations == 0
+        and _region_gdp_value(state, region, context) / 1_000_000_000.0 > 500.0
+    ]
+    return sorted(candidates, key=lambda region: (
+        -int(region.economy_region_counters.get("coreEconomic", 0)),
+        -_region_gdp_value(state, region, context),
+        -region.population_millions,
+        region.region_order,
+    ))
+
+
+def _apply_economy_region_branch(
+    state: NationProjectionState,
+    context: ProjectionContext,
+    *,
+    trace: list[dict[str, Any]] | None,
+) -> tuple[str | None, RegionProjectionState | None, bool, int]:
+    branch = (
+        "Oil" if state.cached_can_accumulate_core_oil
+        else "Mining" if state.cached_can_accumulate_core_mining
+        else "Core" if state.cached_can_accumulate_core_economy
+        else None
+    )
+    if branch is None:
+        return None, None, False, 0
+    candidates = _economy_region_candidates(state, context, branch)
+    if not candidates:
+        return branch, None, False, 0
+    candidate_count = len(candidates)
+    target = candidates[0]
+    key = {"Oil": "oil", "Mining": "mining", "Core": "coreEconomic"}[branch]
+    threshold_name = {
+        "Oil": "numEcosForCoreOilRegion",
+        "Mining": "numEcosForCoreMiningRegion",
+        "Core": "numEcosForCoreEcoRegion",
+    }[branch]
+    counter = int(target.economy_region_counters.get(key, 0)) + 1
+    target.economy_region_counters[key] = counter
+    transformed = counter >= int(_global(context, threshold_name))
+    if transformed:
+        if branch == "Oil":
+            target.oil_region = True
+        elif branch == "Mining":
+            target.resource_region = True
+        else:
+            target.core_economic_region = True
+            target.resource_region = False
+            target.oil_region = False
+        target.economy_region_counters[key] = 0
+    if trace is not None:
+        trace.append({
+            "operation": "economyRegionTrigger",
+            "branch": branch,
+            "regionId": target.id,
+            "counter": target.economy_region_counters[key],
+            "transformed": transformed,
+        })
+    return branch, target, transformed, candidate_count
+
+
 def _apply_completion(
     state: NationProjectionState,
     priority: str,
@@ -1040,7 +1223,179 @@ def _apply_completion(
         "provenance": "dllReimplementation",
         "dependencies": [],
     }
-    if priority == "Knowledge":
+    if priority == "Economy":
+        used.update({
+            Rules.NATION_PRIORITY_ECONOMY_COMPLETE.id,
+            Rules.NATION_PRIORITY_ECONOMY_GDP.id,
+            Rules.NATION_PRIORITY_ECONOMY_INEQUALITY.id,
+            Rules.NATION_PRIORITY_ECONOMY_MARKET.id,
+            Rules.NATION_PRIORITY_ECONOMY_DOWNSTREAM_CACHE.id,
+        })
+        resource_regions = state.cached_num_mining_regions + state.cached_num_oil_regions
+        effective_base = _apply_effect_context(
+            state,
+            context,
+            state.executive_faction_id,
+            "Economy_BasePCGDPIncrease",
+            _global(context, "economyPriorityPerCapitaIncomeChange_base"),
+            rule_id=Rules.NATION_PRIORITY_ECONOMY_GDP.id,
+            affected_metrics=("nation.gdp", "nation.perCapitaGdp", "nation.research"),
+        )
+        effective_resource = _apply_effect_context(
+            state,
+            context,
+            state.executive_faction_id,
+            "Economy_ResourcePCGDPMultiplier",
+            _global(context, "economyPriorityPerCapitaIncomeChange_perResourceRegion"),
+            rule_id=Rules.NATION_PRIORITY_ECONOMY_GDP.id,
+            affected_metrics=("nation.gdp", "nation.perCapitaGdp", "nation.research"),
+        )
+        effective_core = _apply_effect_context(
+            state,
+            context,
+            state.executive_faction_id,
+            "Economy_CoreEcoPCGDPMultiplier",
+            _global(context, "economyPriorityPerCapitaIncomeChange_perCoreEcoRegion"),
+            rule_id=Rules.NATION_PRIORITY_ECONOMY_GDP.id,
+            affected_metrics=("nation.gdp", "nation.perCapitaGdp", "nation.research"),
+        )
+        pcgdp_delta = (
+            effective_base
+            + resource_regions * effective_resource
+            + state.cached_num_core_economic_regions * effective_core
+            + state.democracy * 0.5
+            + state.education
+        ) * scale
+        gdp_delta = pcgdp_delta * state.population_millions * 1_000_000.0
+        mc_cap = sum(
+            _region_mc_cap(state, region, context)
+            for region in state.regions.values()
+            if region.fully_occupied is False
+        )
+        validation_needed = gdp_delta > 0.0 and (
+            state.mission_control >= mc_cap
+            or state.funding_year >= 0.005 * (state.gdp / 1_000_000.0)
+        )
+        state.gdp = max(
+            state.gdp + gdp_delta,
+            state.population_millions * 1_000_000.0 * 100.0,
+        )
+        _refresh_economy_score(state, context, used)
+        metric_inputs.extend(("internal.populationScaling", "nation.democracy", "nation.education", "internal.regionDailyCache"))
+        metric_outputs.extend(("nation.gdp", "nation.perCapitaGdp"))
+        execution["dependencies"].append(Rules.NATION_PRIORITY_ECONOMY_GDP.id)
+        child_executions.append({
+            "ruleId": Rules.NATION_PRIORITY_ECONOMY_GDP.id,
+            "effectiveCoverage": "exact",
+            "provenance": "dllReimplementation",
+            "dependencies": [],
+            "inputs": list(metric_inputs),
+            "outputs": ["nation.gdp", "nation.perCapitaGdp", "internal.economyScore"],
+            "perCapitaGdpDelta": pcgdp_delta,
+            "gdpDelta": gdp_delta,
+            "executiveFactionId": state.executive_faction_id,
+        })
+        execution["dependencies"].append(Rules.NATION_PRIORITY_ECONOMY_DOWNSTREAM_CACHE.id)
+        child_executions.append({
+            "ruleId": Rules.NATION_PRIORITY_ECONOMY_DOWNSTREAM_CACHE.id,
+            "effectiveCoverage": "exact",
+            "provenance": "dllReimplementation",
+            "dependencies": [Rules.NATION_PRIORITY_ECONOMY_GDP.id],
+            "inputs": ["nation.gdp"],
+            "outputs": ["internal.economyScore", "nation.research", "nation.baseInvestmentPointsMonth"],
+            "dailyRegionCachePreserved": True,
+        })
+        if validation_needed:
+            execution["validationTriggers"] = ["positiveGdpWhileMissionControlOrFundingAtCap"]
+            execution["validationApplied"] = True
+            used.add(Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id)
+            if trace is not None:
+                trace.append({
+                    "operation": "priorityValidationTrigger",
+                    "priority": priority,
+                    "reasons": list(execution["validationTriggers"]),
+                    "timing": "insideModifyGDP",
+                })
+            for cp in sorted(state.control_points.values(), key=lambda value: value.position):
+                before = cp.pips.get("Economy", 0)
+                _record_and_fix_control_point(state, cp, context, trace=trace)
+                if cp.pips.get("Economy", 0) and not before:
+                    used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
+
+        inequality_base = (
+            _global(context, "economyPriorityInequalityIncrease")
+            + resource_regions * _global(context, "economyPriorityInequalityIncrease_perResourceRegion")
+        ) * scale
+        inequality_delta = _apply_effect_context(
+            state,
+            context,
+            state.executive_faction_id,
+            "Economy_InequalityMultiplier",
+            inequality_base,
+            rule_id=Rules.NATION_PRIORITY_ECONOMY_INEQUALITY.id,
+            affected_metrics=("nation.inequality", "nation.cohesion", "nation.unrest"),
+        )
+        overshoot = state.inequality + inequality_delta - 9.0
+        state.inequality = min(9.0, max(1.0, state.inequality + inequality_delta))
+        if overshoot > 0.0:
+            _add_cohesion(state, -overshoot, context)
+            state.unrest = min(10.0, max(0.0, state.unrest + overshoot))
+            metric_outputs.extend(("nation.cohesion", "nation.unrest"))
+        metric_outputs.append("nation.inequality")
+        execution["dependencies"].append(Rules.NATION_PRIORITY_ECONOMY_INEQUALITY.id)
+        child_executions.append({
+            "ruleId": Rules.NATION_PRIORITY_ECONOMY_INEQUALITY.id,
+            "effectiveCoverage": "exact",
+            "provenance": "dllReimplementation",
+            "dependencies": [],
+            "inputs": ["internal.populationScaling", "internal.regionDailyCache"],
+            "outputs": ["nation.inequality"] + (["nation.cohesion", "nation.unrest"] if overshoot > 0.0 else []),
+            "inequalityDelta": inequality_delta,
+            "overshoot": max(overshoot, 0.0),
+        })
+
+        market_execution = _apply_market_mean_path(
+            state,
+            Rules.NATION_PRIORITY_ECONOMY_MARKET,
+            metals_increase=0.000015,
+            noble_metals_increase=0.0000075,
+        )
+        child_executions.append(market_execution)
+        execution["dependencies"].append(Rules.NATION_PRIORITY_ECONOMY_MARKET.id)
+
+        branch, target, transformed, candidate_count = _apply_economy_region_branch(state, context, trace=trace)
+        if branch is not None:
+            used.add(Rules.NATION_PRIORITY_ECONOMY_REGION_TRIGGER.id)
+            execution["dependencies"].append(Rules.NATION_PRIORITY_ECONOMY_REGION_TRIGGER.id)
+            child_executions.append({
+                "ruleId": Rules.NATION_PRIORITY_ECONOMY_REGION_TRIGGER.id,
+                "effectiveCoverage": "exact",
+                "provenance": "dllReimplementation",
+                "dependencies": [],
+                "inputs": ["internal.regionDailyCache", "region.economyCounters", "region.gdp"],
+                "outputs": ["region.economyCounters"],
+                "branch": branch,
+                "regionId": target.id if target is not None else None,
+                "candidateCount": candidate_count,
+            })
+        if transformed and target is not None:
+            used.add(Rules.NATION_PRIORITY_ECONOMY_REGION_TRANSITION.id)
+            execution["dependencies"].append(Rules.NATION_PRIORITY_ECONOMY_REGION_TRANSITION.id)
+            region_metric = f"region.{target.id}.economyClassification"
+            metric_outputs.append(region_metric)
+            child_executions.extend((
+                {
+                    "ruleId": Rules.NATION_PRIORITY_ECONOMY_REGION_TRANSITION.id,
+                    "effectiveCoverage": "exact",
+                    "provenance": "dllReimplementation",
+                    "dependencies": [Rules.NATION_PRIORITY_ECONOMY_REGION_TRIGGER.id],
+                    "inputs": ["region.economyCounters"],
+                    "outputs": [region_metric],
+                    "branch": branch,
+                    "regionId": target.id,
+                },
+            ))
+    elif priority == "Knowledge":
         used.add(Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE.id)
         change = _global(context, "knowledgePriorityEducationIncrease")
         if state.education < 8.5:
@@ -1240,6 +1595,14 @@ def _apply_completion(
             used.add(Rules.NATION_ASSET_ARMY_MAINTENANCE.id)
             execution.update({"homeRegionId": target.id, "controlPointPosition": position})
             metric_outputs.append("nation.armies")
+            used.add(Rules.NATION_PRIORITY_BUILD_ARMY_MARKET.id)
+            execution["dependencies"].append(Rules.NATION_PRIORITY_BUILD_ARMY_MARKET.id)
+            child_executions.append(_apply_market_mean_path(
+                state,
+                Rules.NATION_PRIORITY_BUILD_ARMY_MARKET,
+                metals_increase=0.00015,
+                noble_metals_increase=0.000075,
+            ))
             if trace is not None:
                 trace.append({"operation": "createArmy", "homeRegionId": target.id, "controlPointPosition": position})
     else:
@@ -1762,17 +2125,18 @@ def _run_investment_transaction(
             validation_triggers = list(execution.get("validationTriggers", []))
             if validation_triggers:
                 used.add(Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id)
-                trace.append({
-                    "operation": "priorityValidationTrigger",
-                    "priority": priority,
-                    "reasons": validation_triggers,
-                    "timing": "insideCompletionHandler",
-                })
-                for cp in sorted(state.control_points.values(), key=lambda value: value.position):
-                    before = cp.pips.get("Economy", 0)
-                    _record_and_fix_control_point(state, cp, context, trace=trace)
-                    if cp.pips.get("Economy", 0) and not before:
-                        used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
+                if not execution.get("validationApplied"):
+                    trace.append({
+                        "operation": "priorityValidationTrigger",
+                        "priority": priority,
+                        "reasons": validation_triggers,
+                        "timing": "insideCompletionHandler",
+                    })
+                    for cp in sorted(state.control_points.values(), key=lambda value: value.position):
+                        before = cp.pips.get("Economy", 0)
+                        _record_and_fix_control_point(state, cp, context, trace=trace)
+                        if cp.pips.get("Economy", 0) and not before:
+                            used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
                 execution.setdefault("childExecutions", []).append({
                     "ruleId": Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id,
                     "effectiveCoverage": "exact",
