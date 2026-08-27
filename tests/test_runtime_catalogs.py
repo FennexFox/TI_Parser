@@ -141,6 +141,30 @@ class RuntimeCatalogTests(unittest.TestCase):
                 }
             ],
         )
+        write_json(
+            self.templates / "TIFactionTemplate.json",
+            [
+                {"dataName": "ResistCouncil", "ideologyName": "resist", "isAlien": False},
+                {"dataName": "AlienCouncil", "ideologyName": "alien", "isAlien": True},
+            ],
+        )
+        write_json(
+            self.templates / "TIFactionIdeologyTemplate.json",
+            [
+                {
+                    "dataName": "resist", "ideology": "Resist", "sortOrder": 7,
+                    "ideologyCoordinates": {"x": 1, "y": 0, "z": 0},
+                },
+                {
+                    "dataName": "undecided", "ideology": "Undecided", "sortOrder": 9,
+                    "undecided": True, "ideologyCoordinates": {"x": 0, "y": 0, "z": 0},
+                },
+                {
+                    "dataName": "alien", "ideology": "Alien", "sortOrder": 0,
+                    "alien": True, "ideologyCoordinates": {"x": -2, "y": 0, "z": 0},
+                },
+            ],
+        )
         assembly = self.game / "TerraInvicta_Data" / "Managed" / "Assembly-CSharp.dll"
         assembly.parent.mkdir(parents=True, exist_ok=True)
         assembly.write_bytes(b"fixture assembly with TIGlobalConfig default 1.5f")
@@ -300,6 +324,10 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.assertEqual(broken["globalConfig"]["controlPointIPFactor"]["value"], 0.62)
         self.assertEqual(broken["globalConfig"]["nationalInvestmentArmyFactorHome"]["value"], 0.2)
         self.assertEqual(broken["globalConfig"]["numPrioritiesForLegitimize"]["value"], 100)
+        self.assertEqual(modern["globalConfig"]["economyPriorityPerCapitaIncomeChange_base"]["value"], 3.0)
+        self.assertEqual(modern["globalConfig"]["unityPublicOpinionBaseStrength"]["value"], 5.0)
+        self.assertEqual(modern["factionTemplates"]["ResistCouncil"]["ideologyName"], "resist")
+        self.assertEqual(modern["ideologyTemplates"]["resist"]["ideologyCoordinates"]["x"], 1)
 
         envelope = json.loads((self.output / "nation_development_catalog.json").read_text(encoding="utf-8"))
         source_names = {source["name"] for source in envelope["sourceFiles"]}
@@ -309,6 +337,8 @@ class RuntimeCatalogTests(unittest.TestCase):
                 "base/TIRegionTemplate.json",
                 "base/TIMapRegionTemplate.json",
                 "base/TIStartTimeTemplate.json",
+                "base/TIFactionTemplate.json",
+                "base/TIFactionIdeologyTemplate.json",
                 "2003Scenario/TINationTemplate.json",
                 "2003Scenario/TIRegionTemplate.json",
                 "2003Scenario/TIStartTimeTemplate.json",

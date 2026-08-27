@@ -232,14 +232,24 @@ class NationProjectionState:
     hostile_region_ids: set[int] = field(default_factory=set)
     executive_faction_id: int | None = None
     public_opinion_context: dict[str, Any] = field(default_factory=dict)
+    public_opinion: dict[str, float] = field(default_factory=dict)
+    public_opinion_expected_transition: bool = False
     rest_state_context: dict[str, Any] = field(default_factory=dict)
     armies: list[ArmyProjectionState] = field(default_factory=list)
-    world_context: dict[str, float] = field(default_factory=dict)
+    world_market: dict[str, float] = field(default_factory=dict)
+    world_context: dict[str, Any] = field(default_factory=dict)
     world_context_provenance: str = "heldFixedWorldContext"
     population_mean_path: bool = False
     metric_provenance: dict[str, set[str]] = field(default_factory=dict)
     metric_tracker: MetricDependencyTracker = field(default_factory=MetricDependencyTracker)
     federation_economy_bonus: float = 0.0
+    cached_num_mining_regions: int = 0
+    cached_num_oil_regions: int = 0
+    cached_num_core_economic_regions: int = 0
+    cached_can_accumulate_core_economy: bool = False
+    cached_can_accumulate_core_mining: bool = False
+    cached_can_accumulate_core_oil: bool = False
+    world_market_blockers: set[str] = field(default_factory=set)
 
     @property
     def population_millions(self) -> float:
@@ -280,6 +290,7 @@ class PlanSegment:
 class PriorityPlan:
     name: str
     segments: tuple[PlanSegment, ...]
+    unity_public_opinion_policy: str = "failClosed"
 
 
 @dataclass(frozen=True)
@@ -301,6 +312,11 @@ class ProjectionContext:
     region_templates: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     start_template: Mapping[str, Any] = field(default_factory=dict)
     faction_priority_modifiers: Mapping[int, Mapping[str, float]] = field(default_factory=dict)
+    faction_ideologies: Mapping[int, str] = field(default_factory=dict)
+    ideology_templates: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    permanent_allies: Mapping[int, tuple[int, ...]] = field(default_factory=dict)
+    faction_effect_contexts: Mapping[int, Mapping[str, tuple[str, ...]]] = field(default_factory=dict)
+    effect_templates: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 def _canonical_priority(value: str, priorities: Mapping[str, Any]) -> str:
@@ -438,7 +454,13 @@ def parse_projection_document(
                 if len(identities) != len(set(identities)):
                     raise ProjectionInputError("Duplicate advisor placement")
             segments.append(PlanSegment(until_day, until_condition, cp_policies, advisors))
-        plans.append(PriorityPlan(raw_plan["name"], tuple(segments)))
+        stochastic = raw_plan.get("stochasticPolicy", {})
+        if not isinstance(stochastic, dict) or set(stochastic) - {"unityPublicOpinion"}:
+            raise ProjectionInputError("stochasticPolicy supports only unityPublicOpinion")
+        unity_policy = stochastic.get("unityPublicOpinion", "failClosed")
+        if unity_policy not in {"failClosed", "meanPath"}:
+            raise ProjectionInputError("stochasticPolicy.unityPublicOpinion must be failClosed or meanPath")
+        plans.append(PriorityPlan(raw_plan["name"], tuple(segments), str(unity_policy)))
     goals: list[tuple[str, MetricCondition]] = []
     raw_goals = payload.get("goals", [])
     if not isinstance(raw_goals, list):
@@ -1039,6 +1061,32 @@ def _nation_snapshot(state: NationProjectionState, context: ProjectionContext | 
         "stoFighters": state.sto_fighters,
         "baseInvestmentPointsMonth": _base_ip(state, context),
         "priorityProgress": dict(state.progress),
+        "publicOpinion": dict(state.public_opinion),
+    }
+
+
+def _world_projection(state: NationProjectionState) -> dict[str, Any]:
+    values = state.world_context.get("resourceMarketValues")
+    market = {
+        name: float(value)
+        for name, value in values.items()
+        if isinstance(values, Mapping)
+        and name in {"Metals", "NobleMetals"}
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    } if isinstance(values, Mapping) else {}
+    return {"marketValues": market}
+
+
+def _scope_status(state: NationProjectionState, *, blocking: bool = False) -> dict[str, Any]:
+    market_blockers = sorted(state.world_market_blockers)
+    return {
+        "nation": {"status": "incomplete" if blocking else "complete"},
+        "factionContribution": {"status": "incomplete" if blocking else "complete"},
+        "worldMarket": {
+            "status": "incomplete" if market_blockers else "complete",
+            "blockers": market_blockers,
+        },
     }
 
 
@@ -1075,6 +1123,7 @@ def _state_snapshot(state: NationProjectionState, context: ProjectionContext) ->
         "nation": _nation_snapshot(state, context),
         "controlPoints": _control_point_snapshot(state, context),
         "factionContribution": _contribution(state, context),
+        "worldProjection": _world_projection(state),
     }
 
 
@@ -1102,6 +1151,8 @@ PUBLIC_FACTION_METRICS = frozenset({
 def _public_metric_names(state: NationProjectionState) -> set[str]:
     return set(PUBLIC_NATION_METRICS) | set(PUBLIC_FACTION_METRICS) | {
         f"nation.priorityProgress.{priority}" for priority in state.progress
+    } | {f"nation.publicOpinion.{ideology}" for ideology in state.public_opinion} | {
+        "world.market.metals", "world.market.nobleMetals",
     }
 
 
@@ -1111,6 +1162,15 @@ def _seed_metric_evidence(state: NationProjectionState, context: ProjectionConte
     tracker = state.metric_tracker
     for metric in _public_metric_names(state):
         tracker.ensure(metric)
+    for ideology in state.public_opinion:
+        tracker.ensure(f"nation.publicOpinion.{ideology}")
+    market_blockers = tuple(state.world_market_blockers)
+    for metric in ("world.market.metals", "world.market.nobleMetals"):
+        tracker.ensure(
+            metric,
+            coverage="unsupported" if market_blockers else "exact",
+            blockers=market_blockers,
+        )
     for region in state.regions.values():
         tracker.ensure(f"region.{region.id}.population")
         tracker.ensure(f"region.{region.id}.gdp")
@@ -1633,6 +1693,7 @@ def _run_monthly_transaction(
             rule_ids=(Rules.NATION_POPULATION_ANNUAL_GROWTH.id, Rules.NATION_POPULATION_MONTHLY_GROWTH.id),
             coverage="expected",
             provenance=("meanPath", state.world_context_provenance),
+            stochastic_treatments=("deterministicMeanInput",),
         )
         state.metric_tracker.record(
             gdp_metric,
@@ -1902,8 +1963,12 @@ def _projection_preflight(
     active: set[str] = set()
     dormant: set[str] = set()
     implicit: list[dict[str, Any]] = []
+    unity_requested = False
     for segment_index, segment in enumerate(plan.segments):
         _apply_segment(working, segment)
+        unity_requested = unity_requested or any(
+            cp.pips.get("Unity", 0) > 0 for cp in working.control_points.values()
+        )
         for cp in sorted(working.control_points.values(), key=lambda value: value.position):
             effective: dict[str, int] = {}
             for name, value in cp.pips.items():
@@ -1930,10 +1995,21 @@ def _projection_preflight(
                     "reason": "noValidPositivePips",
                 })
                 unsupported.add("Economy")
+    stochastic_blockers: list[dict[str, Any]] = []
+    if unity_requested and plan.unity_public_opinion_policy != "meanPath":
+        unsupported.add("Unity")
+        stochastic_blockers.append({
+            "priority": "Unity",
+            "policy": "unityPublicOpinion",
+            "required": "meanPath",
+            "actual": plan.unity_public_opinion_policy,
+        })
     return sorted(unsupported), {
         "activePriorities": sorted(active),
         "dormantPriorities": sorted(dormant),
         "implicitFallbacks": implicit,
+        "stochasticPolicy": {"unityPublicOpinion": plan.unity_public_opinion_policy},
+        "stochasticPolicyBlockers": stochastic_blockers,
     }
 
 
@@ -2020,6 +2096,8 @@ def run_projection(
             "currentAllocation": {str(cp.position): dict(cp.pips) for cp in state.control_points.values()},
             "authoritativeFinalState": None,
             "lastAuthoritativeState": initial_snapshot,
+            "worldProjection": _world_projection(state),
+            "scopeStatus": _scope_status(state, blocking=True),
             "limitations": ["Nonzero pips reference priority completion/downstream mechanics that are not audited."],
             "mechanicRuleIds": [],
             "coverage": {name: coverage[name] for name in unsupported},
@@ -2211,6 +2289,8 @@ def run_projection(
         "preflight": preflight,
         "nationProjection": final_nation,
         "factionContribution": final_contribution,
+        "worldProjection": _world_projection(state),
+        "scopeStatus": _scope_status(state, blocking=runtime_stop is not None),
         "authoritativeFinalState": state_snapshot if status == "complete" else None,
         "lastAuthoritativeState": state_snapshot,
         "segmentTransitions": transitions,
@@ -2250,7 +2330,9 @@ def run_projection(
         "limitations": incomplete_reasons + [
             "Exogenous events, missions, wars, ownership changes and player actions are held fixed.",
             "Population uses a deterministic mean-input trajectory; it is not guaranteed to equal the expectation of all stochastic trajectories.",
-        ],
+        ] + ([
+            "World-market values are unavailable; the independent market branch is non-authoritative without blocking nation or faction results.",
+        ] if state.world_market_blockers else []),
     }
     if details:
         result["transactions"] = transactions
@@ -2272,7 +2354,11 @@ def projection_output(
     source_notes: list[str],
 ) -> dict[str, Any]:
     initial_used: set[str] = set()
-    initial = {"nation": _nation_snapshot(initial_state, context), "factionContribution": _contribution(initial_state, context, initial_used)}
+    initial = {
+        "nation": _nation_snapshot(initial_state, context),
+        "factionContribution": _contribution(initial_state, context, initial_used),
+        "worldProjection": _world_projection(initial_state),
+    }
     results = [run_projection(initial_state, plan, context, days=days, checkpoints=checkpoints, goals=goals, details=details) for plan in plans]
     complete = [result for result in results if result["status"] == "complete"]
     nation_metrics: dict[str, Any] = {}

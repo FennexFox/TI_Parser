@@ -8929,8 +8929,8 @@ def extract_nation_projection_state(
                 key: int(region[field])
                 for key, field in (
                     ("coreEconomic", "accumulatedCoreEconomyRegionTriggers"),
-                    ("mining", "accumulatedMiningRegionTriggers"),
-                    ("oil", "accumulatedOilRegionTriggers"),
+                    ("mining", "accumulatedCoreMiningRegionTriggers"),
+                    ("oil", "accumulatedCoreOilRegionTriggers"),
                 )
                 if isinstance(region.get(field), (int, float)) and not isinstance(region.get(field), bool)
             },
@@ -9001,6 +9001,25 @@ def extract_nation_projection_state(
     temperature = temperature_anomaly_components(global_state)
     hostile_ids = {region_id for region_id in (ref_id(value) for value in nation.get("hostileClaims", [])) if region_id in regions}
     executive_cp = max(control_points.values(), key=lambda value: value.position)
+    raw_public_opinion = nation.get("publicOpinion")
+    public_opinion = {
+        str(key): float(value)
+        for key, value in raw_public_opinion.items()
+        if isinstance(raw_public_opinion, dict)
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    } if isinstance(raw_public_opinion, dict) else {}
+    raw_market = global_state.get("resourceMarketValues")
+    market_values = {
+        name: float(raw_market[name])
+        for name in ("Metals", "NobleMetals")
+        if isinstance(raw_market, dict)
+        and isinstance(raw_market.get(name), (int, float))
+        and not isinstance(raw_market.get(name), bool)
+    }
+    market_blockers = set()
+    if set(market_values) != {"Metals", "NobleMetals"}:
+        market_blockers.add(Rules.NATION_PRIORITY_ECONOMY_MARKET.id)
     state = nation_projection_layer.NationProjectionState(
         nation_id=nation_id, at=start, gdp=nation_gdp,
         inequality=_required_projection_number(indexed, nation, "inequality", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id),
@@ -9030,6 +9049,7 @@ def extract_nation_projection_state(
         legitimize_counter=as_float(nation.get("accumulatedLegitimizeClaimTriggers"), 0.0),
         hostile_region_ids=hostile_ids,
         executive_faction_id=executive_cp.owner_faction_id,
+        public_opinion=public_opinion,
         armies=armies,
         world_context={
             "earthAtmosphericCO2_ppm": _required_projection_number(indexed, global_state, "earthAtmosphericCO2_ppm", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
@@ -9038,8 +9058,17 @@ def extract_nation_projection_state(
             "stratosphericAerosols_ppm": _required_projection_number(indexed, global_state, "stratosphericAerosols_ppm", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
             "temperatureAnomaly_C": temperature["total"],
             "pcgdpToReduceUnrestBy1": _required_projection_number(indexed, global_state, "fixedPCGDPToReduceUnrestBy1", source="save-field", rule_id=Rules.NATION_PERIODIC_DERIVED_CACHE.id),
+            "resourceMarketValues": market_values,
+            "endOfOil": global_state.get("endOfOil") if isinstance(global_state.get("endOfOil"), bool) else None,
         },
         federation_economy_bonus=as_float(nation.get("restofFederationECOBonus_dailyCache"), 0.0),
+        cached_num_mining_regions=int(as_float(nation.get("numMiningRegions_dailyCache"), 0.0)),
+        cached_num_oil_regions=int(as_float(nation.get("numOilRegions_dailyCache"), 0.0)),
+        cached_num_core_economic_regions=int(as_float(nation.get("numCoreEconomicRegions_dailyCache"), 0.0)),
+        cached_can_accumulate_core_economy=bool(nation.get("canAccumulateCoreEconomyTriggers")),
+        cached_can_accumulate_core_mining=bool(nation.get("canAccumulateCoreMiningTriggers")),
+        cached_can_accumulate_core_oil=bool(nation.get("canAccumulateCoreOilTriggers")),
+        world_market_blockers=market_blockers,
     )
     return state
 
@@ -9088,6 +9117,49 @@ def calculate_nation_projection(
                 welfare_base,
             ) - welfare_base,
         }
+    faction_templates = development.get("factionTemplates") if isinstance(development.get("factionTemplates"), dict) else {}
+    ideology_templates = development.get("ideologyTemplates") if isinstance(development.get("ideologyTemplates"), dict) else {}
+    faction_ideologies: dict[int, str] = {}
+    active_human: list[tuple[int, int, str]] = []
+    alien_faction_id: int | None = None
+    proxy_candidates: list[tuple[int, int]] = []
+    all_faction_contexts: dict[int, dict[str, tuple[str, ...]]] = {}
+    for entry in type_entries(indexed, "TIFactionState"):
+        value = entry.get("Value") or {}
+        owner_id = raw_state_id(entry)
+        template_name = str(value.get("templateName") or "")
+        faction_template = faction_templates.get(template_name)
+        if owner_id is None or not isinstance(faction_template, dict):
+            continue
+        ideology_name = str(faction_template.get("ideologyName") or "")
+        ideology_template = ideology_templates.get(ideology_name)
+        if not isinstance(ideology_template, dict):
+            continue
+        ideology = str(ideology_template.get("ideology") or "")
+        if not ideology:
+            continue
+        faction_ideologies[owner_id] = ideology
+        all_faction_contexts[owner_id] = {
+            str(name): tuple(str(effect) for effect in effects)
+            for name, effects in faction_effect_contexts(indexed, owner_id).items()
+        }
+        if faction_template.get("isAlien") is True or ideology_template.get("alien") is True:
+            alien_faction_id = owner_id
+        else:
+            active_human.append((int(ideology_template.get("sortOrder") or 0), owner_id, ideology_name))
+            will_proxy = ideology_template.get("willProxy")
+            if isinstance(will_proxy, int) and will_proxy > 0:
+                proxy_candidates.append((will_proxy, owner_id))
+    permanent_allies = {owner_id: (owner_id,) for owner_id in faction_ideologies}
+    if alien_faction_id is not None and proxy_candidates:
+        proxy_id = min(proxy_candidates)[1]
+        permanent_allies[alien_faction_id] = tuple(dict.fromkeys((*permanent_allies[alien_faction_id], proxy_id)))
+        permanent_allies[proxy_id] = tuple(dict.fromkeys((*permanent_allies[proxy_id], alien_faction_id)))
+    state.public_opinion_context = {
+        "activeHumanIdeologyNames": [name for _sort, _owner, name in sorted(active_human)],
+        "alienFactionId": alien_faction_id,
+        "alienProxyFactionId": min(proxy_candidates)[1] if proxy_candidates else None,
+    }
     nation_template_name = str(nation.get("templateName") or "")
     start_template_name = str((first_value(indexed, "TITimeState") or {}).get("templateName") or "")
     nation_template = _required_projection_catalog_row(
@@ -9119,6 +9191,11 @@ def calculate_nation_projection(
         region_templates=development.get("regionTemplates") or {},
         start_template=start_template,
         faction_priority_modifiers=faction_priority_modifiers,
+        faction_ideologies=faction_ideologies,
+        ideology_templates=ideology_templates,
+        permanent_allies=permanent_allies,
+        faction_effect_contexts=all_faction_contexts,
+        effect_templates=catalogs.effects,
     )
     nation_projection_layer.calibrate_rest_state_context(
         state,

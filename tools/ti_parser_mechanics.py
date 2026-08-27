@@ -80,6 +80,11 @@ class CoverageResolvers:
         ("exact", "unsupported"),
         "Resolve exact no-count-change monthly reconciliation or stop before an unsupported mutation.",
     )
+    UNITY_PUBLIC_OPINION = CoverageResolver(
+        "nation.priority.unity.public-opinion.v1",
+        ("expected", "unsupported"),
+        "Require explicit mean-path policy before applying sequential conditional expected propaganda transitions.",
+    )
 
 
 COVERAGE_RESOLVERS = {
@@ -88,6 +93,7 @@ COVERAGE_RESOLVERS = {
         CoverageResolvers.MISSION_CONTROL_PLACEMENT,
         CoverageResolvers.BUILD_ARMY_PLACEMENT,
         CoverageResolvers.PERIODIC_CONTROL_POINTS,
+        CoverageResolvers.UNITY_PUBLIC_OPINION,
     )
 }
 
@@ -193,6 +199,41 @@ class Rules:
         ("TINationState.OnUnityPriorityComplete", "TINationState.unityPriorityCohesionChange", "TINationState.unityPriorityEducationChange"),
         data_dependencies=("nationDevelopment.globalConfig.unityBaseCohesionChange", "nationDevelopment.globalConfig.unityMinCohesionChange", "nationDevelopment.globalConfig.unityPriorityEducationChange"),
     )
+    NATION_PRIORITY_UNITY_PUBLIC_OPINION = MechanicRule(
+        "nation.priority.unity.public-opinion", 1,
+        "Apply each CP owner's propaganda as a sequential conditional expected transition when explicitly enabled.",
+        "partial", "unsupported",
+        ("TINationState.OnUnityPriorityComplete", "TINationState.PropagandaOnPop_PerOwnedCP", "TINationState.PropagandaOnPop"),
+        deterministic=False,
+        coverage_mode="conditional",
+        allowed_coverages=CoverageResolvers.UNITY_PUBLIC_OPINION.allowed_coverages,
+        coverage_resolver_id=CoverageResolvers.UNITY_PUBLIC_OPINION.id,
+        test_ids=("tests.test_nation_projection.NationProjectionPlanTests.test_unity_stochastic_policy_is_explicit_and_plan_scoped",),
+    )
+    NATION_PRIORITY_UNITY_COHESION = MechanicRule(
+        "nation.priority.unity.cohesion", 1,
+        "Apply the direct Unity cohesion delta independently from propaganda output.",
+        "partial", "unsupported",
+        ("TINationState.OnUnityPriorityComplete", "TINationState.unityPriorityCohesionChange"),
+    )
+    NATION_PRIORITY_UNITY_EDUCATION = MechanicRule(
+        "nation.priority.unity.education", 1,
+        "Apply the direct Unity education delta independently from propaganda output.",
+        "partial", "unsupported",
+        ("TINationState.OnUnityPriorityComplete", "TINationState.unityPriorityEducationChange"),
+    )
+    NATION_PRIORITY_UNITY_LEGITIMIZE = MechanicRule(
+        "nation.priority.unity.legitimize", 1,
+        "Apply Unity's hostile-claim legitimize counter and deterministic claim removal.",
+        "partial", "unsupported",
+        ("TINationState.OnUnityPriorityComplete", "TINationState.OnLegitimizeClaimPriorityComplete"),
+    )
+    NATION_COHESION_PUBLIC_OPINION = MechanicRule(
+        "nation.cohesion.public-opinion", 1,
+        "Derive public-opinion dispersion and public/elite divide inputs to resting cohesion.",
+        "partial", "unsupported",
+        ("TINationState.publicOpinionImpactOnCohesion", "TINationState.publicEliteDivideImpactOnCohesion"),
+    )
     NATION_PRIORITY_FUNDING_COMPLETE = MechanicRule(
         "nation.priority.funding.complete", 1,
         "Increase annual national funding on completion.",
@@ -204,6 +245,61 @@ class Rules:
     NATION_PRIORITY_ECONOMY_COMPLETE = MechanicRule(
         "nation.priority.economy.complete", 1, "Apply Economy completion and all national/global downstream effects.",
         "partial", "unsupported", ("TINationState.OnEconomyPriorityComplete",),
+    )
+    NATION_PRIORITY_ECONOMY_GDP = MechanicRule(
+        "nation.priority.economy.gdp", 1,
+        "Apply Economy per-capita GDP and national GDP changes with live executive-faction effects.",
+        "partial", "unsupported",
+        ("TINationState.OnEconomyPriorityComplete", "TINationState.economyPriorityPerCapitaIncomeChange", "TINationState.ModifyGDP"),
+    )
+    NATION_PRIORITY_ECONOMY_INEQUALITY = MechanicRule(
+        "nation.priority.economy.inequality", 1,
+        "Apply Economy inequality and above-cap cohesion/unrest spillover.",
+        "partial", "unsupported",
+        ("TINationState.OnEconomyPriorityComplete", "TINationState.AddToInequality"),
+    )
+    NATION_PRIORITY_ECONOMY_MARKET = MechanicRule(
+        "nation.priority.economy.market", 1,
+        "Project Economy's Metals and Noble Metals market mutation as a deterministic mean-input branch.",
+        "partial", "unsupported",
+        ("TIGlobalValuesState.ModifyMarketValuesForEconomyPriority",),
+        deterministic=False,
+    )
+    NATION_PRIORITY_ECONOMY_REGION_TRIGGER = MechanicRule(
+        "nation.priority.economy.region-trigger", 1,
+        "Select and increment the cached Oil, Mining, or Core Economy trigger branch.",
+        "partial", "unsupported",
+        ("TINationState.OnEconomyPriorityComplete", "TINationState.GetNextCoreOilRegion", "TINationState.GetNextCoreMiningRegion", "TINationState.GetNextCoreEcoRegion"),
+    )
+    NATION_PRIORITY_ECONOMY_REGION_TRANSITION = MechanicRule(
+        "nation.priority.economy.region-transition", 1,
+        "Apply the threshold Oil, Mining, or Core Economy region state transition.",
+        "partial", "unsupported",
+        ("TINationState.OnCoreOilRegionPriorityComplete", "TINationState.OnCoreMiningRegionComplete", "TINationState.OnCoreEconomicRegionPriorityComplete"),
+    )
+    NATION_PRIORITY_ECONOMY_DOWNSTREAM_CACHE = MechanicRule(
+        "nation.priority.economy.downstream-cache", 1,
+        "Propagate Economy GDP and regional changes to live validity while preserving daily region caches.",
+        "partial", "unsupported",
+        ("TINationState.ModifyGDP", "TINationState.CacheRegionValues", "TINationState.PossiblePriorityValidationChange"),
+    )
+    NATION_PERIODIC_REGION_CACHE = MechanicRule(
+        "nation.periodic.region-cache", 1,
+        "Cache occupied-filtered resource/core region counts and Economy trigger availability before allocation.",
+        "partial", "unsupported",
+        ("TINationState.CacheRegionValues", "TINationState.DailyNationUpdate"),
+    )
+    NATION_EFFECT_CONTEXT_EXPIRATION = MechanicRule(
+        "nation.effect.context-expiration", 1,
+        "Remove saved faction effects at the audited semi-monthly boundary after daily bonus caching.",
+        "partial", "unsupported",
+        ("TIFactionState.FactionPeriodicUpdate", "TIEffectsState.RemoveExpiredEffects"),
+    )
+    NATION_PRIORITY_VALIDATION_TRIGGER = MechanicRule(
+        "nation.priority.validation-trigger", 1,
+        "Revalidate CP values only at audited setters and priority-validity change triggers.",
+        "partial", "unsupported",
+        ("TINationState.PossiblePriorityValidationChange", "TIControlPoint.SetControlPointPriority"),
     )
     NATION_PRIORITY_WELFARE_COMPLETE = MechanicRule(
         "nation.priority.welfare.complete", 2,
@@ -449,8 +545,22 @@ REGISTRY = {rule.id: rule for rule in (
     Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE,
     Rules.NATION_PRIORITY_GOVERNMENT_LEGITIMIZE,
     Rules.NATION_PRIORITY_UNITY_COMPLETE,
+    Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION,
+    Rules.NATION_PRIORITY_UNITY_COHESION,
+    Rules.NATION_PRIORITY_UNITY_EDUCATION,
+    Rules.NATION_PRIORITY_UNITY_LEGITIMIZE,
+    Rules.NATION_COHESION_PUBLIC_OPINION,
     Rules.NATION_PRIORITY_FUNDING_COMPLETE,
     Rules.NATION_PRIORITY_ECONOMY_COMPLETE,
+    Rules.NATION_PRIORITY_ECONOMY_GDP,
+    Rules.NATION_PRIORITY_ECONOMY_INEQUALITY,
+    Rules.NATION_PRIORITY_ECONOMY_MARKET,
+    Rules.NATION_PRIORITY_ECONOMY_REGION_TRIGGER,
+    Rules.NATION_PRIORITY_ECONOMY_REGION_TRANSITION,
+    Rules.NATION_PRIORITY_ECONOMY_DOWNSTREAM_CACHE,
+    Rules.NATION_PERIODIC_REGION_CACHE,
+    Rules.NATION_EFFECT_CONTEXT_EXPIRATION,
+    Rules.NATION_PRIORITY_VALIDATION_TRIGGER,
     Rules.NATION_PRIORITY_WELFARE_COMPLETE,
     Rules.NATION_PRIORITY_WELFARE_INEQUALITY,
     Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER,

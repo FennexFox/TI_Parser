@@ -77,9 +77,16 @@ COMPILED_NATION_GLOBALS: dict[str, int | float] = {
     "welfarePriorityInequalityChange": -0.005,
     "knowledgePriorityEducationIncrease": 0.005,
     "governmentPriorityDemocracyIncrease": 0.01,
+    "economyPriorityPerCapitaIncomeChange_base": 3.0,
+    "economyPriorityPerCapitaIncomeChange_perCoreEcoRegion": 1.5,
+    "economyPriorityPerCapitaIncomeChange_perResourceRegion": 1.5,
+    "economyPriorityInequalityIncrease": 0.00015,
+    "economyPriorityInequalityIncrease_perResourceRegion": 0.0001,
     "unityPriorityEducationChange": -0.001,
     "unityBaseCohesionChange": 0.1,
     "unityMinCohesionChange": 0.025,
+    "unityPublicOpinionBaseStrength": 5.0,
+    "religionUnityPublicOpinionBonusStrength": 3,
     "fundingPriorityBaseIncomeIncrease": 10.0,
     "maxMonthlyCohesionIncrease_normal": 0.1,
     "maxMonthlyCohesionDecrease_normal": 0.1,
@@ -125,6 +132,19 @@ NATION_DEVELOPMENT_TEMPLATE_FIELDS: dict[str, tuple[str, tuple[str, ...], dict[s
         ("dataName", "relationType", "region1", "region2", "projectUnlockName", "friendlyOnly"),
         {},
     ),
+    "factionTemplates": (
+        "TIFactionTemplate.json",
+        ("dataName", "ideologyName", "isAlien"),
+        {"isAlien": False},
+    ),
+    "ideologyTemplates": (
+        "TIFactionIdeologyTemplate.json",
+        (
+            "dataName", "alien", "undecided", "sortOrder", "willProxy", "willAppease",
+            "ideology", "ideologyCoordinates",
+        ),
+        {"alien": False, "undecided": False, "willProxy": -1, "willAppease": -1},
+    ),
 }
 NATION_DEVELOPMENT_TEMPLATE_DEFAULT_ORIGINS = {
     "nationTemplates.popGrowthModifier": "TINationTemplate compiled field default",
@@ -133,6 +153,11 @@ NATION_DEVELOPMENT_TEMPLATE_DEFAULT_ORIGINS = {
     "regionTemplates.mineCapable": "TIRegionTemplate compiled field default",
     "regionTemplates.oilCapable": "TIRegionTemplate compiled field default",
     "startTimeTemplates.populationRegressionPeriod_years": "TIStartTimeTemplate compiled field initializer",
+    "factionTemplates.isAlien": "TIFactionTemplate compiled field default",
+    "ideologyTemplates.alien": "TIFactionIdeologyTemplate compiled field default",
+    "ideologyTemplates.undecided": "TIFactionIdeologyTemplate compiled field default",
+    "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field initializer",
+    "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field initializer",
 }
 PRIORITY_DIVERSITY_BONUSES = {
     "Economy": 0.5,

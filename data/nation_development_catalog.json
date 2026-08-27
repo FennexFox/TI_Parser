@@ -46103,6 +46103,48 @@
       "Unity": 0.2,
       "Welfare": 0.2
     },
+    "factionTemplates": {
+      "AlienCouncil": {
+        "dataName": "AlienCouncil",
+        "ideologyName": "alien",
+        "isAlien": true
+      },
+      "AppeaseCouncil": {
+        "dataName": "AppeaseCouncil",
+        "ideologyName": "appease",
+        "isAlien": false
+      },
+      "CooperateCouncil": {
+        "dataName": "CooperateCouncil",
+        "ideologyName": "cooperate",
+        "isAlien": false
+      },
+      "DestroyCouncil": {
+        "dataName": "DestroyCouncil",
+        "ideologyName": "destroy",
+        "isAlien": false
+      },
+      "EscapeCouncil": {
+        "dataName": "EscapeCouncil",
+        "ideologyName": "escape",
+        "isAlien": false
+      },
+      "ExploitCouncil": {
+        "dataName": "ExploitCouncil",
+        "ideologyName": "exploit",
+        "isAlien": false
+      },
+      "ResistCouncil": {
+        "dataName": "ResistCouncil",
+        "ideologyName": "resist",
+        "isAlien": false
+      },
+      "SubmitCouncil": {
+        "dataName": "SubmitCouncil",
+        "ideologyName": "submit",
+        "isAlien": false
+      }
+    },
     "globalConfig": {
       "badInequality": {
         "value": 4.0,
@@ -46147,6 +46189,26 @@
       "coreResourceRegionGDPModifier": {
         "value": 1.25,
         "valueOrigin": "TIGlobalConfig.json"
+      },
+      "economyPriorityInequalityIncrease": {
+        "value": 0.00015,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "economyPriorityInequalityIncrease_perResourceRegion": {
+        "value": 0.0001,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "economyPriorityPerCapitaIncomeChange_base": {
+        "value": 3.0,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "economyPriorityPerCapitaIncomeChange_perCoreEcoRegion": {
+        "value": 1.5,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
+      "economyPriorityPerCapitaIncomeChange_perResourceRegion": {
+        "value": 1.5,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
       },
       "federationGDPEconomyBonus": {
         "value": 0.01,
@@ -46248,6 +46310,10 @@
         "value": 6.0,
         "valueOrigin": "TIGlobalConfig compiled field initializer"
       },
+      "religionUnityPublicOpinionBonusStrength": {
+        "value": 3,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
       "severeInequality": {
         "value": 4.75,
         "valueOrigin": "TIGlobalConfig compiled field initializer"
@@ -46264,9 +46330,155 @@
         "value": -0.001,
         "valueOrigin": "TIGlobalConfig compiled field initializer"
       },
+      "unityPublicOpinionBaseStrength": {
+        "value": 5.0,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
       "welfarePriorityInequalityChange": {
         "value": -0.005,
         "valueOrigin": "TIGlobalConfig compiled field initializer"
+      }
+    },
+    "ideologyTemplates": {
+      "alien": {
+        "alien": true,
+        "dataName": "alien",
+        "ideology": "Alien",
+        "ideologyCoordinates": {
+          "x": -3,
+          "y": 0,
+          "z": 0
+        },
+        "sortOrder": 0,
+        "undecided": false,
+        "willAppease": -1,
+        "willProxy": -1
+      },
+      "appease": {
+        "alien": false,
+        "dataName": "appease",
+        "ideology": "Appease",
+        "ideologyCoordinates": {
+          "x": -1.5,
+          "y": -0.5,
+          "z": 0
+        },
+        "sortOrder": 2,
+        "undecided": false,
+        "willAppease": 1,
+        "willProxy": 2
+      },
+      "cooperate": {
+        "alien": false,
+        "dataName": "cooperate",
+        "ideology": "Cooperate",
+        "ideologyCoordinates": {
+          "x": -0.5,
+          "y": 1,
+          "z": 0
+        },
+        "sortOrder": 3,
+        "undecided": false,
+        "willAppease": 3,
+        "willProxy": 3
+      },
+      "destroy": {
+        "alien": false,
+        "dataName": "destroy",
+        "ideology": "Destroy",
+        "ideologyCoordinates": {
+          "x": 2,
+          "y": -0.5,
+          "z": 0
+        },
+        "sortOrder": 8,
+        "undecided": false,
+        "willAppease": -1,
+        "willProxy": -1
+      },
+      "escape": {
+        "alien": false,
+        "dataName": "escape",
+        "ideology": "Escape",
+        "ideologyCoordinates": {
+          "x": 0.5,
+          "y": 1,
+          "z": 0
+        },
+        "sortOrder": 5,
+        "undecided": false,
+        "willAppease": -1,
+        "willProxy": -1
+      },
+      "exploit": {
+        "alien": false,
+        "dataName": "exploit",
+        "ideology": "Exploit",
+        "ideologyCoordinates": {
+          "x": 0,
+          "y": -1,
+          "z": 0
+        },
+        "sortOrder": 4,
+        "undecided": false,
+        "willAppease": 5,
+        "willProxy": 4
+      },
+      "peaceful": {
+        "alien": false,
+        "dataName": "peaceful",
+        "ideology": "Peaceful",
+        "ideologyCoordinates": {
+          "x": 2,
+          "y": 2,
+          "z": 0
+        },
+        "sortOrder": 6,
+        "undecided": false,
+        "willAppease": 4,
+        "willProxy": -1
+      },
+      "resist": {
+        "alien": false,
+        "dataName": "resist",
+        "ideology": "Resist",
+        "ideologyCoordinates": {
+          "x": 1,
+          "y": 0,
+          "z": 0
+        },
+        "sortOrder": 7,
+        "undecided": false,
+        "willAppease": -1,
+        "willProxy": -1
+      },
+      "submit": {
+        "alien": false,
+        "dataName": "submit",
+        "ideology": "Submit",
+        "ideologyCoordinates": {
+          "x": -2,
+          "y": 1,
+          "z": 0
+        },
+        "sortOrder": 1,
+        "undecided": false,
+        "willAppease": 2,
+        "willProxy": 1
+      },
+      "undecided": {
+        "alien": false,
+        "dataName": "undecided",
+        "ideology": "Undecided",
+        "ideologyCoordinates": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "sortOrder": 9,
+        "undecided": true,
+        "willAppease": -1,
+        "willProxy": -1
       }
     },
     "mapRegionTemplates": {
@@ -60483,6 +60695,11 @@
       }
     },
     "templateDefaultOrigins": {
+      "factionTemplates.isAlien": "TIFactionTemplate compiled field default",
+      "ideologyTemplates.alien": "TIFactionIdeologyTemplate compiled field default",
+      "ideologyTemplates.undecided": "TIFactionIdeologyTemplate compiled field default",
+      "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field initializer",
+      "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field initializer",
       "nationTemplates.popGrowthModifier": "TINationTemplate compiled field default",
       "regionTemplates.annualPopGrowthModifier": "TIRegionTemplate compiled field default",
       "regionTemplates.environment": "TIRegionTemplate compiled field initializer",
@@ -60495,7 +60712,7 @@
     "name": "build_runtime_catalogs",
     "version": "1"
   },
-  "payloadFingerprint": "992b874388ea7efccb7b512638360be875071b4599c3af0a064e34c6cdb16f00",
+  "payloadFingerprint": "bc8dff547ea5a44e0fec59769dac95720051fb396fad2c0bb10540998bf0f956",
   "scenarioOverrides": {
     "2003Scenario": {
       "bilateralTemplates": {
@@ -96245,6 +96462,10 @@
       "sha256": "9c8285734dc6644c882458b79115e233bbc101445a8a39c19c1d3cf2a28fe457"
     },
     {
+      "name": "2003Scenario/TIFactionTemplate.json",
+      "sha256": "687c6289a1c1f06f7643468401e5c2cb31e739537e3e80d91d5d7bdeeb365829"
+    },
+    {
       "name": "2003Scenario/TIMetaTemplate.json",
       "sha256": "08924ca30930b942a018672134dceaef214befe44cef8e4d1d5d966585089482"
     },
@@ -96263,6 +96484,10 @@
     {
       "name": "BrokenEarthScenario/TIBilateralTemplate.json",
       "sha256": "099c502d8fa9198aa75977db31404555c4705ed4b1a76f5e82ef5f175a2daf74"
+    },
+    {
+      "name": "BrokenEarthScenario/TIFactionTemplate.json",
+      "sha256": "e0049e0a1824f631a73512c84a66695ce25fe99ae12c67d8ca53990f5512ef67"
     },
     {
       "name": "BrokenEarthScenario/TIGlobalConfig.json",
@@ -96291,6 +96516,14 @@
     {
       "name": "base/TIBilateralTemplate.json",
       "sha256": "085533545b98d7a6931cd7fed0097a0c5821f687e08f07a1ed5e1e1eaea502ef"
+    },
+    {
+      "name": "base/TIFactionIdeologyTemplate.json",
+      "sha256": "a84a99ed657177084df16313b3eec18c5ad7a772a65148b6ca87a35eeec2a8c5"
+    },
+    {
+      "name": "base/TIFactionTemplate.json",
+      "sha256": "af900ac81463e69ceae9b4990fc45f96f9adbbc22c9899824f6ed9fad9d0630d"
     },
     {
       "name": "base/TIGlobalConfig.json",

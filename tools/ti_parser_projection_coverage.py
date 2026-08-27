@@ -38,6 +38,7 @@ class MetricEvidence:
     depends_on: set[str] = field(default_factory=set)
     rule_ids: set[str] = field(default_factory=set)
     blockers: set[str] = field(default_factory=set)
+    stochastic_treatments: set[str] = field(default_factory=set)
 
     def output(self) -> dict[str, object]:
         result: dict[str, object] = {
@@ -47,11 +48,14 @@ class MetricEvidence:
             "ruleIds": sorted(self.rule_ids),
             "blockers": sorted(self.blockers),
         }
-        if "meanPath" in self.provenance:
-            result.update({
-                "stochasticTreatment": "deterministicMeanInput",
-                "expectationGuarantee": False,
-            })
+        treatments = sorted(self.stochastic_treatments)
+        if "meanPath" in self.provenance and not treatments:
+            # Backward-compatible default for the original Population path.
+            treatments = ["deterministicMeanInput"]
+        if treatments:
+            result["stochasticTreatments"] = treatments
+            result["stochasticTreatment"] = treatments[0] if len(treatments) == 1 else "mixed"
+            result["expectationGuarantee"] = False
         return result
 
 
@@ -68,6 +72,7 @@ class MetricDependencyTracker:
         provenance: Iterable[str] = (),
         rule_ids: Iterable[str] = (),
         blockers: Iterable[str] = (),
+        stochastic_treatments: Iterable[str] = (),
     ) -> MetricEvidence:
         if coverage not in COVERAGE_ORDER:
             raise ValueError(f"Unknown metric coverage: {coverage}")
@@ -80,6 +85,7 @@ class MetricDependencyTracker:
         current.provenance.update(str(value) for value in provenance)
         current.rule_ids.update(str(value) for value in rule_ids)
         current.blockers.update(str(value) for value in blockers)
+        current.stochastic_treatments.update(str(value) for value in stochastic_treatments)
         if "meanPath" in current.provenance:
             current.coverage = combine_coverage(current.coverage, "expected")
         return current
@@ -93,6 +99,7 @@ class MetricDependencyTracker:
         coverage: str = "exact",
         provenance: Iterable[str] = (),
         blockers: Iterable[str] = (),
+        stochastic_treatments: Iterable[str] = (),
     ) -> MetricEvidence | dict[str, MetricEvidence]:
         """Replace evidence for calculated outputs with their actual input graph."""
 
@@ -108,10 +115,12 @@ class MetricDependencyTracker:
         combined_provenance = set(str(value) for value in provenance)
         combined_rules = set(str(value) for value in rule_ids)
         combined_blockers = set(str(value) for value in blockers)
+        combined_treatments = set(str(value) for value in stochastic_treatments)
         for item in snapshots.values():
             combined_provenance.update(item.provenance)
             combined_rules.update(item.rule_ids)
             combined_blockers.update(item.blockers)
+            combined_treatments.update(item.stochastic_treatments)
         if "meanPath" in combined_provenance:
             combined = combine_coverage(combined, "expected")
         written: dict[str, MetricEvidence] = {}
@@ -122,6 +131,7 @@ class MetricDependencyTracker:
                 depends_on=set(input_names),
                 rule_ids=set(combined_rules),
                 blockers=set(combined_blockers),
+                stochastic_treatments=set(combined_treatments),
             )
             self.evidence[output] = evidence
             written[output] = evidence
@@ -176,6 +186,7 @@ def execution_record(
     dependencies: Iterable[str] = (),
     provenance: str | Iterable[str] = "dllReimplementation",
     coverage_resolver_id: str | None = None,
+    stochastic_treatments: Iterable[str] = (),
 ) -> dict[str, object]:
     provenance_values = (provenance,) if isinstance(provenance, str) else tuple(provenance)
     result: dict[str, object] = {
@@ -189,5 +200,10 @@ def execution_record(
     if coverage_resolver_id is not None:
         result["coverageResolverId"] = coverage_resolver_id
     if "meanPath" in result["provenance"]:
+        result["expectationGuarantee"] = False
+    treatments = sorted(set(str(value) for value in stochastic_treatments))
+    if treatments:
+        result["stochasticTreatments"] = treatments
+        result["stochasticTreatment"] = treatments[0] if len(treatments) == 1 else "mixed"
         result["expectationGuarantee"] = False
     return result

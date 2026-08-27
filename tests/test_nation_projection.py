@@ -122,6 +122,37 @@ def state(*, pips=None, cp_count=1, progress=None, advisors=(), at=None, annual_
 
 
 class NationProjectionPlanTests(unittest.TestCase):
+    @mechanic_rule_test(Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id, evidence="coverageBranch")
+    def test_unity_stochastic_policy_is_explicit_and_plan_scoped(self):
+        initial = state(pips={"Knowledge": 3})
+        payload = {"plans": [{
+            "name": "p",
+            "stochasticPolicy": {"unityPublicOpinion": "meanPath"},
+            "segments": [
+                {"until": {"day": 5}},
+                {"controlPoints": [{"position": 0, "pips": {"Unity": 3}}]},
+            ],
+        }]}
+        plans, _ = projection.parse_projection_document(
+            payload, state=initial, councilors={}, priorities=context().priorities
+        )
+        self.assertEqual(plans[0].unity_public_opinion_policy, "meanPath")
+        result = projection.run_projection(initial, plans[0], context(), days=1)
+        self.assertEqual(result["preflight"]["stochasticPolicyBlockers"], [])
+        bad = copy.deepcopy(payload)
+        bad["plans"][0]["stochasticPolicy"]["unityPublicOpinion"] = "replay"
+        with self.assertRaisesRegex(projection.ProjectionInputError, "failClosed or meanPath"):
+            projection.parse_projection_document(
+                bad, state=initial, councilors={}, priorities=context().priorities
+            )
+        no_opt_in = copy.deepcopy(payload)
+        no_opt_in["plans"][0].pop("stochasticPolicy")
+        plans, _ = projection.parse_projection_document(
+            no_opt_in, state=initial, councilors={}, priorities=context().priorities
+        )
+        result = projection.run_projection(initial, plans[0], context(), days=1)
+        self.assertEqual(result["preflight"]["stochasticPolicyBlockers"][0]["priority"], "Unity")
+
     @mechanic_rule_test(Rules.NATION_ADVISOR_ATTRIBUTE_SOURCE.id, evidence="stateTransition")
     def test_saved_and_virtual_advisor_validation(self):
         initial = state()
@@ -149,6 +180,21 @@ class NationProjectionPlanTests(unittest.TestCase):
 
 
 class NationProjectionTransactionTests(unittest.TestCase):
+    def test_world_market_scope_can_be_incomplete_without_blocking_nation(self):
+        initial = state()
+        initial.world_market_blockers.add(Rules.NATION_PRIORITY_ECONOMY_MARKET.id)
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+        )
+        self.assertEqual(result["status"], "complete")
+        self.assertIsNotNone(result["authoritativeFinalState"])
+        self.assertEqual(result["scopeStatus"]["nation"]["status"], "complete")
+        self.assertEqual(result["scopeStatus"]["worldMarket"]["status"], "incomplete")
+        self.assertEqual(result["metricCoverage"]["world.market.metals"]["coverage"], "unsupported")
+
     @mechanic_rule_test(Rules.NATION_IP_CONTROL_POINT_ALLOCATION.id, evidence="expectedValue")
     def test_one_tick_control_point_allocation(self):
         initial = state()

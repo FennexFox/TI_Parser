@@ -57,7 +57,7 @@
 
 ## Progress
 
-- Pending.
+- Complete.
 
 ## Decision log
 
@@ -66,4 +66,16 @@
 
 ## Outcomes / Retrospective
 
-- Pending.
+- Added branch-aware state and diagnostics for public opinion and world-market
+  values without enabling Economy or Unity completion handlers.
+- Added a plan-scoped Unity stochastic policy gate over fully materialized
+  segments. A possible nonzero Unity pip now requires the explicit `meanPath`
+  policy before simulation begins.
+- Packaged audited Economy/Unity constants and normalized faction/ideology
+  template data in the existing hash-verified runtime catalog envelope.
+- Corrected the real save region trigger field names and verified the local CAL
+  extraction path exposes public opinion, Metals/Noble Metals, cached region
+  values, and the expected unsupported-priority preflight result.
+- Validation: 58 focused registry, catalog, projection, CLI, and package-only
+  tests plus 13 subtests passed; the local one-day CAL command completed its
+  observational extraction/preflight smoke without encoding save values.
