@@ -18,6 +18,8 @@
 - Replace the approximate date loop with verified DLL event boundaries and execute mutations on cloned state. Preserve verified authoritative prefixes while rolling back only the incomplete handler or phase that reaches an unsupported dependency.
 - Derive metric coverage and provenance from the dependencies actually read and written. Conditional rule coverage remains distinct from the coverage of each affected output metric.
 - Treat Population as a deterministic mean-input trajectory: replace each stochastic input with its mean, propagate `meanPath`, and never claim that the nonlinear trajectory equals the mathematical expectation of all stochastic paths.
+- Support Economy through independently covered GDP, inequality, regional, and world-market branches. An unsupported market-only branch does not invalidate nation or faction state until an audited dependency reads it.
+- Support Unity only when the plan opts into its sequential conditional-expected public-opinion trajectory. Keep this distinct from Population's mean-input trajectory in diagnostics.
 
 ## Phase Order
 
@@ -34,6 +36,11 @@
 11. [Shared priority validity and independent verification](11-validity-and-verification.md)
 12. [Real-save matrix, documentation, and Graphify refresh](12-real-save-graphify.md)
 13. [Cross-runner mechanics test-ID resolution](13-test-id-import-compatibility.md)
+14. [Economy and Unity audit, catalog, and state](14-economy-unity-foundations.md)
+15. [Scheduler, cache, and validation triggers](15-scheduler-cache-validity.md)
+16. [Economy and BuildArmy market branches](16-economy-market.md)
+17. [Unity public opinion and direct effects](17-unity-public-opinion.md)
+18. [Real-save verification, documentation, and Graphify](18-economy-unity-verification.md)
 
 ## Phase Dependencies
 
@@ -52,6 +59,11 @@
 - Phase 13 depends on phase 11's registry evidence contract and preserves its
   canonical dotted test IDs across both unittest discovery and pytest import
   modes.
+- Phase 14 extends the audited registry/catalog/state contracts without enabling either completion.
+- Phase 15 depends on phase 14 and makes the scheduler, cached faction bonuses, effect expiry, and validation triggers faithful enough for Economy and Unity.
+- Phase 16 depends on phases 14 and 15 and enables Economy plus BuildArmy's independently covered market branch.
+- Phase 17 depends on phases 14 and 15 and enables Unity only under the explicit stochastic policy.
+- Phase 18 depends on phases 16 and 17 and completes full-suite, observational real-save, documentation, and Graphify verification.
 
 ## Source Of Truth Decisions
 
@@ -69,6 +81,9 @@
 - Registry `test_ids` remain canonical `tests.<module>.<class>.<method>` paths;
   the repository test tree is an explicit package so test runners do not change
   their meaning.
+- Economy market values are an independent output scope. Missing market-only data leaves nation/faction output and ranking available, records `worldMarket` incomplete, and becomes blocking only if a simulated nation/faction rule reads that value.
+- Population and Unity both use `coverage: expected` and `provenance: meanPath`, but Population uses `deterministicMeanInput` while Unity uses `deterministicExpectedTransition`; neither claims full-path mathematical expectation.
+- Unity opt-in is checked against every materialized segment after pip inheritance, including the implicit current-pip segment when no plan file is supplied.
 
 ## Global Validation Expectations
 
@@ -79,6 +94,7 @@
 - py -3 -m unittest tests.test_nation_projection tests.test_nation_projection_cli tests.test_package_only_runtime
 - $env:TI_PARSER_REAL_SAVE = '<local ExitSave.gz>'; py -3 -m unittest tests.test_nation_projection_real_save; Remove-Item Env:TI_PARSER_REAL_SAVE
 - graphify update .; graphify diagnose multigraph --graph graphify-out/graph.json --json; graphify query "nation projection runtime dependency population government welfare mission control build army"
+- graphify query "nation projection economy unity market public opinion stochastic policy validation trigger"
 
 ## Known Risks And Assumptions
 
@@ -89,4 +105,6 @@
 - Installed DLL/template inputs can drift independently of the repository. Catalog regeneration and provenance parity must fail visibly, while runtime remains package-only.
 - Population feedback is nonlinear. The deterministic mean-input trajectory is generally not guaranteed to equal the expected value over complete stochastic trajectories.
 - Monthly `UpdateControlPoints` mutation is outside this extension; a required CP-count change must stop before mutation under `nation.periodic.control-points`.
-- Economy remains unsupported because its region transformation, nation effect, market, and environment dependencies are not all implemented. Unity-dependent resting-state metrics remain unsupported until its public-opinion side effect is modeled.
+- Economy market mutation is modeled only as a deterministic mean-input branch; coupled climate/environment feedback remains held fixed.
+- Unity public opinion is a sequential conditional-expected approximation, not exact RNG replay or the expectation of the complete nonlinear trajectory.
+- Monte Carlo, optimizer, actual CP-count mutation, and market/public-opinion goal metrics remain out of scope.
