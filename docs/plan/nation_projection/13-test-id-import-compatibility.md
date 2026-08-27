@@ -77,3 +77,8 @@
 - Graphify was incrementally refreshed after the package marker was committed:
   2,162 nodes, 6,208 edges, and 117 communities. Multigraph diagnostics report
   no malformed, missing-endpoint, dangling, self-loop, or duplicate edges.
+- Phase 17 hardened this again after a full-pytest reproduction showed that an
+  explicit package marker still did not make runner-driven re-imports a sound
+  registry contract in every environment. Registry validation now resolves
+  canonical IDs against pytest's already-collected test objects and decorator
+  metadata, so it no longer calls `importlib.import_module("tests...")`.

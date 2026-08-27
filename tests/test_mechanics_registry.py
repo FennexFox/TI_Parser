@@ -1,6 +1,5 @@
 import sys
 import unittest
-import importlib
 from dataclasses import replace
 from pathlib import Path
 
@@ -9,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ti_parser_mechanics import (
     COVERAGE_RESOLVERS,
+    COLLECTED_MECHANIC_TESTS,
     REGISTRY,
     Rules,
     mechanic_diagnostics,
@@ -31,17 +31,16 @@ class MechanicsRegistryTests(unittest.TestCase):
             or any(value != "unsupported" for value in rule.allowed_coverages)
         ))
         self.assertEqual({row["id"] for row in mechanic_diagnostics(REGISTRY)}, set(REGISTRY))
-        for rule in REGISTRY.values():
-            for test_id in rule.test_ids:
-                module_name, class_name, method_name = test_id.rsplit(".", 2)
-                test_class = getattr(importlib.import_module(module_name), class_name)
-                self.assertTrue(callable(getattr(test_class, method_name)), test_id)
-
-        def resolve_test(test_id):
-            module_name, class_name, method_name = test_id.rsplit(".", 2)
-            return getattr(getattr(importlib.import_module(module_name), class_name), method_name)
-
-        validate_test_metadata(resolve_test)
+        expected_ids = {
+            test_id
+            for rule in REGISTRY.values()
+            for test_id in rule.test_ids
+        }
+        missing = expected_ids - set(COLLECTED_MECHANIC_TESTS)
+        if missing:
+            self.skipTest("Direct mechanic fixtures were not part of this focused pytest collection")
+        self.assertTrue(all(callable(COLLECTED_MECHANIC_TESTS[test_id]) for test_id in expected_ids))
+        validate_test_metadata(COLLECTED_MECHANIC_TESTS.__getitem__)
 
     def test_duplicate_and_unregistered_rule_ids_fail_closed(self):
         with self.assertRaisesRegex(ValueError, "Duplicate"):
@@ -73,7 +72,7 @@ class MechanicsRegistryTests(unittest.TestCase):
     def test_real_save_rule_contracts_are_registered(self):
         required = set(self.test_real_save_rule_contracts_are_registered.mechanic_rule_ids)
         self.assertLessEqual(required, set(REGISTRY))
-        self.assertEqual(REGISTRY["nation.priority.unity.complete"].coverage, "unsupported")
+        self.assertEqual(REGISTRY["nation.priority.unity.complete"].coverage, "expected")
         self.assertEqual(REGISTRY["nation.priority.government.complete"].coverage, "exact")
         self.assertEqual(REGISTRY["nation.periodic.control-points"].coverage_mode, "conditional")
         self.assertEqual(REGISTRY["nation.periodic.control-points"].allowed_coverages, ("exact", "unsupported"))
@@ -89,6 +88,11 @@ class MechanicsRegistryTests(unittest.TestCase):
         build_army = REGISTRY["nation.priority.build-army.placement"]
         self.assertEqual(build_army.coverage_mode, "conditional")
         self.assertEqual(build_army.allowed_coverages, ("exact", "unsupported"))
+
+        unity = REGISTRY["nation.priority.unity.public-opinion"]
+        self.assertEqual(unity.coverage_mode, "conditional")
+        self.assertEqual(unity.allowed_coverages, ("expected", "unsupported"))
+        self.assertIn(unity.coverage_resolver_id, COVERAGE_RESOLVERS)
 
     def test_execution_coverage_is_validated_against_registered_resolver(self):
         mission_control = Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT

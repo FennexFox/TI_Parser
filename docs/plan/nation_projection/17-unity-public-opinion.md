@@ -46,7 +46,7 @@
 
 ## Progress
 
-- Pending.
+- Completed.
 
 ## Decision log
 
@@ -54,4 +54,33 @@
 
 ## Outcomes / Retrospective
 
-- Pending.
+- Unity now executes in DLL order: Religion owner lookup, distinct CP owners in
+  nation CP order, sequential propaganda, direct cohesion, direct education,
+  and hostile-claim legitimize handling.
+- Public opinion uses the DLL integer sample count, weak/strong movement
+  thresholds, ideology sort/tie order, Undecided normalization, disabled-CP
+  filtering for owned-count strength, permanent allies, and the independent
+  Religion bonus. Positive Unity samples already at the target ideology remain
+  in place, matching the audited DLL branch condition.
+- Every propaganda source records its before/after vector and effective inputs.
+  Metric evidence is `expected`, `meanPath`,
+  `deterministicExpectedTransition`, and `expectationGuarantee: false`.
+- Direct cohesion and education remain exact when their own inputs are exact;
+  they do not inherit public-opinion stochasticity. Population mean-input
+  provenance is still propagated independently when population scaling is an
+  upstream input.
+- The noon rest cache now computes public dispersion and public/elite divide
+  from live vectors. This is the first downstream point at which Unity opinion
+  evidence reaches cohesion-rest; later monthly movement inherits it normally.
+- Registry rules for Unity and public-opinion cohesion are verified and backed
+  by literal expected-value/state-transition fixtures. Registry fixture
+  discovery now consumes pytest-collected objects instead of importing the
+  unstable `tests` namespace.
+- Validation: the focused projection/registry suite passed, then the complete
+  suite passed with 248 tests, 9 skips, and 23 subtests. An observational
+  10-day smoke on the local Broken Earth save used a currently extant
+  four-control-point/five-region nation selected from the save: five Unity
+  completions finished with no runtime stop, direct cohesion remained exact,
+  public opinion and noon cohesion-rest were expected. The save's current
+  `CAL` entry is no longer the earlier four-CP/five-region snapshot, so no CAL
+  identity/count/value was promoted to a regression contract.

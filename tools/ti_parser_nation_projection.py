@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta
+from functools import lru_cache
 import copy
 import math
 import operator
@@ -36,6 +37,7 @@ STATIC_COMPLETIONS = {
     "Economy": ("exact", Rules.NATION_PRIORITY_ECONOMY_COMPLETE),
     "Knowledge": ("exact", Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE),
     "Government": ("exact", Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE),
+    "Unity": ("expected", Rules.NATION_PRIORITY_UNITY_COMPLETE),
     "Welfare": ("exact", Rules.NATION_PRIORITY_WELFARE_COMPLETE),
     "MissionControl": ("exact", Rules.NATION_PRIORITY_MISSION_CONTROL_COMPLETE),
     "Military_BuildArmy": ("exact", Rules.NATION_PRIORITY_BUILD_ARMY_COMPLETE),
@@ -669,8 +671,6 @@ def priority_coverage(priorities: Mapping[str, Any]) -> dict[str, dict[str, Any]
     result = {}
     for name in priorities:
         completion, supported_rule = STATIC_COMPLETIONS.get(name, ("unsupported", None))
-        if name == "Unity":
-            completion, supported_rule = "unsupported", Rules.NATION_PRIORITY_UNITY_COMPLETE
         rule = COMPLETION_RULES.get(name, supported_rule)
         overall = completion
         resolver_rule = (
@@ -1028,6 +1028,234 @@ def _next_army_control_point_position(state: NationProjectionState) -> int:
     return selected
 
 
+def _ideology_coordinates(row: Mapping[str, Any]) -> tuple[float, float, float] | None:
+    raw = row.get("ideologyCoordinates")
+    if not isinstance(raw, Mapping):
+        return None
+    values = tuple(raw.get(axis) for axis in ("x", "y", "z"))
+    if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in values):
+        return None
+    return tuple(float(value) for value in values)  # type: ignore[return-value]
+
+
+def _active_human_ideologies(
+    state: NationProjectionState,
+    context: ProjectionContext,
+) -> tuple[tuple[str, float, float, float], ...]:
+    names = state.public_opinion_context.get("activeHumanIdeologyNames")
+    if not isinstance(names, list):
+        names = []
+    rows: list[tuple[int, str, float, float, float]] = []
+    seen: set[str] = set()
+    selected_names = {str(name) for name in names}
+    for template_name, row in context.ideology_templates.items():
+        if not isinstance(row, Mapping):
+            continue
+        if template_name not in selected_names and not row.get("undecided"):
+            continue
+        ideology = row.get("ideology")
+        coordinates = _ideology_coordinates(row)
+        if not isinstance(ideology, str) or not ideology or coordinates is None or ideology in seen:
+            continue
+        seen.add(ideology)
+        rows.append((int(row.get("sortOrder") or 0), ideology, *coordinates))
+    if not rows:
+        raise ProjectionRuntimeStop(
+            "Unity requires active human ideology coordinates",
+            rule_ids=(Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id,),
+            dependencies=({"field": "activeHumanIdeologies", "source": "nationDevelopment.ideologyTemplates"},),
+            affected_metrics=("nation.publicOpinion.*", "nation.cohesionRest"),
+            priority="Unity",
+            mechanic="PropagandaOnPop",
+        )
+    return tuple((ideology, x, y, z) for _sort, ideology, x, y, z in sorted(rows))
+
+
+def _faction_ideology_target(
+    faction_id: int,
+    context: ProjectionContext,
+) -> tuple[str, tuple[float, float, float]]:
+    ideology = context.faction_ideologies.get(faction_id)
+    for row in context.ideology_templates.values():
+        if isinstance(row, Mapping) and row.get("ideology") == ideology:
+            coordinates = _ideology_coordinates(row)
+            if isinstance(ideology, str) and coordinates is not None:
+                return ideology, coordinates
+    raise ProjectionRuntimeStop(
+        "Unity CP owner ideology is unavailable",
+        rule_ids=(Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id,),
+        dependencies=({"field": f"factionIdeology.{faction_id}", "source": "save/catalog"},),
+        affected_metrics=("nation.publicOpinion.*", "nation.cohesionRest"),
+        priority="Unity",
+        mechanic="PropagandaOnPop",
+    )
+
+
+def _distance(left: tuple[float, float, float], right: tuple[float, float, float]) -> float:
+    return math.sqrt(sum((left[index] - right[index]) ** 2 for index in range(3)))
+
+
+def _nearest_ideology(
+    point: tuple[float, float, float],
+    active: tuple[tuple[str, float, float, float], ...],
+    disallow: str | None,
+) -> str:
+    candidates = [row for row in active if row[0] != disallow]
+    if not candidates:
+        return "Undecided"
+    return min(candidates, key=lambda row: _distance(point, (row[1], row[2], row[3])))[0]
+
+
+@lru_cache(maxsize=4096)
+def _movement_distribution(
+    origin: tuple[float, float, float],
+    target: tuple[float, float, float],
+    strong: bool,
+    active: tuple[tuple[str, float, float, float], ...],
+    disallow: str | None,
+) -> tuple[tuple[str, float], ...]:
+    distance = _distance(origin, target)
+    if distance > 0.0:
+        step = min(2.0, distance) if strong else 1.0
+        point = tuple(origin[index] + (target[index] - origin[index]) * step / distance for index in range(3))
+        return ((_nearest_ideology(point, active, disallow), 1.0),)
+
+    # Positive Unity propaganda never enters the DLL movement branch for a
+    # sample already at the target ideology. The cube perturbation is reachable
+    # only for negative-strength effects, which Unity does not use.
+    return ((_nearest_ideology(origin, active, None), 1.0),)
+
+
+def _propaganda_expected_transition(
+    state: NationProjectionState,
+    context: ProjectionContext,
+    target: tuple[float, float, float],
+    strength: float,
+) -> tuple[dict[str, float], int, str | None]:
+    active = _active_human_ideologies(state, context)
+    if state.population_millions < 0.005:
+        return dict(state.public_opinion), 0, None
+    sample_count = int(max(math.sqrt(state.population_millions * 1_000_000.0 / 100.0), 1.0))
+    cap = (100.0 - state.democracy - (10.0 - state.cohesion)) / 100.0
+    disallow = None
+    active_names = [row[0] for row in active]
+    if state.public_opinion and max(state.public_opinion.values()) > cap:
+        disallow = max(active_names, key=lambda name: state.public_opinion.get(name, 0.0))
+    success = min(max(abs(strength) / 100.0, 0.0), 1.0)
+    strong = min(max((abs(strength) - 10.0) / 100.0, 0.0), 1.0)
+    weak = max(success - strong, 0.0)
+    expected_counts = {name: 0.0 for name in active_names}
+    for ideology, x, y, z in active:
+        count = int(state.public_opinion.get(ideology, 0.0) * sample_count)
+        if count <= 0:
+            continue
+        origin = (x, y, z)
+        expected_counts[ideology] += count * (1.0 - success)
+        for destination, probability in _movement_distribution(origin, target, False, active, disallow):
+            expected_counts[destination] += count * weak * probability
+        for destination, probability in _movement_distribution(origin, target, True, active, disallow):
+            expected_counts[destination] += count * strong * probability
+    result = {name: min(expected_counts[name] / sample_count, 1.0) for name in active_names}
+    total = sum(result.values())
+    undecided = next((name for name in active_names if name.casefold() == "undecided"), "Undecided")
+    if total < 1.0:
+        result[undecided] = result.get(undecided, 0.0) + 1.0 - total
+    elif total > 1.0:
+        result[undecided] = total - 1.0
+    return result, sample_count, disallow
+
+
+def _unity_owner_sequence(state: NationProjectionState) -> list[int]:
+    owners: list[int] = []
+    for cp in sorted(state.control_points.values(), key=lambda value: value.position):
+        if cp.owner_faction_id is not None and cp.owner_faction_id not in owners:
+            owners.append(cp.owner_faction_id)
+    return owners
+
+
+def _unity_owned_cp_count(state: NationProjectionState, context: ProjectionContext, faction_id: int) -> int:
+    allies = set(context.permanent_allies.get(faction_id, (faction_id,))) | {faction_id}
+    return sum(
+        1 for cp in state.control_points.values()
+        if not cp.benefits_disabled and cp.owner_faction_id in allies
+    )
+
+
+def _apply_unity_public_opinion(
+    state: NationProjectionState,
+    context: ProjectionContext,
+    *,
+    policy: str,
+) -> list[dict[str, Any]]:
+    if policy != "meanPath":
+        raise ProjectionRuntimeStop(
+            "Unity public opinion requires stochasticPolicy.unityPublicOpinion=meanPath",
+            rule_ids=(Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id,),
+            affected_metrics=("nation.publicOpinion.*", "nation.cohesionRest"),
+            priority="Unity",
+            mechanic="PropagandaOnPop",
+        )
+    religion_owner = next((
+        cp.owner_faction_id
+        for cp in sorted(state.control_points.values(), key=lambda value: value.position)
+        if cp.control_point_type == "Religion"
+    ), None)
+    base_strength = _global(context, "unityPublicOpinionBaseStrength") * _population_scaling(state, context)
+    religion_bonus = int(_global(context, "religionUnityPublicOpinionBonusStrength"))
+    executions: list[dict[str, Any]] = []
+    for sequence, faction_id in enumerate(_unity_owner_sequence(state)):
+        target_ideology, target = _faction_ideology_target(faction_id, context)
+        owned_cp_count = _unity_owned_cp_count(state, context, faction_id)
+        bonus_cps = religion_bonus if faction_id == religion_owner else 0
+        strength = base_strength * (owned_cp_count + bonus_cps)
+        before = dict(state.public_opinion)
+        sample_count = 0
+        disallow = None
+        if owned_cp_count + bonus_cps > 0 and strength != 0.0:
+            state.public_opinion, sample_count, disallow = _propaganda_expected_transition(
+                state,
+                context,
+                target,
+                strength,
+            )
+        output_metrics = [f"nation.publicOpinion.{ideology}" for ideology in state.public_opinion]
+        state.metric_tracker.record(
+            output_metrics,
+            inputs=(
+                "nation.priorityProgress.Unity",
+                "internal.populationScaling",
+                *tuple(f"nation.publicOpinion.{name}" for name in before),
+            ),
+            coverage="expected",
+            provenance=("meanPath",),
+            rule_ids=(Rules.NATION_PRIORITY_UNITY_COMPLETE.id, Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id),
+            stochastic_treatments=("deterministicExpectedTransition",),
+        )
+        executions.append({
+            "ruleId": Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id,
+            "effectiveCoverage": "expected",
+            "coverageResolverId": Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.coverage_resolver_id,
+            "provenance": "meanPath",
+            "stochasticTreatment": "deterministicExpectedTransition",
+            "expectationGuarantee": False,
+            "dependencies": [],
+            "inputs": ["internal.populationScaling", *[f"nation.publicOpinion.{name}" for name in before]],
+            "outputs": output_metrics,
+            "sourceSequence": sequence,
+            "sourceFactionId": faction_id,
+            "targetIdeology": target_ideology,
+            "ownedControlPointCount": owned_cp_count,
+            "religionBonusControlPoints": bonus_cps,
+            "effectiveStrength": strength,
+            "sampleCount": sample_count,
+            "disallowedIdeology": disallow,
+            "before": before,
+            "after": dict(state.public_opinion),
+        })
+    state.public_opinion_expected_transition = bool(executions)
+    return executions
+
+
 def _add_cohesion(state: NationProjectionState, value: float, context: ProjectionContext) -> None:
     state.cohesion += value
     democracy_loss = 0.0
@@ -1211,6 +1439,7 @@ def _apply_completion(
     used: set[str],
     *,
     trace: list[dict[str, Any]] | None = None,
+    unity_public_opinion_policy: str = "failClosed",
 ) -> dict[str, Any]:
     scale = _population_scaling(state, context)
     progress_metric = f"nation.priorityProgress.{priority}"
@@ -1524,11 +1753,124 @@ def _apply_completion(
             if trace is not None:
                 trace.append({"operation": "welfareColonyCounter", "regionId": target.id, "value": target.welfare_colony_counter})
     elif priority == "Unity":
-        raise ProjectionRuntimeStop(
-            "Unity public-opinion side effects are not implemented",
-            rule_ids=(Rules.NATION_PRIORITY_UNITY_COMPLETE.id,),
-            affected_metrics=("nation.cohesion", "nation.cohesionRest", "factionContribution.research"),
+        used.update({
+            Rules.NATION_PRIORITY_UNITY_COMPLETE.id,
+            Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id,
+            Rules.NATION_PRIORITY_UNITY_COHESION.id,
+            Rules.NATION_PRIORITY_UNITY_EDUCATION.id,
+        })
+        execution["effectiveCoverage"] = "expected"
+        execution["provenance"] = "meanPath"
+        execution["stochasticTreatment"] = "deterministicExpectedTransition"
+        execution["expectationGuarantee"] = False
+        public_executions = _apply_unity_public_opinion(
+            state,
+            context,
+            policy=unity_public_opinion_policy,
         )
+        public_metrics = [f"nation.publicOpinion.{ideology}" for ideology in state.public_opinion]
+        execution["dependencies"].append(Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id)
+        child_executions.extend(public_executions)
+        metric_outputs.extend(public_metrics)
+
+        cohesion_delta = scale * min(
+            _global(context, "unityBaseCohesionChange"),
+            max(
+                _global(context, "unityMinCohesionChange"),
+                _global(context, "unityBaseCohesionChange")
+                * (1.0 - 0.05 * (state.education + state.democracy)),
+            ),
+        )
+        _add_cohesion(state, cohesion_delta, context)
+        execution["dependencies"].append(Rules.NATION_PRIORITY_UNITY_COHESION.id)
+        child_executions.append({
+            "ruleId": Rules.NATION_PRIORITY_UNITY_COHESION.id,
+            "effectiveCoverage": "exact",
+            "provenance": "dllReimplementation",
+            "dependencies": [],
+            "inputs": ["internal.populationScaling", "nation.education", "nation.democracy"],
+            "outputs": ["nation.cohesion"],
+            "cohesionDelta": cohesion_delta,
+        })
+        metric_outputs.append("nation.cohesion")
+
+        education_delta = scale * _global(context, "unityPriorityEducationChange")
+        state.education = max(0.0, state.education + education_delta)
+        execution["dependencies"].append(Rules.NATION_PRIORITY_UNITY_EDUCATION.id)
+        child_executions.append({
+            "ruleId": Rules.NATION_PRIORITY_UNITY_EDUCATION.id,
+            "effectiveCoverage": "exact",
+            "provenance": "dllReimplementation",
+            "dependencies": [],
+            "inputs": ["internal.populationScaling"],
+            "outputs": ["nation.education"],
+            "educationDelta": education_delta,
+        })
+        metric_inputs.extend(("internal.populationScaling", "nation.education", "nation.democracy"))
+        metric_outputs.append("nation.education")
+
+        if state.hostile_region_ids:
+            used.add(Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id)
+            execution["dependencies"].append(Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id)
+            state.legitimize_counter += 1.0
+            removed_region_id = None
+            if state.legitimize_counter >= _global(context, "numPrioritiesForLegitimize"):
+                target_region = _next_legitimize_region(state)
+                if target_region is not None:
+                    state.hostile_region_ids.remove(target_region.id)
+                    state.legitimize_counter = 0.0
+                    removed_region_id = target_region.id
+                    execution["removedHostileClaimRegionId"] = target_region.id
+                    metric_outputs.append("internal.hostileClaims")
+                    if trace is not None:
+                        trace.append({"operation": "removeHostileClaim", "regionId": target_region.id})
+            child_executions.append({
+                "ruleId": Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id,
+                "effectiveCoverage": "exact",
+                "provenance": "dllReimplementation",
+                "dependencies": [],
+                "inputs": ["internal.hostileClaims", "internal.legitimizeCounter"],
+                "outputs": ["internal.legitimizeCounter"] + (["internal.hostileClaims"] if removed_region_id is not None else []),
+                "removedHostileClaimRegionId": removed_region_id,
+            })
+        if trace is not None:
+            trace.append({
+                "operation": "unityDirectEffects",
+                "cohesionDelta": cohesion_delta,
+                "educationDelta": education_delta,
+                "publicOpinionSourceCount": len(public_executions),
+            })
+        execution["outputEvidence"] = {
+            **{
+                metric: {
+                    "inputs": [metric, progress_metric, "internal.populationScaling"],
+                    "ruleIds": [Rules.NATION_PRIORITY_UNITY_COMPLETE.id, Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id],
+                    "coverage": "expected",
+                    "provenance": ["meanPath"],
+                    "stochasticTreatment": "deterministicExpectedTransition",
+                    "expectationGuarantee": False,
+                    "alreadyRecorded": True,
+                }
+                for metric in public_metrics
+            },
+            "nation.cohesion": {
+                "inputs": ["nation.cohesion", progress_metric, "internal.populationScaling", "nation.education", "nation.democracy"],
+                "ruleIds": [Rules.NATION_PRIORITY_UNITY_COMPLETE.id, Rules.NATION_PRIORITY_UNITY_COHESION.id],
+                "coverage": "exact",
+            },
+            "nation.education": {
+                "inputs": ["nation.education", progress_metric, "internal.populationScaling"],
+                "ruleIds": [Rules.NATION_PRIORITY_UNITY_COMPLETE.id, Rules.NATION_PRIORITY_UNITY_EDUCATION.id],
+                "coverage": "exact",
+            },
+            **({
+                "internal.hostileClaims": {
+                    "inputs": ["internal.hostileClaims", progress_metric],
+                    "ruleIds": [Rules.NATION_PRIORITY_UNITY_COMPLETE.id, Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id],
+                    "coverage": "exact",
+                }
+            } if "internal.hostileClaims" in metric_outputs else {}),
+        }
     elif priority == "Funding":
         used.add(Rules.NATION_PRIORITY_FUNDING_COMPLETE.id)
         state.funding_year += _global(context, "fundingPriorityBaseIncomeIncrease") + state.num_control_points
@@ -1908,6 +2250,7 @@ def _run_investment_transaction(
     *,
     at: datetime | None = None,
     fail_on_unsupported_fallback: bool = False,
+    unity_public_opinion_policy: str = "failClosed",
 ) -> dict[str, Any]:
     used = {
         Rules.NATION_IP_BASE.id,
@@ -2085,7 +2428,7 @@ def _run_investment_transaction(
     for priority in ordered:
         cost = float(context.priorities[priority]["investmentCost"]) / max(context.national_ip_multiplier, 1e-12)
         while state.progress.get(priority, 0.0) + 1e-12 >= cost and _priority_valid(state, priority, context):
-            if priority not in STATIC_COMPLETIONS or priority == "Unity":
+            if priority not in STATIC_COMPLETIONS:
                 raise stop(
                     f"Reached unsupported priority completion: {priority}",
                     phase="priorityCompletion",
@@ -2099,7 +2442,14 @@ def _run_investment_transaction(
             completion_start = copy.deepcopy(state)
             used_start = set(used)
             try:
-                execution = _apply_completion(state, priority, context, used, trace=trace)
+                execution = _apply_completion(
+                    state,
+                    priority,
+                    context,
+                    used,
+                    trace=trace,
+                    unity_public_opinion_policy=unity_public_opinion_policy,
+                )
             except ProjectionRuntimeStop as exc:
                 attempted_trace = list(trace)
                 state.__dict__.clear()
@@ -2158,15 +2508,23 @@ def _run_investment_transaction(
             if priority in {"Knowledge", "Government", "Welfare"}:
                 completion_inputs.append("internal.populationScaling")
             for output_metric in execution.get("outputs", []):
-                output_coverage = "exact"
+                evidence = execution.get("outputEvidence", {}).get(str(output_metric), {})
+                if evidence.get("alreadyRecorded"):
+                    continue
+                output_coverage = str(evidence.get("coverage", "exact"))
                 if priority == "MissionControl" and output_metric == "nation.missionControl":
                     # Placement can be aggregate-only while the nation-level +1 is exact.
                     output_coverage = "exact"
                 state.metric_tracker.record(
                     str(output_metric),
-                    inputs=tuple([str(output_metric), *completion_inputs]),
-                    rule_ids=(str(execution["ruleId"]), *tuple(str(value) for value in execution.get("dependencies", []))),
+                    inputs=tuple(str(value) for value in evidence.get("inputs", [str(output_metric), *completion_inputs])),
+                    rule_ids=tuple(str(value) for value in evidence.get(
+                        "ruleIds",
+                        (str(execution["ruleId"]), *tuple(str(value) for value in execution.get("dependencies", []))),
+                    )),
                     coverage=output_coverage,
+                    provenance=tuple(str(value) for value in evidence.get("provenance", ())),
+                    stochastic_treatments=(str(evidence["stochasticTreatment"]),) if evidence.get("stochasticTreatment") else (),
                 )
             state.metric_tracker.record(
                 progress_metric,
@@ -2494,6 +2852,51 @@ def _hostile_claim_population_fraction(state: NationProjectionState) -> float:
     ) / total
 
 
+def _public_opinion_cohesion_impact(state: NationProjectionState, context: ProjectionContext) -> float:
+    if not state.public_opinion or not context.ideology_templates:
+        return 0.0
+    active = _active_human_ideologies(state, context)
+    coordinates = {name: (x, y, z) for name, x, y, z in active}
+    mean = tuple(
+        sum(coordinates[name][axis] * state.public_opinion.get(name, 0.0) for name in coordinates)
+        for axis in range(3)
+    )
+    variance = sum(
+        _distance(coordinates[name], mean) ** 2 * state.public_opinion.get(name, 0.0)
+        for name in coordinates
+    )
+    maximum_distance = max(
+        (_distance(left[1:], right[1:]) for left in active for right in active),
+        default=0.0,
+    )
+    worst_case = maximum_distance * 0.5
+    dispersion_ratio = min(max(math.sqrt(max(variance, 0.0)) / worst_case, 0.0), 1.0) if worst_case else 0.0
+    dispersion = -0.5 + (dispersion_ratio - 0.5) * -_global(
+        context,
+        "publicOpinionDispersionCohesionMultiplier",
+    )
+
+    elite_sum = [0.0, 0.0, 0.0]
+    for cp in state.control_points.values():
+        if cp.owner_faction_id is None:
+            continue
+        try:
+            _ideology, owner_coordinates = _faction_ideology_target(cp.owner_faction_id, context)
+        except ProjectionRuntimeStop:
+            if state.public_opinion_expected_transition:
+                raise
+            continue
+        for axis in range(3):
+            elite_sum[axis] += owner_coordinates[axis]
+    denominator = max(state.num_control_points, 1)
+    elite_mean = tuple(value / denominator for value in elite_sum)
+    elite_divide = -_distance(elite_mean, mean) * _global(
+        context,
+        "publicEliteIdeologicalDistanceCohesionMultiplier",
+    )
+    return dispersion + elite_divide
+
+
 def _cohesion_dynamic_impact(state: NationProjectionState, context: ProjectionContext) -> float:
     inequality = min(1.0, 0.5 + state.education / 20.0) * (
         -state.inequality * _global(context, "inequalityCohesionMultiplier")
@@ -2510,7 +2913,7 @@ def _cohesion_dynamic_impact(state: NationProjectionState, context: ProjectionCo
     hostile = -hostile_total * state.democracy / 10.0
     autocracy = ((3.5 ** 1.285) - (state.democracy ** 1.285)) * ((10.0 - state.unrest) / 10.0) if state.democracy <= 3.5 else 0.0
     anocracy = 2.0 * abs(5.0 - state.democracy) - 3.0 if 3.5 < state.democracy <= 6.5 else 0.0
-    return inequality + population + pcgdp_impact + hostile + autocracy + anocracy
+    return inequality + population + pcgdp_impact + hostile + autocracy + anocracy + _public_opinion_cohesion_impact(state, context)
 
 
 def _democracy_cohesion_transform(original: float, democracy: float) -> float:
@@ -2537,7 +2940,12 @@ def _refresh_rest_caches(
     *,
     at: datetime | None = None,
 ) -> dict[str, Any]:
-    used = {Rules.NATION_PERIODIC_DERIVED_CACHE.id, Rules.NATION_PERIODIC_COHESION.id, Rules.NATION_PERIODIC_UNREST.id}
+    used = {
+        Rules.NATION_PERIODIC_DERIVED_CACHE.id,
+        Rules.NATION_PERIODIC_COHESION.id,
+        Rules.NATION_PERIODIC_UNREST.id,
+        Rules.NATION_COHESION_PUBLIC_OPINION.id,
+    }
     fixed_cohesion = state.rest_state_context.get("cohesionFixedImpact")
     fixed_unrest = state.rest_state_context.get("unrestFixedImpact")
     unrest_divisor = state.rest_state_context.get("pcgdpToReduceUnrestBy1")
@@ -2552,6 +2960,13 @@ def _refresh_rest_caches(
             ),
             affected_metrics=("nation.cohesionRest", "nation.unrestRest"),
         )
+    public_impact = _public_opinion_cohesion_impact(state, context)
+    public_metrics = tuple(f"nation.publicOpinion.{ideology}" for ideology in state.public_opinion)
+    state.metric_tracker.record(
+        "internal.publicOpinionCohesionImpact",
+        inputs=public_metrics,
+        rule_ids=(Rules.NATION_COHESION_PUBLIC_OPINION.id,),
+    )
     raw_cohesion = float(fixed_cohesion) + _cohesion_dynamic_impact(state, context)
     state.cohesion_rest = min(10.0, max(0.0, _democracy_cohesion_transform(raw_cohesion, state.democracy)))
     pcgdp = state.gdp / (state.population_millions * 1_000_000.0) if state.population_millions else 0.0
@@ -2564,8 +2979,13 @@ def _refresh_rest_caches(
         inputs=(
             "nation.inequality", "nation.education", "nation.population", "nation.perCapitaGdp",
             "nation.democracy", "nation.unrest", "internal.hostileClaims", "internal.pcgdpTracker",
+            "internal.publicOpinionCohesionImpact",
         ),
-        rule_ids=(Rules.NATION_PERIODIC_DERIVED_CACHE.id, Rules.NATION_PERIODIC_COHESION.id),
+        rule_ids=(
+            Rules.NATION_PERIODIC_DERIVED_CACHE.id,
+            Rules.NATION_PERIODIC_COHESION.id,
+            Rules.NATION_COHESION_PUBLIC_OPINION.id,
+        ),
     )
     state.metric_tracker.record(
         "nation.unrestRest",
@@ -2596,9 +3016,19 @@ def _refresh_rest_caches(
                 "inputs": [
                     "nation.inequality", "nation.education", "nation.population", "nation.perCapitaGdp",
                     "nation.democracy", "nation.cohesion", "nation.unrest", "nation.armies",
+                    "internal.publicOpinionCohesionImpact",
                 ],
                 "outputs": ["nation.cohesionRest", "nation.unrestRest"],
-            }
+            },
+            {
+                "ruleId": Rules.NATION_COHESION_PUBLIC_OPINION.id,
+                "effectiveCoverage": "exact",
+                "provenance": "dllReimplementation",
+                "dependencies": [],
+                "inputs": list(public_metrics),
+                "outputs": ["internal.publicOpinionCohesionImpact"],
+                "publicOpinionImpact": public_impact,
+            },
         ],
     }
 
@@ -2871,6 +3301,7 @@ def run_projection(
                     segment_index,
                     at=moment,
                     fail_on_unsupported_fallback=True,
+                    unity_public_opinion_policy=plan.unity_public_opinion_policy,
                 )
             elif kind == "monthly":
                 transaction, _ = _run_monthly_transaction(

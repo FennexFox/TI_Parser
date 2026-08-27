@@ -58,6 +58,10 @@ def context(*, priorities=None, diversity=None):
         "unityPriorityEducationChange": {"value": -0.001},
         "unityBaseCohesionChange": {"value": 0.1},
         "unityMinCohesionChange": {"value": 0.025},
+        "unityPublicOpinionBaseStrength": {"value": 5.0},
+        "religionUnityPublicOpinionBonusStrength": {"value": 3},
+        "publicEliteIdeologicalDistanceCohesionMultiplier": {"value": 2.0},
+        "publicOpinionDispersionCohesionMultiplier": {"value": 6.0},
         "fundingPriorityBaseIncomeIncrease": {"value": 10.0},
         "maxMonthlyCohesionIncrease_normal": {"value": 0.1},
         "maxMonthlyCohesionDecrease_normal": {"value": 0.1},
@@ -132,6 +136,48 @@ def state(*, pips=None, cp_count=1, progress=None, advisors=(), at=None, annual_
             "resourceMarketValues": {"Metals": 10.0, "NobleMetals": 20.0},
         },
     )
+
+
+def unity_context():
+    return replace(
+        context(),
+        faction_ideologies={7: "Resist", 8: "Cooperate"},
+        ideology_templates={
+            "resist": {
+                "ideology": "Resist", "sortOrder": 1,
+                "ideologyCoordinates": {"x": 0.0, "y": 0.0, "z": 0.0},
+            },
+            "cooperate": {
+                "ideology": "Cooperate", "sortOrder": 2,
+                "ideologyCoordinates": {"x": 2.0, "y": 0.0, "z": 0.0},
+            },
+            "undecided": {
+                "ideology": "Undecided", "sortOrder": 3, "undecided": True,
+                "ideologyCoordinates": {"x": 1.0, "y": 0.0, "z": 0.0},
+            },
+        },
+        permanent_allies={7: (7,), 8: (8,)},
+    )
+
+
+def unity_state(*, at=None):
+    value = state(
+        pips={"Unity": 3},
+        cp_count=2,
+        progress={"Unity": 1.99},
+        at=at,
+    )
+    value.control_points[1].owner_faction_id = 7
+    value.control_points[1].control_point_type = "Religion"
+    value.control_points[2].owner_faction_id = 8
+    value.public_opinion = {"Resist": 0.4, "Cooperate": 0.3, "Undecided": 0.3}
+    value.public_opinion_context = {"activeHumanIdeologyNames": ["resist", "cooperate"]}
+    projection.calibrate_rest_state_context(
+        value,
+        unity_context(),
+        pcgdp_to_reduce_unrest_by_one=3_000.0,
+    )
+    return value
 
 
 class NationProjectionPlanTests(unittest.TestCase):
@@ -252,11 +298,175 @@ class NationProjectionTransactionTests(unittest.TestCase):
         self.assertAlmostEqual(initial.education, before + 0.005 * 8.5 / 8.0)
         self.assertAlmostEqual(initial.cohesion, 4.01)
 
-    def test_unity_fails_closed_until_public_opinion_downstream_is_implemented(self):
-        initial = state(pips={"Unity": 3}, progress={"Unity": 1.99})
-        result = projection.run_projection(initial, projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)), context(), days=1)
+    def test_unity_fails_closed_without_explicit_public_opinion_policy(self):
+        initial = unity_state()
+        result = projection.run_projection(initial, projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)), unity_context(), days=1)
         self.assertEqual(result["status"], "incomplete")
-        self.assertIn("nation.priority.unity.complete", result["missingMechanicRules"])
+        self.assertEqual(result["preflight"]["stochasticPolicyBlockers"][0]["policy"], "unityPublicOpinion")
+
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_UNITY_COMPLETE.id,
+        Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id,
+        Rules.NATION_PRIORITY_UNITY_COHESION.id,
+        Rules.NATION_PRIORITY_UNITY_EDUCATION.id,
+        evidence="expectedValue",
+    )
+    def test_unity_sequential_expected_transition_and_direct_effects(self):
+        initial = unity_state()
+        before_cohesion = initial.cohesion
+        before_education = initial.education
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan(
+                "p",
+                (projection.PlanSegment(None, None, None, None),),
+                unity_public_opinion_policy="meanPath",
+            ),
+            unity_context(),
+            days=1,
+            details=True,
+        )
+        self.assertEqual(result["status"], "complete")
+        self.assertAlmostEqual(result["nationProjection"]["cohesion"], before_cohesion + 0.035)
+        self.assertAlmostEqual(result["nationProjection"]["education"], before_education - 0.001)
+        propaganda = [
+            row for row in result["ruleExecutions"]
+            if row["ruleId"] == Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id
+        ]
+        self.assertEqual([row["sourceFactionId"] for row in propaganda], [7, 8])
+        self.assertEqual(propaganda[0]["religionBonusControlPoints"], 3)
+        self.assertEqual(propaganda[1]["before"], propaganda[0]["after"])
+        self.assertEqual(propaganda[0]["stochasticTreatment"], "deterministicExpectedTransition")
+        coverage = result["metricCoverage"]
+        self.assertEqual(coverage["nation.publicOpinion.Resist"]["coverage"], "expected")
+        self.assertEqual(
+            coverage["nation.publicOpinion.Resist"]["stochasticTreatment"],
+            "deterministicExpectedTransition",
+        )
+        self.assertFalse(coverage["nation.publicOpinion.Resist"]["expectationGuarantee"])
+        self.assertEqual(coverage["nation.cohesion"]["coverage"], "exact")
+        self.assertEqual(coverage["nation.education"]["coverage"], "exact")
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id, evidence="expectedValue")
+    def test_unity_conditional_expected_transition_uses_integer_sample_counts(self):
+        initial = unity_state()
+        result, sample_count, disallow = projection._propaganda_expected_transition(
+            initial,
+            unity_context(),
+            (0.0, 0.0, 0.0),
+            5.0,
+        )
+        self.assertEqual(sample_count, 707)
+        self.assertIsNone(disallow)
+        self.assertAlmostEqual(result["Resist"], 292.6 / 707.0)
+        self.assertAlmostEqual(result["Cooperate"], 201.4 / 707.0)
+        self.assertAlmostEqual(result["Undecided"], 213.0 / 707.0)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id, evidence="coverageBranch")
+    def test_unity_religion_bonus_survives_disabled_cp_and_permanent_allies_count(self):
+        initial = unity_state()
+        initial.control_points[1].benefits_disabled = True
+        ctx = replace(unity_context(), permanent_allies={7: (7, 8), 8: (8,)})
+        tx = projection._run_investment_transaction(
+            initial,
+            ctx,
+            1,
+            0,
+            unity_public_opinion_policy="meanPath",
+        )
+        propaganda = [
+            row for row in tx["ruleExecutions"]
+            if row["ruleId"] == Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id
+        ]
+        self.assertEqual(propaganda[0]["ownedControlPointCount"], 1)
+        self.assertEqual(propaganda[0]["religionBonusControlPoints"], 3)
+        self.assertAlmostEqual(propaganda[0]["effectiveStrength"], 20.0)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id, evidence="stateTransition")
+    def test_unity_legitimize_removes_deterministic_claim(self):
+        initial = unity_state()
+        initial.hostile_region_ids = {1}
+        tx = projection._run_investment_transaction(
+            initial,
+            unity_context(),
+            1,
+            0,
+            unity_public_opinion_policy="meanPath",
+        )
+        self.assertEqual(initial.hostile_region_ids, set())
+        self.assertEqual(tx["completions"][0]["removedHostileClaimRegionId"], 1)
+        legitimize = next(
+            row for row in tx["ruleExecutions"]
+            if row["ruleId"] == Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id
+        )
+        self.assertEqual(legitimize["removedHostileClaimRegionId"], 1)
+
+    @mechanic_rule_test(Rules.NATION_COHESION_PUBLIC_OPINION.id, evidence="stateTransition")
+    def test_unity_public_opinion_propagates_to_noon_rest_cache_only(self):
+        initial = unity_state()
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan(
+                "p",
+                (projection.PlanSegment(None, None, None, None),),
+                unity_public_opinion_policy="meanPath",
+            ),
+            unity_context(),
+            days=1,
+        )
+        coverage = result["metricCoverage"]
+        self.assertEqual(coverage["nation.cohesionRest"]["coverage"], "expected")
+        self.assertEqual(
+            coverage["nation.cohesionRest"]["stochasticTreatment"],
+            "deterministicExpectedTransition",
+        )
+        self.assertEqual(coverage["nation.cohesion"]["coverage"], "exact")
+
+    @mechanic_rule_test(Rules.NATION_COHESION_PUBLIC_OPINION.id, evidence="expectedValue")
+    def test_public_opinion_and_elite_vectors_have_literal_cohesion_impact(self):
+        initial = unity_state()
+        # Public mean x=0.9, variance=0.69; max human distance=2 so the
+        # worst-case standard deviation is 1. Elite mean is x=1.
+        expected = -0.5 + (0.69 ** 0.5 - 0.5) * -6.0 - 0.1 * 2.0
+        self.assertAlmostEqual(
+            projection._public_opinion_cohesion_impact(initial, unity_context()),
+            expected,
+        )
+
+    def test_population_mean_input_and_unity_expected_transition_remain_distinct(self):
+        initial = unity_state(at=datetime(2030, 1, 31, 11, 0))
+        initial.control_points.pop(2)
+        initial.num_control_points_unclamped = 1
+        projection.calibrate_rest_state_context(
+            initial,
+            unity_context(),
+            pcgdp_to_reduce_unrest_by_one=3_000.0,
+        )
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan(
+                "p",
+                (projection.PlanSegment(None, None, None, None),),
+                unity_public_opinion_policy="meanPath",
+            ),
+            unity_context(),
+            days=2,
+        )
+        coverage = result["metricCoverage"]
+        self.assertEqual(
+            coverage["nation.population"]["stochasticTreatment"],
+            "deterministicMeanInput",
+        )
+        self.assertEqual(
+            coverage["nation.education"]["stochasticTreatment"],
+            "deterministicMeanInput",
+        )
+        self.assertEqual(coverage["nation.publicOpinion.Resist"]["stochasticTreatment"], "mixed")
+        self.assertEqual(
+            set(coverage["nation.publicOpinion.Resist"]["stochasticTreatments"]),
+            {"deterministicMeanInput", "deterministicExpectedTransition"},
+        )
+        self.assertFalse(coverage["nation.publicOpinion.Resist"]["expectationGuarantee"])
 
     @mechanic_rule_test(Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE.id, evidence="expectedValue")
     def test_government_completion_below_cap(self):

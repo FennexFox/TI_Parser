@@ -19,6 +19,13 @@ REGISTRY_CONTRACT_TEST_ID = (
     "tests.test_mechanics_registry.MechanicsRegistryTests."
     "test_real_save_rule_contracts_are_registered"
 )
+COLLECTED_MECHANIC_TESTS: dict[str, Callable[..., object]] = {}
+
+
+def register_collected_mechanic_test(test_id: str, test: Callable[..., object]) -> None:
+    """Register pytest's already-collected object without importing a tests package."""
+
+    COLLECTED_MECHANIC_TESTS[str(test_id)] = test
 
 
 @dataclass(frozen=True)
@@ -199,46 +206,60 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_government_at_cap_applies_knowledge_and_legitimizes_claim",),
     )
     NATION_PRIORITY_UNITY_COMPLETE = MechanicRule(
-        "nation.priority.unity.complete", 2,
+        "nation.priority.unity.complete", 3,
         "Apply Unity only when its public-opinion side effect and resting-cohesion dependency are projected.",
-        "partial", "unsupported",
+        "verified", "expected",
         ("TINationState.OnUnityPriorityComplete", "TINationState.unityPriorityCohesionChange", "TINationState.unityPriorityEducationChange"),
         data_dependencies=("nationDevelopment.globalConfig.unityBaseCohesionChange", "nationDevelopment.globalConfig.unityMinCohesionChange", "nationDevelopment.globalConfig.unityPriorityEducationChange"),
+        deterministic=False,
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_unity_sequential_expected_transition_and_direct_effects",),
     )
     NATION_PRIORITY_UNITY_PUBLIC_OPINION = MechanicRule(
-        "nation.priority.unity.public-opinion", 1,
+        "nation.priority.unity.public-opinion", 2,
         "Apply each CP owner's propaganda as a sequential conditional expected transition when explicitly enabled.",
-        "partial", "unsupported",
+        "verified", "expected",
         ("TINationState.OnUnityPriorityComplete", "TINationState.PropagandaOnPop_PerOwnedCP", "TINationState.PropagandaOnPop"),
         deterministic=False,
         coverage_mode="conditional",
         allowed_coverages=CoverageResolvers.UNITY_PUBLIC_OPINION.allowed_coverages,
         coverage_resolver_id=CoverageResolvers.UNITY_PUBLIC_OPINION.id,
-        test_ids=("tests.test_nation_projection.NationProjectionPlanTests.test_unity_stochastic_policy_is_explicit_and_plan_scoped",),
+        test_ids=(
+            "tests.test_nation_projection.NationProjectionPlanTests.test_unity_stochastic_policy_is_explicit_and_plan_scoped",
+            "tests.test_nation_projection.NationProjectionTransactionTests.test_unity_sequential_expected_transition_and_direct_effects",
+            "tests.test_nation_projection.NationProjectionTransactionTests.test_unity_conditional_expected_transition_uses_integer_sample_counts",
+            "tests.test_nation_projection.NationProjectionTransactionTests.test_unity_religion_bonus_survives_disabled_cp_and_permanent_allies_count",
+        ),
     )
     NATION_PRIORITY_UNITY_COHESION = MechanicRule(
-        "nation.priority.unity.cohesion", 1,
+        "nation.priority.unity.cohesion", 2,
         "Apply the direct Unity cohesion delta independently from propaganda output.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.OnUnityPriorityComplete", "TINationState.unityPriorityCohesionChange"),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_unity_sequential_expected_transition_and_direct_effects",),
     )
     NATION_PRIORITY_UNITY_EDUCATION = MechanicRule(
-        "nation.priority.unity.education", 1,
+        "nation.priority.unity.education", 2,
         "Apply the direct Unity education delta independently from propaganda output.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.OnUnityPriorityComplete", "TINationState.unityPriorityEducationChange"),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_unity_sequential_expected_transition_and_direct_effects",),
     )
     NATION_PRIORITY_UNITY_LEGITIMIZE = MechanicRule(
-        "nation.priority.unity.legitimize", 1,
+        "nation.priority.unity.legitimize", 2,
         "Apply Unity's hostile-claim legitimize counter and deterministic claim removal.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.OnUnityPriorityComplete", "TINationState.OnLegitimizeClaimPriorityComplete"),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_unity_legitimize_removes_deterministic_claim",),
     )
     NATION_COHESION_PUBLIC_OPINION = MechanicRule(
-        "nation.cohesion.public-opinion", 1,
+        "nation.cohesion.public-opinion", 2,
         "Derive public-opinion dispersion and public/elite divide inputs to resting cohesion.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.publicOpinionImpactOnCohesion", "TINationState.publicEliteDivideImpactOnCohesion"),
+        test_ids=(
+            "tests.test_nation_projection.NationProjectionTransactionTests.test_unity_public_opinion_propagates_to_noon_rest_cache_only",
+            "tests.test_nation_projection.NationProjectionTransactionTests.test_public_opinion_and_elite_vectors_have_literal_cohesion_impact",
+        ),
     )
     NATION_PRIORITY_FUNDING_COMPLETE = MechanicRule(
         "nation.priority.funding.complete", 1,
