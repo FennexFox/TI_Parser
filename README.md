@@ -184,23 +184,33 @@ satisfied segment takes effect immediately before the next investment tick.
 only the selected faction's share from that target nation. Advisor placement is
 a hypothetical policy that assumes successful continuous Advise renewal.
 
-Projection mechanics are fail closed. Knowledge, Government, Welfare, Funding,
-Mission Control, and BuildArmy have authoritative paths; MC and BuildArmy
-coverage is resolved from the actual execution path. Economy remains
-unsupported, and Unity remains unsupported until its public-opinion downstream
-effect is projected. Population uses a deterministic mean-input (`meanPath`)
-trajectory: the per-update random input is replaced by zero, but the result is
-not claimed to equal the mathematical expectation across nonlinear stochastic
-trajectories. `metricCoverage` is built from the inputs and outputs actually
-executed, so mean-path provenance reaches only dependent completion effects,
-rest caches, base IP, progress, research, and faction contribution. Rule-level
-placement coverage remains separate from placement-independent aggregate metric
-coverage.
+Projection mechanics are fail closed. Economy, Knowledge, Government, Welfare,
+Unity, Funding, Mission Control, and BuildArmy have supported paths; MC and
+BuildArmy coverage is resolved from the actual execution path. Economy keeps
+GDP, inequality, and region effects authoritative even when only its independent
+world-market branch is unavailable. Unity requires a plan-level
+`stochasticPolicy.unityPublicOpinion: "meanPath"` opt-in. Its direct cohesion,
+education, and legitimize branches remain exact when their own inputs are exact,
+while CP-owner propaganda is a sequential conditional expected transition.
 
-Unsupported priorities or newly activated dependencies return an `incomplete`
+Population and Unity both use `coverage: expected`, `provenance: meanPath`, and
+`expectationGuarantee: false`, but they are not the same approximation.
+Population reports `stochasticTreatment: deterministicMeanInput` because each
+random scalar input is replaced by its mean. Unity reports
+`deterministicExpectedTransition` because each integer-sample transition kernel
+is replaced by its conditional expected flow and then fed sequentially to the
+next CP owner. Neither is claimed to equal the mathematical expectation across
+the complete nonlinear stochastic trajectory. `metricCoverage` is built from
+the inputs and outputs actually executed, so each treatment reaches only its
+real descendants. Rule-level placement/branch coverage remains separate from
+placement-independent aggregate metric coverage.
+
+Unsupported priorities or newly activated blocking dependencies return an `incomplete`
 plan and are excluded from comparison/ranking. A completed handler, its cost,
 and CP fallback/cache repair remain in the authoritative prefix; an unsupported
-next allocation/effect is never executed. `runtimeStop` identifies the exact
+next allocation/effect is never executed. A missing independent Economy or
+BuildArmy market value instead leaves nation/faction scopes complete and marks
+only `scopeStatus.worldMarket` incomplete. `runtimeStop` identifies the exact
 timestamp/day/transaction/phase, trigger, authoritative mutations, unsupported
 next step, state context, affected metrics, and attempted transaction.
 `lastAuthoritativeState` and successful `authoritativeFinalState` include CP raw

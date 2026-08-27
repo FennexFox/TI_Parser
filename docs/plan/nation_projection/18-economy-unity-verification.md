@@ -21,7 +21,9 @@
 ## Implementation steps
 
 1. Add independent literal fixtures for Economy/Unity formulas, ordering, coverage branches, fallback, and stochastic semantics.
-2. Run dynamic opt-in CAL plans without hardcoded IDs, names, counts, or current values.
+2. Prefer CAL when it is projection-capable; otherwise select a viable nation
+   from the opt-in save dynamically. Do not hardcode IDs, names, counts, or
+   current values.
 3. Record first `UpdateControlPoints` blocker timing/context in long Economy runs rather than implementing it.
 4. Update audit, README, and all phase outcomes with exact/expected/unsupported distinctions and remaining limitations.
 5. Run both complete test runners and package/catalog verification.
@@ -45,7 +47,9 @@
 
 ## Manual smoke tests
 
-- Inspect Economy-only, Economy mixed/conditional, Unity opt-in/negative, Government→Economy fallback, and Economy+Unity CAL outputs.
+- Inspect Economy-only, Economy mixed/conditional, Unity opt-in/negative,
+  Government→Economy fallback, and Economy+Unity outputs from the dynamically
+  selected observational target.
 
 ## Rollback risks
 
@@ -53,7 +57,8 @@
 
 ## Progress
 
-- Pending.
+- Mechanics, tests, real-save smoke, README, and audit updates are complete.
+- Graphify refresh and final graph diagnostics remain before phase completion.
 
 ## Decision log
 
@@ -61,4 +66,26 @@
 
 ## Outcomes / Retrospective
 
-- Pending.
+- Real-save selection no longer assumes that the token `CAL` still identifies
+  the earlier four-CP/five-region nation. CAL is preferred only when its saved
+  refs are projection-capable; otherwise the fixture chooses the first viable
+  non-alien nation from the save and derives every CP position dynamically.
+- The opt-in Broken Earth run passed 10 real-save tests and 16 subtests. The
+  one-year Economy, Unity, and Economy+Unity cases all completed without a CP
+  mutation blocker. The long Government path preserved its cap/invalidation
+  fallback and continued into later Economy completions instead of stopping at
+  the former unsupported boundary. These are observational results, not a
+  controlled A-to-B validation.
+- The synthetic suite directly covers Economy formulas/branch isolation,
+  Unity integer sample counts and sequential owner state, Religion/disabled/allied
+  strength, direct deltas, legitimize, public/elite rest impact, and the
+  distinction between Population mean-input and Unity expected-transition
+  provenance.
+- Full runner results before Graphify: pytest reports 249 passed, 11 skipped,
+  and 23 subtests; unittest discovery reports 260 tests passed with 12 skips.
+  Strict validation accepts all 18 phase files.
+- Installed-template parity for `nation_development_catalog.json` passes for
+  Modern, 2003, and Broken Earth, including payload and source hashes. The
+  aggregate `catalog-verify` command remains failed because three unrelated
+  research-catalog source hashes have drifted; this phase did not regenerate
+  unrelated research artifacts.

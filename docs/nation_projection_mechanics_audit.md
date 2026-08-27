@@ -45,7 +45,19 @@ downgrade.
 | `nation.priority.knowledge.complete` | verified | exact | `TINationState.OnKnowledgePriorityComplete` |
 | `nation.priority.government.complete` | verified | exact | `TINationState.OnGovernmentPriorityComplete` |
 | `nation.priority.government.legitimize` | verified | exact | `TINationState.GetNextRegionToLegitimizeClaim` |
-| `nation.priority.unity.complete` | partial | unsupported | `TINationState.OnUnityPriorityComplete` |
+| `nation.priority.economy.complete` | verified | exact | `TINationState.OnEconomyPriorityComplete` |
+| `nation.priority.economy.gdp` | verified | exact | `TINationState.economyPriorityPerCapitaGDPChange` |
+| `nation.priority.economy.inequality` | verified | exact | `TINationState.economyPriorityInequalityChange` |
+| `nation.priority.economy.market` | verified | conditional | `TIGlobalValuesState.ModifyMarketValuesForEconomyPriority` |
+| `nation.priority.economy.region-trigger` | verified | exact | `TINationState.OnEconomyPriorityComplete` |
+| `nation.priority.economy.region-transition` | verified | exact | `TIRegionState.SetCore*Region` |
+| `nation.priority.economy.downstream-cache` | verified | exact | `TINationState.ModifyGDP` |
+| `nation.priority.unity.complete` | verified | expected | `TINationState.OnUnityPriorityComplete` |
+| `nation.priority.unity.public-opinion` | verified | conditional | `TINationState.PropagandaOnPop` |
+| `nation.priority.unity.cohesion` | verified | exact | `TINationState.unityPriorityCohesionChange` |
+| `nation.priority.unity.education` | verified | exact | `TINationState.unityPriorityEducationChange` |
+| `nation.priority.unity.legitimize` | verified | exact | `TINationState.OnLegitimizeClaimPriorityComplete` |
+| `nation.cohesion.public-opinion` | verified | exact | `TINationState.publicOpinionImpactOnCohesion` |
 | `nation.priority.funding.complete` | verified | exact | `TINationState.OnFundingPriorityComplete` |
 | `nation.priority.welfare.complete` | verified | exact | `TINationState.OnWelfarePriorityComplete` |
 | `nation.priority.welfare.inequality` | verified | exact | `TINationState.welfarePriorityInequalityChange` |
@@ -56,7 +68,11 @@ downgrade.
 | `nation.priority.mission-control.placement` | verified | conditional | `TINationState.OnMissionControlPriorityComplete` |
 | `nation.priority.build-army.complete` | verified | conditional | `TINationState.OnBuildArmyPriorityComplete` |
 | `nation.priority.build-army.placement` | verified | conditional | `TINationState.GetNextArmyRegion` |
+| `nation.priority.build-army.market` | verified | conditional | `TIGlobalValuesState.ModifyMarketValuesForArmyPriority` |
 | `nation.asset.army.maintenance` | verified | exact | `TINationState.SetBaseInvestmentPoints_month` |
+| `nation.effect.context-expiration` | verified | exact | `TIFactionState.RemoveExpiredEffectContexts` |
+| `nation.priority.validation-trigger` | verified | exact | `TINationState.PossiblePriorityValidationChange` |
+| `nation.periodic.region-cache` | verified | exact | `TINationState.CacheRegionValues` |
 | `nation.periodic.cohesion` | verified | exact | `TINationState.GetMonthlyCohesionMovement` |
 | `nation.periodic.unrest` | verified | exact | `TINationState.GetMonthlyUnrestMovement` |
 | `nation.periodic.derived-cache` | verified | exact | `TINationState.DailyNationUpdate2` |
@@ -88,6 +104,26 @@ trajectory and is not guaranteed to equal the mathematical expectation of all
 stochastic trajectories after nonlinear feedback. Diagnostics therefore also
 record `stochasticTreatment: "deterministicMeanInput"` and
 `expectationGuarantee: false`.
+
+Unity public opinion uses resolver
+`nation.priority.unity.public-opinion.v1`: a materialized plan with explicit
+`meanPath` policy executes as `expected`; a possible Unity segment without that
+policy is `unsupported` at preflight. Unlike Population, Unity applies the
+conditional expected flow of the DLL's integer-sample transition kernel for
+each distinct CP owner in sequence. Diagnostics identify this as
+`deterministicExpectedTransition`; nonlinear sequential feedback means it is
+not a complete-trajectory expectation. Direct Unity cohesion, education, and
+legitimize outputs do not read the propaganda result and retain their own exact
+coverage until an actual expected upstream input, such as population scaling,
+reaches them.
+
+Economy and BuildArmy market mutation use `world-market.mean-input.v1`.
+Available Metals/Noble Metals values receive the midpoint of the audited
+uniform input (`expected/meanPath/deterministicMeanInput`). If only those values
+are missing, nation/faction mutation and completion cost remain authoritative,
+the world-market scope alone becomes incomplete, and no nation ranking is
+withheld. A future mechanic that reads a missing market value would turn that
+branch into a blocking dependency at the read point.
 
 ## Metric dependency evidence
 
@@ -130,13 +166,26 @@ alter the already calculated daily base IP; its scenario maintenance starts at
 the next base-IP update. Omitted UI naming and notifications do not reduce
 mechanic coverage.
 
+Economy applies GDP and PCGDP, economy-score refresh, inequality and overshoot,
+then its independent market branch and the cached Oil-before-Mining-before-Core
+region trigger. Region selection uses live candidates in nation region order,
+but the cached branch does not fall through to another resource type when its
+candidates are exhausted during the same day. GDP-dependent validity is
+rechecked only at the audited trigger, while daily region counts remain cached
+until the next daily region-cache phase.
+
+Unity first resolves the Religion CP owner, then visits distinct owned factions
+in nation control-point order. Owned strength excludes disabled CPs but includes
+permanent allies; the separate Religion bonus still applies when its CP is
+disabled. The resulting opinion vector is an input to the 12:00 cohesion-rest
+cache and later monthly movement, not to the direct cohesion/education branch
+of the same completion.
+
 ## Fail-closed completion rules
 
 The following completion/downstream rules remain non-authoritative:
 
-- `nation.priority.economy.complete`
 - `nation.priority.environment.complete`
-- `nation.priority.unity.complete`
 - `nation.priority.oppression.complete`
 - `nation.priority.spoils.complete`
 - `nation.priority.initiate-spaceflight.complete`
@@ -158,8 +207,8 @@ before use. CP revalidation/fallback, a fully successful priority handler plus
 cost consumption, and a fully successful periodic phase are authoritative
 boundaries. Only mutations after the last verified boundary roll back. Thus a
 Government completion that reaches the cap preserves its state effect, consumed
-cost, Economy raw pip 1, and repaired cache; the following investment tick stops
-at `beforeAllocation` without ever running Economy allocation/effect. An
+cost, Economy raw pip 1, and repaired cache; the following investment tick can
+now allocate and complete Economy. An
 interrupted multi-completion transaction records prior successful completions as
 `authoritativePrefix` under `runtimeStop.attemptedTransaction`. Every blocker
 sets `authoritativeFinalState` to null and excludes the plan from comparison.

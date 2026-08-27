@@ -21,20 +21,54 @@ class NationProjectionRealSaveTests(unittest.TestCase):
         if not cls.save_path.is_file():
             raise unittest.SkipTest("TI_PARSER_REAL_SAVE does not point to a file")
         cls.indexed = parser.build_index(parser.load_save(cls.save_path))
-        cls.nation_id, cls.nation = parser.match_raw_state(cls.indexed, "TINationState", "CAL")
-        if cls.nation_id is None or cls.nation is None:
-            raise unittest.SkipTest("CAL is not present in the selected real save")
+        preferred_id, preferred = parser.match_raw_state(cls.indexed, "TINationState", "CAL")
+
+        def viable(nation):
+            if not isinstance(nation, dict) or not nation.get("controlPoints") or not nation.get("regions"):
+                return False
+            refs = (*nation.get("controlPoints", []), *nation.get("regions", []))
+            return all(
+                isinstance(parser.state_value_by_id(cls.indexed, parser.ref_id(ref)), dict)
+                for ref in refs
+            )
+
+        if viable(preferred):
+            cls.nation_id, cls.nation = preferred_id, preferred
+        else:
+            candidates = []
+            for entry in parser.type_entries(cls.indexed, "TINationState"):
+                nation = entry.get("Value") or {}
+                nation_id = parser.raw_state_id(entry)
+                if nation_id is not None and nation.get("templateName") != "ALN" and viable(nation):
+                    candidates.append((nation_id, nation))
+            if not candidates:
+                raise unittest.SkipTest("The selected real save has no projection-capable nation")
+            cls.nation_id, cls.nation = min(candidates, key=lambda item: item[0])
+        cls.nation_token = str(cls.nation.get("templateName") or cls.nation_id)
         cls.positions = sorted(cp["positionInNation"] for cp in parser.nation_control_points(cls.indexed, cls.nation))
 
-    def _all_cp_plan(self, name, pips, *, days=365, goals=None, segments=None, details=False):
+    def _all_cp_plan(
+        self,
+        name,
+        pips,
+        *,
+        days=365,
+        goals=None,
+        segments=None,
+        details=False,
+        unity_policy=None,
+    ):
         if segments is None:
             segments = [{"controlPoints": [{"position": position, "pips": dict(pips)} for position in self.positions]}]
-        payload = {"plans": [{"name": name, "segments": segments}]}
+        plan = {"name": name, "segments": segments}
+        if unity_policy is not None:
+            plan["stochasticPolicy"] = {"unityPublicOpinion": unity_policy}
+        payload = {"plans": [plan]}
         if goals:
             payload["goals"] = goals
         return parser.calculate_nation_projection(
             self.indexed,
-            "CAL",
+            self.nation_token,
             None,
             payload,
             days=days,
@@ -127,7 +161,7 @@ class NationProjectionRealSaveTests(unittest.TestCase):
     def test_default_plan_reports_active_dormant_and_fail_closed_blockers(self):
         result = parser.calculate_nation_projection(
             self.indexed,
-            "CAL",
+            self.nation_token,
             None,
             None,
             days=1,
@@ -210,7 +244,7 @@ class NationProjectionRealSaveTests(unittest.TestCase):
                     self.assertGreaterEqual(len(result["segmentTransitions"]), 2)
 
     def test_nation_ui_live_validity_matches_serialized_control_point_totals(self):
-        result = parser.calculate_nation_ui(self.indexed, None, "CAL")
+        result = parser.calculate_nation_ui(self.indexed, None, self.nation_token)
         priorities = result["priorities"]
         mission_control = priorities["validityByPriority"].get("MissionControl")
         self.assertIsNotNone(mission_control)
@@ -224,7 +258,7 @@ class NationProjectionRealSaveTests(unittest.TestCase):
     def test_current_mc_and_army_paths_resolve_from_save_state_without_hardcoded_ids(self):
         output = parser.calculate_nation_projection(
             self.indexed,
-            "CAL",
+            self.nation_token,
             None,
             {"plans": [{"name": "extract", "segments": [{"controlPoints": [
                 {"position": cp["positionInNation"], "pips": {"Knowledge": 3}}
@@ -284,20 +318,58 @@ class NationProjectionRealSaveTests(unittest.TestCase):
                 expected_maintenance,
             )
 
-    def test_long_government_reaches_structured_economy_fallback_boundary(self):
+    def test_long_government_fallback_can_reach_later_economy_completion(self):
         result = self._all_cp_plan("government-long", {"Government": 3}, days=2500, details=True)
-        self.assertEqual(result["status"], "incomplete")
-        self.assertEqual(result["runtimeStop"]["phase"], "beforeAllocation")
-        self.assertEqual(result["runtimeStop"]["trigger"]["priority"], "Economy")
         self.assertTrue(any(event["priority"] == "Government" for event in result["completionEvents"]))
         self.assertTrue(any(
-            row["rawPips"].get("Economy") == 1
-            for row in result["lastAuthoritativeState"]["controlPoints"]
-        ))
-        self.assertFalse(any(
             row["ruleId"] == "nation.priority.economy.complete"
             for row in result["ruleExecutions"]
         ))
+        if result["status"] == "incomplete":
+            self.assertEqual(result["runtimeStop"]["trigger"]["ruleId"], "nation.periodic.control-points")
+
+    def test_economy_and_unity_observational_matrix(self):
+        cases = (
+            ("economy", {"Economy": 3}, None),
+            ("economy-knowledge", {"Economy": 2, "Knowledge": 1}, None),
+            ("unity", {"Unity": 3}, "meanPath"),
+            ("unity-knowledge-welfare", {"Unity": 1, "Knowledge": 1, "Welfare": 1}, "meanPath"),
+            ("economy-unity", {"Economy": 2, "Unity": 1}, "meanPath"),
+        )
+        for name, pips, unity_policy in cases:
+            with self.subTest(plan=name):
+                result = self._all_cp_plan(
+                    name,
+                    pips,
+                    days=365,
+                    details=True,
+                    unity_policy=unity_policy,
+                )
+                self.assertTrue(result["completionEvents"])
+                if result["status"] == "incomplete":
+                    self.assertEqual(
+                        result["runtimeStop"]["trigger"]["ruleId"],
+                        "nation.periodic.control-points",
+                    )
+                if "Unity" in pips:
+                    opinion_rows = [
+                        value for key, value in result["metricCoverage"].items()
+                        if key.startswith("nation.publicOpinion.")
+                    ]
+                    self.assertTrue(opinion_rows)
+                    self.assertTrue(all(row["coverage"] == "expected" for row in opinion_rows))
+                    self.assertTrue(all(
+                        "deterministicExpectedTransition" in row.get("stochasticTreatments", [])
+                        for row in opinion_rows
+                    ))
+
+    def test_unity_without_opt_in_fails_preflight(self):
+        result = self._all_cp_plan("unity-no-opt-in", {"Unity": 3}, days=1)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(
+            result["preflight"]["stochasticPolicyBlockers"][0]["policy"],
+            "unityPublicOpinion",
+        )
 
 
 if __name__ == "__main__":
