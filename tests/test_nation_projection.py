@@ -1,6 +1,7 @@
 import copy
 import sys
 import unittest
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -117,7 +118,7 @@ def state(*, pips=None, cp_count=1, progress=None, advisors=(), at=None, annual_
         space_flight_program=True,
         num_control_points_unclamped=cp_count,
         rest_state_context={"cohesionFixedImpact": 12.0, "unrestFixedImpact": 10.5, "pcgdpToReduceUnrestBy1": 3_000.0},
-        world_context={"temperatureAnomaly_C": 1.0},
+        world_context={"temperatureAnomaly_C": 1.0, "endOfOil": False},
     )
 
 
@@ -638,9 +639,12 @@ class NationProjectionTransactionTests(unittest.TestCase):
         initial = state(at=datetime(2029, 12, 31, 12), annual_growth=0.0)
         plan = projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),))
         result = projection.run_projection(initial, plan, context(), days=1, checkpoints=(1,), details=True)
-        self.assertEqual([row["kind"] for row in result["transactions"]], ["monthly", "investment", "derivedCache"])
-        self.assertEqual([row["at"][-8:] for row in result["transactions"]], ["00:00:00", "10:30:00", "12:00:00"])
+        self.assertEqual([row["kind"] for row in result["transactions"]], ["factionCache", "monthly", "investment", "derivedCache"])
+        self.assertEqual([row["at"][-8:] for row in result["transactions"]], ["00:00:00", "00:00:00", "10:30:00", "12:00:00"])
         self.assertEqual([row["phase"] for row in result["phaseTrace"]], [
+            "faction.cachePriorityBonuses",
+            "effects.expire",
+            "condition.afterFactionCache",
             "monthly.controlPointsAndMovement",
             "monthly.population",
             "monthly.quarterlyTracker",
@@ -651,10 +655,10 @@ class NationProjectionTransactionTests(unittest.TestCase):
             "condition.afterRest",
             "checkpoint.capture",
         ])
-        monthly_population = result["phaseTrace"][1]
-        investment = result["phaseTrace"][4]
-        rest_cache = result["phaseTrace"][6]
-        checkpoint = result["phaseTrace"][8]
+        monthly_population = result["phaseTrace"][4]
+        investment = result["phaseTrace"][7]
+        rest_cache = result["phaseTrace"][9]
+        checkpoint = result["phaseTrace"][11]
         self.assertEqual(monthly_population["populationMillions"], checkpoint["populationMillions"])
         self.assertEqual(investment["baseInvestmentPointsMonth"], checkpoint["baseInvestmentPointsMonth"])
         self.assertEqual(rest_cache["cohesionRest"], checkpoint["cohesionRest"])
@@ -679,7 +683,8 @@ class NationProjectionTransactionTests(unittest.TestCase):
             latitude=5.0, longitude=5.0, annual_population_growth=0.0,
             annual_population_growth_modifier=0.0, environment="Standard", xenoforming_level=0.0,
             nuclear_detonations=0, colony=False, permanent_colony=False, resource_region=False,
-            oil_region=False, core_economic_region=True, capital=False, occupation_fraction=0.0,
+            oil_region=False, core_economic_region=True, mine_capable=False, oil_capable=False,
+            capital=False, occupation_fraction=0.0,
             fully_occupied=False, welfare_colony_counter=0,
         )
         projection._refresh_economy_score(initial, context())
@@ -715,6 +720,62 @@ class NationProjectionTransactionTests(unittest.TestCase):
         self.assertEqual(result["status"], "incomplete")
         self.assertIsNone(result["authoritativeFinalState"])
         self.assertIn("nation.priority.economy.complete", result["missingMechanicRules"])
+
+
+class NationProjectionSchedulerTests(unittest.TestCase):
+    @mechanic_rule_test(Rules.NATION_PERIODIC_REGION_CACHE.id, evidence="stateTransition")
+    def test_daily_region_cache_refreshes_before_allocation(self):
+        initial = state()
+        initial.regions[1].resource_region = True
+        initial.cached_num_mining_regions = 0
+        transaction = projection._run_investment_transaction(initial, context(), 1, 0)
+        self.assertEqual(initial.cached_num_mining_regions, 1)
+        self.assertEqual(transaction["phaseTrace"][0]["regionCache"]["miningRegions"], 1)
+        self.assertEqual(transaction["ruleExecutions"][0]["ruleId"], Rules.NATION_PERIODIC_REGION_CACHE.id)
+
+    @mechanic_rule_test(
+        Rules.NATION_IP_PRIORITY_BONUS.id,
+        Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,
+        evidence="ordering",
+    )
+    def test_daily_priority_bonus_cache_precedes_effect_expiry(self):
+        initial = state(at=datetime(2029, 12, 31, 12), annual_growth=0.0)
+        initial.faction_effect_contexts = {7: {"KnowledgePriority": ["TemporaryKnowledge"]}}
+        initial.faction_effect_expirations = {
+            7: {"TemporaryKnowledge": datetime(2030, 1, 1, 0, 0)}
+        }
+        projection_context = replace(
+            context(),
+            faction_priority_bonus_bases={7: {"Knowledge": 0.1}},
+            effect_templates={
+                "TemporaryKnowledge": {"operation": "Additive", "value": 0.2}
+            },
+        )
+        plan = projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),))
+        result = projection.run_projection(initial, plan, projection_context, days=1, details=True)
+        cache = result["transactions"][0]
+        investment = next(row for row in result["transactions"] if row["kind"] == "investment")
+        self.assertAlmostEqual(cache["cachedPriorityBonuses"]["7"]["Knowledge"], 0.3)
+        self.assertEqual(cache["expiredEffects"][0]["effect"], "TemporaryKnowledge")
+        expected = investment["baseInvestmentPointsMonth"] * 12.0 / 365.2422 * 1.3
+        self.assertAlmostEqual(investment["allocation"]["Knowledge"], expected)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id, evidence="stateTransition")
+    def test_nontriggering_education_change_preserves_cached_weights(self):
+        initial = state(pips={"Knowledge": 3}, progress={"Knowledge": 0.99})
+        initial.regions[1].mission_control = 0
+        initial.mission_control = 0
+        point = initial.control_points[1]
+        point.total_weight = 7
+        point.num_priorities_with_weight = 1
+        point.diversity_bonus_cache = {"Knowledge": 0.125}
+        transaction = projection._run_investment_transaction(initial, context(), 1, 0)
+        self.assertEqual(point.total_weight, 7)
+        self.assertEqual(point.diversity_bonus_cache, {"Knowledge": 0.125})
+        self.assertFalse(any(
+            row.get("operation") == "priorityValidationTrigger"
+            for row in transaction["mutationTrace"]
+        ))
 
 
 if __name__ == "__main__":

@@ -40,6 +40,27 @@ STATIC_COMPLETIONS = {
     "Military_BuildArmy": ("exact", Rules.NATION_PRIORITY_BUILD_ARMY_COMPLETE),
     "Funding": ("exact", Rules.NATION_PRIORITY_FUNDING_COMPLETE),
 }
+PRIORITY_BONUS_EFFECT_CONTEXTS = {
+    "Economy": "EconomyPriority",
+    "Welfare": "WelfarePriority",
+    "Environment": "EnvironmentPriority",
+    "Knowledge": "KnowledgePriority",
+    "Government": "GovernmentPriority",
+    "Unity": "UnityPriority",
+    "Oppression": "OppressionPriority",
+    "Funding": "SpaceDevPriority",
+    "Spoils": "SpoilsPriority",
+    "Civilian_InitiateSpaceflightProgram": "SpaceflightPriority",
+    "LaunchFacilities": "LaunchFacilitiesPriority",
+    "MissionControl": "MissionControlPriority",
+    "Military": "MilitaryPriority",
+    "Military_BuildArmy": "BuildArmyPriority",
+    "Military_BuildNavy": "UpgradeArmyPriority",
+    "Military_InitiateNuclearProgram": "BuildNuclearWeaponsPriority",
+    "Military_BuildNuclearWeapons": "BuildNuclearWeaponsPriority",
+    "Military_BuildSpaceDefenses": "BuildSpaceDefensesPriority",
+    "Military_BuildSTOSquadron": "BuildSTOSquadronPriority",
+}
 COMPLETION_RULES = {
     "Economy": Rules.NATION_PRIORITY_ECONOMY_COMPLETE,
     "Welfare": Rules.NATION_PRIORITY_WELFARE_COMPLETE,
@@ -249,7 +270,12 @@ class NationProjectionState:
     cached_can_accumulate_core_economy: bool = False
     cached_can_accumulate_core_mining: bool = False
     cached_can_accumulate_core_oil: bool = False
+    policy_no_oil_development: bool = False
+    policy_no_mineral_development: bool = False
     world_market_blockers: set[str] = field(default_factory=set)
+    faction_effect_contexts: dict[int, dict[str, list[str]]] = field(default_factory=dict)
+    faction_effect_expirations: dict[int, dict[str, datetime]] = field(default_factory=dict)
+    faction_priority_bonus_cache: dict[int, dict[str, float]] = field(default_factory=dict)
 
     @property
     def population_millions(self) -> float:
@@ -317,6 +343,7 @@ class ProjectionContext:
     permanent_allies: Mapping[int, tuple[int, ...]] = field(default_factory=dict)
     faction_effect_contexts: Mapping[int, Mapping[str, tuple[str, ...]]] = field(default_factory=dict)
     effect_templates: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    faction_priority_bonus_bases: Mapping[int, Mapping[str, float]] = field(default_factory=dict)
 
 
 def _canonical_priority(value: str, priorities: Mapping[str, Any]) -> str:
@@ -489,6 +516,148 @@ def _global(context: ProjectionContext, name: str) -> float:
     return float(value)
 
 
+def _apply_effect_context(
+    state: NationProjectionState,
+    context: ProjectionContext,
+    faction_id: int,
+    effect_context: str,
+    base_value: float,
+) -> float:
+    """Apply the current save-backed faction effect list to a scalar value."""
+
+    result = float(base_value)
+    names = state.faction_effect_contexts.get(faction_id, {}).get(effect_context, [])
+    for effect_name in names:
+        row = context.effect_templates.get(effect_name)
+        if not isinstance(row, Mapping):
+            raise ProjectionRuntimeStop(
+                f"Effect template is unavailable: {effect_name}",
+                rule_ids=(Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,),
+                dependencies=({"field": effect_name, "source": "effectsCatalog"},),
+                affected_metrics=("nation.*", "factionContribution.*"),
+                mechanic="effectContext",
+            )
+        operation = row.get("operation")
+        value = row.get("value")
+        if operation not in {"Additive", "Multiplicative", "SetToFixedValue", "IncreaseToValue", "DecreaseToValue"}:
+            raise ProjectionRuntimeStop(
+                f"Effect operation is unsupported: {effect_name}",
+                rule_ids=(Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,),
+                dependencies=({"field": "operation", "source": f"effectsCatalog.{effect_name}"},),
+                affected_metrics=("nation.*", "factionContribution.*"),
+                mechanic="effectContext",
+            )
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
+            raise ProjectionRuntimeStop(
+                f"Effect value is unavailable: {effect_name}",
+                rule_ids=(Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,),
+                dependencies=({"field": "value", "source": f"effectsCatalog.{effect_name}"},),
+                affected_metrics=("nation.*", "factionContribution.*"),
+                mechanic="effectContext",
+            )
+        amount = float(value)
+        if operation == "Additive":
+            result += amount
+        elif operation == "Multiplicative":
+            result *= amount
+        elif operation == "SetToFixedValue":
+            result = amount
+        elif operation == "IncreaseToValue":
+            result = max(result, amount)
+        else:
+            result = min(result, amount)
+    return result
+
+
+def _cache_faction_priority_bonuses(
+    state: NationProjectionState,
+    context: ProjectionContext,
+) -> dict[int, dict[str, float]]:
+    cached: dict[int, dict[str, float]] = {}
+    faction_ids = {
+        cp.owner_faction_id for cp in state.control_points.values() if cp.owner_faction_id is not None
+    } | set(context.faction_priority_bonus_bases)
+    for faction_id in sorted(faction_ids):
+        base = context.faction_priority_bonus_bases.get(faction_id, {})
+        cached[faction_id] = {}
+        for priority in context.priorities:
+            context_name = PRIORITY_BONUS_EFFECT_CONTEXTS.get(priority)
+            value = float(base.get(priority, 0.0))
+            if context_name:
+                value = _apply_effect_context(state, context, faction_id, context_name, value)
+            cached[faction_id][priority] = value
+    state.faction_priority_bonus_cache = cached
+    for cp in state.control_points.values():
+        cp.priority_bonuses = dict(cached.get(cp.owner_faction_id or -1, {}))
+    return cached
+
+
+def _expire_faction_effects(state: NationProjectionState, at: datetime) -> list[dict[str, Any]]:
+    expired: list[dict[str, Any]] = []
+    for faction_id in sorted(state.faction_effect_expirations):
+        expirations = state.faction_effect_expirations[faction_id]
+        for effect_name, expires_at in sorted(list(expirations.items())):
+            if at < expires_at:
+                continue
+            contexts = state.faction_effect_contexts.get(faction_id, {})
+            removed_from: list[str] = []
+            for context_name, names in contexts.items():
+                if effect_name in names:
+                    names.remove(effect_name)
+                    removed_from.append(context_name)
+            del expirations[effect_name]
+            expired.append({
+                "factionId": faction_id,
+                "effect": effect_name,
+                "expiredAt": expires_at.isoformat(),
+                "removedFromContexts": sorted(removed_from),
+            })
+    return expired
+
+
+def _run_faction_cache_transaction(
+    state: NationProjectionState,
+    context: ProjectionContext,
+    day: int,
+    *,
+    at: datetime,
+) -> dict[str, Any]:
+    cached = _cache_faction_priority_bonuses(state, context)
+    expired = _expire_faction_effects(state, at) if at.day in {1, 15} else []
+    rules = {Rules.NATION_IP_PRIORITY_BONUS.id}
+    executions = [{
+        "ruleId": Rules.NATION_IP_PRIORITY_BONUS.id,
+        "effectiveCoverage": "exact",
+        "provenance": "dllReimplementation",
+        "dependencies": [],
+        "inputs": ["faction.priorityBonusSources", "faction.effectContexts"],
+        "outputs": ["internal.factionPriorityBonusCache"],
+    }]
+    if at.day in {1, 15}:
+        rules.add(Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id)
+        executions.append({
+            "ruleId": Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,
+            "effectiveCoverage": "exact",
+            "provenance": "dllReimplementation",
+            "dependencies": [],
+            "inputs": ["faction.effectExpirations"],
+            "outputs": ["faction.effectContexts"],
+        })
+    return {
+        "kind": "factionCache",
+        "day": day,
+        "at": at.isoformat(),
+        "mechanicRules": sorted(rules),
+        "cachedPriorityBonuses": {str(key): dict(value) for key, value in cached.items()},
+        "expiredEffects": expired,
+        "ruleExecutions": executions,
+        "phaseTrace": [
+            {"phase": "faction.cachePriorityBonuses", "factionIds": sorted(cached)},
+            *([{"phase": "effects.expire", "expiredEffects": expired}] if at.day in {1, 15} else []),
+        ],
+    }
+
+
 def priority_coverage(priorities: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     result = {}
     for name in priorities:
@@ -651,12 +820,80 @@ def _national_priority_bonus(state: NationProjectionState, priority: str, contex
     if priority == "Economy":
         return state.federation_economy_bonus * _global(context, "federationGDPEconomyBonus")
     if priority in {"Military_BuildArmy", "Military_BuildNavy"}:
-        mining_regions = sum(
-            1 for region in state.regions.values()
-            if region.resource_region is True and region.fully_occupied is False
-        )
-        return mining_regions * _global(context, "coreMineralBuildMilitaryModifier")
+        return state.cached_num_mining_regions * _global(context, "coreMineralBuildMilitaryModifier")
     return 0.0
+
+
+def _refresh_region_cache(state: NationProjectionState, context: ProjectionContext) -> dict[str, Any]:
+    missing: list[dict[str, Any]] = []
+    for region in state.regions.values():
+        for field_name, value in (
+            ("resourceRegion", region.resource_region),
+            ("oilRegion", region.oil_region),
+            ("coreEconomicRegion", region.core_economic_region),
+            ("colonyRegion", region.colony),
+            ("nuclearDetonations", region.nuclear_detonations),
+            ("mineCapable", region.mine_capable),
+            ("oilCapable", region.oil_capable),
+            ("fullyOccupied", region.fully_occupied),
+        ):
+            if value is None:
+                missing.append({"field": field_name, "source": f"save/catalog.region.{region.id}"})
+    end_of_oil = state.world_context.get("endOfOil")
+    if not isinstance(end_of_oil, bool):
+        missing.append({"field": "endOfOil", "source": "save.TIGlobalValuesState"})
+    if missing:
+        raise ProjectionRuntimeStop(
+            "Daily region cache inputs are incomplete",
+            rule_ids=(Rules.NATION_PERIODIC_REGION_CACHE.id,),
+            dependencies=missing,
+            affected_metrics=("nation.priorityProgress.Economy", "nation.priorityProgress.Military_BuildArmy"),
+            phase="dailyRegionCache",
+            mechanic="CacheRegionValues",
+        )
+    ordered = sorted(state.regions.values(), key=lambda value: value.region_order)
+    state.cached_num_mining_regions = sum(
+        1 for region in ordered if region.resource_region and not region.fully_occupied
+    )
+    state.cached_num_oil_regions = sum(
+        1 for region in ordered if region.oil_region and not region.fully_occupied
+    )
+    state.cached_num_core_economic_regions = sum(
+        1 for region in ordered if region.core_economic_region and not region.fully_occupied
+    )
+    oil_candidates = [
+        region for region in ordered
+        if not end_of_oil
+        and not region.core_economic_region
+        and not (region.resource_region or region.oil_region)
+        and region.nuclear_detonations == 0
+        and region.oil_capable
+    ]
+    mining_candidates = [
+        region for region in ordered
+        if not region.core_economic_region
+        and not (region.resource_region or region.oil_region)
+        and region.nuclear_detonations == 0
+        and region.mine_capable
+    ]
+    core_candidates = [
+        region for region in ordered
+        if not region.core_economic_region
+        and not region.colony
+        and region.nuclear_detonations == 0
+        and _region_gdp_value(state, region, context) / 1_000_000_000.0 > 500.0
+    ]
+    state.cached_can_accumulate_core_oil = bool(oil_candidates) and not state.policy_no_oil_development
+    state.cached_can_accumulate_core_mining = bool(mining_candidates) and not state.policy_no_mineral_development
+    state.cached_can_accumulate_core_economy = bool(core_candidates)
+    return {
+        "miningRegions": state.cached_num_mining_regions,
+        "oilRegions": state.cached_num_oil_regions,
+        "coreEconomicRegions": state.cached_num_core_economic_regions,
+        "canAccumulateCoreOil": state.cached_can_accumulate_core_oil,
+        "canAccumulateCoreMining": state.cached_can_accumulate_core_mining,
+        "canAccumulateCoreEconomy": state.cached_can_accumulate_core_economy,
+    }
 
 
 def _army_maintenance(state: NationProjectionState, context: ProjectionContext) -> float:
@@ -810,14 +1047,23 @@ def _apply_completion(
             change *= 8.5 / max(1.0, state.education)
         elif state.education >= 12.0:
             change *= 12.0 / max(1.0, state.education)
+        mission_control_was_at_cap = (
+            change > 0.0
+            and "MissionControl" in context.priorities
+            and not _priority_valid(state, "MissionControl", context)
+        )
         state.education = max(0.0, state.education + scale * change)
         state.cohesion = min(10.0, max(0.0, state.cohesion + scale * (0.01 if state.cohesion < 5 else -0.01 if state.cohesion > 5 else 0.0)))
         metric_inputs.append("internal.populationScaling")
         metric_outputs.extend(("nation.education", "nation.cohesion"))
+        if mission_control_was_at_cap:
+            execution["validationTriggers"] = ["positiveEducationWhileMissionControlAtCap"]
     elif priority == "Government":
         used.add(Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE.id)
         if state.democracy >= 10.0:
-            _apply_completion(state, "Knowledge", context, used, trace=trace)
+            knowledge_execution = _apply_completion(state, "Knowledge", context, used, trace=trace)
+            if knowledge_execution.get("validationTriggers"):
+                execution["validationTriggers"] = list(knowledge_execution["validationTriggers"])
             metric_inputs.append("internal.populationScaling")
             metric_outputs.extend(("nation.education", "nation.cohesion"))
         else:
@@ -1262,10 +1508,25 @@ def _condition_met(condition: MetricCondition, metrics: Mapping[str, float], ini
     return OPS[condition.op](value, condition.value)
 
 
-def _apply_segment(state: NationProjectionState, segment: PlanSegment) -> None:
+def _apply_segment(
+    state: NationProjectionState,
+    segment: PlanSegment,
+    context: ProjectionContext | None = None,
+    *,
+    trace: list[dict[str, Any]] | None = None,
+) -> None:
     if segment.control_points is not None:
         for policy in segment.control_points:
-            state.control_points[policy.control_point_id].pips = dict(policy.pips)
+            cp = state.control_points[policy.control_point_id]
+            cp.pips = dict(policy.pips)
+            if context is not None:
+                _record_and_fix_control_point(state, cp, context, trace=trace)
+                if trace is not None:
+                    trace.append({
+                        "operation": "planPrioritySetter",
+                        "controlPointPosition": cp.position,
+                        "rawPips": dict(cp.pips),
+                    })
     if segment.advisors is not None:
         state.advisors = segment.advisors
 
@@ -1357,15 +1618,18 @@ def _run_investment_transaction(
             attempted_transaction=attempted(phase, attempted_trace=attempted_trace),
         )
 
-    # Policy/validity repair is authoritative. Any resulting unsupported priority
-    # is gated before this tick's allocation.
+    # Allocation reads live-valid numerators but the serialized/revalidated
+    # denominator and diversity cache. Only a setter or an audited validation
+    # trigger refreshes those caches.
     effective_by_cp: dict[int, dict[str, int]] = {}
     for cp in sorted(state.control_points.values(), key=lambda value: value.position):
-        before_economy = cp.pips.get("Economy", 0)
-        effective = _record_and_fix_control_point(state, cp, context, trace=trace)
+        if cp.total_weight <= 0:
+            before_economy = cp.pips.get("Economy", 0)
+            _record_and_fix_control_point(state, cp, context, trace=trace)
+            if cp.pips.get("Economy", 0) and not before_economy:
+                used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
+        effective = _effective_pips(state, cp, context)
         effective_by_cp[cp.id] = effective
-        if cp.pips.get("Economy", 0) and not before_economy:
-            used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
     active_unsupported = sorted({
         priority
         for effective in effective_by_cp.values()
@@ -1390,13 +1654,33 @@ def _run_investment_transaction(
     _refresh_advisor_evidence(state)
     _refresh_economy_score(state, context, used)
     base_ip = _base_ip(state, context)
+    region_cache = _refresh_region_cache(state, context)
+    used.add(Rules.NATION_PERIODIC_REGION_CACHE.id)
+    rule_executions.append({
+        "ruleId": Rules.NATION_PERIODIC_REGION_CACHE.id,
+        "effectiveCoverage": "exact",
+        "provenance": "dllReimplementation",
+        "dependencies": [],
+        "inputs": ["region.flags", "region.occupation", "region.gdp", "world.endOfOil"],
+        "outputs": ["internal.regionDailyCache"],
+    })
     cp_ip = base_ip / state.num_control_points if state.num_control_points else 0.0
     for cp in sorted(state.control_points.values(), key=lambda value: value.position):
         effective = effective_by_cp[cp.id]
-        total = sum(effective.values())
+        total = cp.total_weight
+        if total <= 0:
+            raise stop(
+                "Control-point cached total weight is not positive",
+                phase="beforeAllocation",
+                priority=None,
+                rule_ids=(Rules.NATION_IP_CONTROL_POINT_ALLOCATION.id,),
+                dependencies=({"field": "totalWeightsForControlPoint", "source": f"controlPoint.{cp.id}"},),
+                affected_metrics=("nation.priorityProgress.*",),
+                mechanic="controlPointCache",
+            )
         for priority, pip in effective.items():
             bonus = cp.priority_bonuses.get(priority, 0.0)
-            bonus += _diversity_bonus(cp, priority, effective, context)
+            bonus += cp.diversity_bonus_cache.get(priority, 0.0)
             bonus += _national_priority_bonus(state, priority, context)
             if bonus >= 0.0 and cp.benefits_disabled:
                 bonus = 0.0
@@ -1434,6 +1718,7 @@ def _run_investment_transaction(
         "outputs": nonzero_allocations,
     })
     ordered = sorted(context.priorities, key=lambda name: int(context.priorities[name]["enumValue"]))
+    deferred_validation_reasons: list[str] = []
     for priority in ordered:
         cost = float(context.priorities[priority]["investmentCost"]) / max(context.national_ip_multiplier, 1e-12)
         while state.progress.get(priority, 0.0) + 1e-12 >= cost and _priority_valid(state, priority, context):
@@ -1474,6 +1759,29 @@ def _run_investment_transaction(
                 str(execution["effectiveCoverage"]),
                 coverage_resolver_id=execution.get("coverageResolverId"),
             )
+            validation_triggers = list(execution.get("validationTriggers", []))
+            if validation_triggers:
+                used.add(Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id)
+                trace.append({
+                    "operation": "priorityValidationTrigger",
+                    "priority": priority,
+                    "reasons": validation_triggers,
+                    "timing": "insideCompletionHandler",
+                })
+                for cp in sorted(state.control_points.values(), key=lambda value: value.position):
+                    before = cp.pips.get("Economy", 0)
+                    _record_and_fix_control_point(state, cp, context, trace=trace)
+                    if cp.pips.get("Economy", 0) and not before:
+                        used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
+                execution.setdefault("childExecutions", []).append({
+                    "ruleId": Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id,
+                    "effectiveCoverage": "exact",
+                    "provenance": "dllReimplementation",
+                    "dependencies": [str(execution["ruleId"])],
+                    "inputs": list(execution.get("outputs", [])),
+                    "outputs": ["internal.controlPointWeightCache"],
+                    "triggerReasons": validation_triggers,
+                })
             state.progress[priority] -= cost
             progress_metric = f"nation.priorityProgress.{priority}"
             completion_metric = f"internal.completion.{priority}"
@@ -1520,16 +1828,29 @@ def _run_investment_transaction(
             child_executions = execution.pop("childExecutions", [])
             rule_executions.append(execution)
             rule_executions.extend(child_executions)
-            # DLL revalidates weights after each successful completion. A newly
-            # generated fallback is authoritative but is not allocated until the
-            # next investment transaction.
-            for cp in sorted(state.control_points.values(), key=lambda value: value.position):
-                before = cp.pips.get("Economy", 0)
-                _record_and_fix_control_point(state, cp, context, trace=trace)
-                if cp.pips.get("Economy", 0) and not before:
-                    used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
-    for cp in sorted(state.control_points.values(), key=lambda value: value.position):
-        _record_and_fix_control_point(state, cp, context, trace=trace)
+            if not _priority_valid(state, priority, context):
+                deferred_validation_reasons.append(f"{priority}BecameInvalid")
+    if deferred_validation_reasons:
+        used.add(Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id)
+        trace.append({
+            "operation": "priorityValidationTrigger",
+            "reasons": deferred_validation_reasons,
+            "timing": "afterCompletionTraversal",
+        })
+        for cp in sorted(state.control_points.values(), key=lambda value: value.position):
+            before = cp.pips.get("Economy", 0)
+            _record_and_fix_control_point(state, cp, context, trace=trace)
+            if cp.pips.get("Economy", 0) and not before:
+                used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
+        rule_executions.append({
+            "ruleId": Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id,
+            "effectiveCoverage": "exact",
+            "provenance": "dllReimplementation",
+            "dependencies": [Rules.NATION_PRIORITY_COMPLETION_ORDER.id],
+            "inputs": ["internal.priorityValidity"],
+            "outputs": ["internal.controlPointWeightCache"],
+            "triggerReasons": deferred_validation_reasons,
+        })
     return {
         "sequence": day,
         "kind": "investment",
@@ -1546,6 +1867,7 @@ def _run_investment_transaction(
             "phase": "investment.segmentAndAllocation",
             "segmentIndex": segment_index,
             "baseInvestmentPointsMonth": base_ip,
+            "regionCache": region_cache,
             "allocation": {name: value for name, value in allocation.items() if value},
             "completedPriorities": [event["priority"] for event in completions],
         }],
@@ -1965,7 +2287,7 @@ def _projection_preflight(
     implicit: list[dict[str, Any]] = []
     unity_requested = False
     for segment_index, segment in enumerate(plan.segments):
-        _apply_segment(working, segment)
+        _apply_segment(working, segment, context)
         unity_requested = unity_requested or any(
             cp.pips.get("Unity", 0) > 0 for cp in working.control_points.values()
         )
@@ -2020,20 +2342,22 @@ def _event_schedule(start: datetime, days: int, checkpoints: Iterable[int]) -> l
     end_date = horizon.date()
     investment_day = 0
     while calendar <= end_date:
+        midnight = datetime.combine(calendar, time(0, 0))
+        if start < midnight <= horizon:
+            events.append((midnight, 0, "factionCache", investment_day))
         if calendar.day == 1:
-            moment = datetime.combine(calendar, time(0, 0))
-            if start < moment <= horizon:
-                events.append((moment, 0, "monthly", investment_day))
+            if start < midnight <= horizon:
+                events.append((midnight, 1, "monthly", investment_day))
         investment = datetime.combine(calendar, time(10, 30))
         if start < investment <= horizon:
             investment_day += 1
-            events.append((investment, 1, "investment", investment_day))
+            events.append((investment, 2, "investment", investment_day))
         rest = datetime.combine(calendar, time(12, 0))
         if start < rest <= horizon:
-            events.append((rest, 2, "rest", investment_day))
+            events.append((rest, 3, "rest", investment_day))
         calendar += timedelta(days=1)
     for checkpoint in sorted(set(checkpoints)):
-        events.append((start + timedelta(days=checkpoint), 3, "checkpoint", checkpoint))
+        events.append((start + timedelta(days=checkpoint), 4, "checkpoint", checkpoint))
     return sorted(events, key=lambda row: (row[0], row[1]))
 
 
@@ -2077,7 +2401,7 @@ def run_projection(
     _seed_metric_evidence(state, context)
     coverage = priority_coverage(context.priorities)
     unsupported, preflight = _projection_preflight(state, plan, context, coverage)
-    _apply_segment(state, plan.segments[0])
+    _apply_segment(state, plan.segments[0], context)
     _refresh_advisor_evidence(state)
     initial_metrics = _metrics(state, context)
     if unsupported:
@@ -2110,7 +2434,7 @@ def run_projection(
     while segment_index < len(plan.segments) - 1 and _segment_met(plan.segments[segment_index], 0, _metrics(state, context), initial_metrics):
         prior = segment_index
         segment_index += 1
-        _apply_segment(state, plan.segments[segment_index])
+        _apply_segment(state, plan.segments[segment_index], context)
         _refresh_advisor_evidence(state)
         transitions.append({"day": 0, "from": prior, "to": segment_index, "reason": "satisfiedAtStart"})
         advisor_transitions.append({"day": 0, "advisors": [item.output() for item in state.advisors]})
@@ -2169,7 +2493,7 @@ def run_projection(
                 before = state.advisors
                 segment_index = pending_segment
                 pending_segment = None
-                _apply_segment(state, plan.segments[segment_index])
+                _apply_segment(state, plan.segments[segment_index], context)
                 _refresh_advisor_evidence(state)
                 if state.advisors != before:
                     advisor_transitions.append({"day": investment_day, "at": moment.isoformat(), "advisors": [item.output() for item in state.advisors]})
@@ -2191,6 +2515,13 @@ def run_projection(
                     investment_day,
                     at=moment,
                     quarterly=moment.month in {1, 4, 7, 10},
+                )
+            elif kind == "factionCache":
+                transaction = _run_faction_cache_transaction(
+                    working,
+                    context,
+                    investment_day,
+                    at=moment,
                 )
             else:
                 transaction = _refresh_rest_caches(working, context, investment_day, at=moment)
@@ -2231,6 +2562,7 @@ def run_projection(
             moment,
         )
         condition_phase = {
+            "factionCache": "condition.afterFactionCache",
             "monthly": "condition.afterMonthly",
             "investment": "condition.afterInvestment",
             "rest": "condition.afterRest",

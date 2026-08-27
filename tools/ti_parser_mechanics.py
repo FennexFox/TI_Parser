@@ -286,20 +286,23 @@ class Rules:
     NATION_PERIODIC_REGION_CACHE = MechanicRule(
         "nation.periodic.region-cache", 1,
         "Cache occupied-filtered resource/core region counts and Economy trigger availability before allocation.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.CacheRegionValues", "TINationState.DailyNationUpdate"),
+        test_ids=("tests.test_nation_projection.NationProjectionSchedulerTests.test_daily_region_cache_refreshes_before_allocation",),
     )
     NATION_EFFECT_CONTEXT_EXPIRATION = MechanicRule(
         "nation.effect.context-expiration", 1,
         "Remove saved faction effects at the audited semi-monthly boundary after daily bonus caching.",
-        "partial", "unsupported",
-        ("TIFactionState.FactionPeriodicUpdate", "TIEffectsState.RemoveExpiredEffects"),
+        "verified", "exact",
+        ("FactionPeriodicUpdate.OnMonthlyUpdate", "FactionPeriodicUpdate.OnMidMonthlyUpdate", "TIEffectsState.GlobalCheckForRemoveEffects"),
+        test_ids=("tests.test_nation_projection.NationProjectionSchedulerTests.test_daily_priority_bonus_cache_precedes_effect_expiry",),
     )
     NATION_PRIORITY_VALIDATION_TRIGGER = MechanicRule(
         "nation.priority.validation-trigger", 1,
         "Revalidate CP values only at audited setters and priority-validity change triggers.",
-        "partial", "unsupported",
+        "verified", "exact",
         ("TINationState.PossiblePriorityValidationChange", "TIControlPoint.SetControlPointPriority"),
+        test_ids=("tests.test_nation_projection.NationProjectionSchedulerTests.test_nontriggering_education_change_preserves_cached_weights",),
     )
     NATION_PRIORITY_WELFARE_COMPLETE = MechanicRule(
         "nation.priority.welfare.complete", 2,

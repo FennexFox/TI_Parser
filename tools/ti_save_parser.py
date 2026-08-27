@@ -8564,6 +8564,8 @@ def faction_priority_bonuses_for_projection(
     priorities: dict[str, Any],
     trait_templates: dict[str, dict[str, Any]],
     effect_templates: dict[str, dict[str, Any]],
+    *,
+    apply_effects: bool = True,
 ) -> dict[str, float]:
     bonuses = {name: 0.0 for name in priorities}
     for councilor_id in faction_councilor_ids(faction):
@@ -8587,11 +8589,38 @@ def faction_priority_bonuses_for_projection(
         for priority, value in hab_leo_priority_bonuses(hab, hab_module_records(indexed, hab, load_hab_module_catalog())).items():
             if priority in bonuses:
                 bonuses[priority] += as_float(value, 0.0)
-    contexts = faction_effect_contexts(indexed, faction_id)
-    for priority, context_name in PRIORITY_BONUS_EFFECT_CONTEXTS.items():
-        if priority in bonuses:
-            bonuses[priority] = apply_effect_modifiers(contexts, effect_templates, context_name, bonuses[priority])
+    if apply_effects:
+        contexts = faction_effect_contexts(indexed, faction_id)
+        for priority, context_name in PRIORITY_BONUS_EFFECT_CONTEXTS.items():
+            if priority in bonuses:
+                bonuses[priority] = apply_effect_modifiers(contexts, effect_templates, context_name, bonuses[priority])
     return bonuses
+
+
+def faction_effect_expirations_for_projection(indexed: IndexedState) -> dict[int, dict[str, datetime]]:
+    result: dict[int, dict[str, datetime]] = {}
+    for entry in type_entries(indexed, "TIEffectsState"):
+        value = entry.get("Value") or {}
+        pairs = value.get("factionEffectExpirations")
+        if not isinstance(pairs, list):
+            continue
+        for pair in pairs:
+            if not isinstance(pair, dict):
+                continue
+            faction_id = ref_id(pair.get("Key"))
+            raw_expirations = pair.get("Value")
+            if faction_id is None or not isinstance(raw_expirations, dict):
+                continue
+            parsed: dict[str, datetime] = {}
+            for effect_name, raw_expiration in raw_expirations.items():
+                expiration = ti_datetime(raw_expiration)
+                if expiration is None:
+                    raise nation_projection_layer.ProjectionInputError(
+                        f"Faction effect {effect_name!r} has an invalid expiration timestamp"
+                    )
+                parsed[str(effect_name)] = expiration
+            result[faction_id] = parsed
+    return result
 
 
 def projection_advisor_profiles(
@@ -8832,6 +8861,7 @@ def extract_nation_projection_state(
         positions.add(position)
         owner_id = ref_id(cp.get("faction"))
         raw_pips = cp.get("controlPointPriorities") if isinstance(cp.get("controlPointPriorities"), dict) else {}
+        raw_diversity = cp.get("diversityBonus") if isinstance(cp.get("diversityBonus"), dict) else {}
         control_points[cp_id] = nation_projection_layer.ControlPointProjectionState(
             id=cp_id,
             position=position,
@@ -8842,6 +8872,7 @@ def extract_nation_projection_state(
             priority_bonuses=dict(owner_bonuses.get(owner_id or -1, {})),
             total_weight=int(as_float(cp.get("totalWeightsForControlPoint"), 0.0)),
             num_priorities_with_weight=int(as_float(cp.get("numPrioritiesWithWeight"), 0.0)),
+            diversity_bonus_cache={str(key): as_float(value, 0.0) for key, value in raw_diversity.items()},
         )
     regions: dict[int, nation_projection_layer.RegionProjectionState] = {}
     region_map_names: dict[int, str] = {}
@@ -9068,6 +9099,8 @@ def extract_nation_projection_state(
         cached_can_accumulate_core_economy=bool(nation.get("canAccumulateCoreEconomyTriggers")),
         cached_can_accumulate_core_mining=bool(nation.get("canAccumulateCoreMiningTriggers")),
         cached_can_accumulate_core_oil=bool(nation.get("canAccumulateCoreOilTriggers")),
+        policy_no_oil_development=bool(nation.get("policy_noOilDevelopment")),
+        policy_no_mineral_development=bool(nation.get("policy_noMineralDevelopment")),
         world_market_blockers=market_blockers,
     )
     return state
@@ -9096,11 +9129,21 @@ def calculate_nation_projection(
     _, councilor_by_id = councilor_summary_maps(indexed, catalogs.traits)
     all_advisors, available_advisors = projection_advisor_profiles(indexed, faction_id, faction, councilor_by_id)
     owner_bonuses: dict[int, dict[str, float]] = {}
+    owner_bonus_bases: dict[int, dict[str, float]] = {}
     for cp in nation_control_points(indexed, nation):
         owner_id = ref_id(cp.get("faction"))
         owner = state_value_by_id(indexed, owner_id)
         if owner_id is not None and isinstance(owner, dict) and owner_id not in owner_bonuses:
             owner_bonuses[owner_id] = faction_priority_bonuses_for_projection(indexed, owner_id, owner, priorities, catalogs.traits, catalogs.effects)
+            owner_bonus_bases[owner_id] = faction_priority_bonuses_for_projection(
+                indexed,
+                owner_id,
+                owner,
+                priorities,
+                catalogs.traits,
+                catalogs.effects,
+                apply_effects=False,
+            )
     state = extract_nation_projection_state(indexed, nation_id, nation, all_advisors, owner_bonuses, development)
     plans, goals = nation_projection_layer.parse_projection_document(plan_payload, state=state, councilors=available_advisors, priorities=priorities)
     contexts = faction_effect_contexts(indexed, faction_id)
@@ -9160,6 +9203,14 @@ def calculate_nation_projection(
         "alienFactionId": alien_faction_id,
         "alienProxyFactionId": min(proxy_candidates)[1] if proxy_candidates else None,
     }
+    state.faction_effect_contexts = {
+        owner_id: {name: list(effects) for name, effects in contexts.items()}
+        for owner_id, contexts in all_faction_contexts.items()
+    }
+    state.faction_effect_expirations = faction_effect_expirations_for_projection(indexed)
+    state.faction_priority_bonus_cache = {
+        owner_id: dict(bonuses) for owner_id, bonuses in owner_bonuses.items()
+    }
     nation_template_name = str(nation.get("templateName") or "")
     start_template_name = str((first_value(indexed, "TITimeState") or {}).get("templateName") or "")
     nation_template = _required_projection_catalog_row(
@@ -9196,6 +9247,7 @@ def calculate_nation_projection(
         permanent_allies=permanent_allies,
         faction_effect_contexts=all_faction_contexts,
         effect_templates=catalogs.effects,
+        faction_priority_bonus_bases=owner_bonus_bases,
     )
     nation_projection_layer.calibrate_rest_state_context(
         state,

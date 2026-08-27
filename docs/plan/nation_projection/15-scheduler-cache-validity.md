@@ -48,7 +48,7 @@
 
 ## Progress
 
-- Pending.
+- Complete.
 
 ## Decision log
 
@@ -56,4 +56,22 @@
 
 ## Outcomes / Retrospective
 
-- Pending.
+- Added a daily faction transaction that caches owner priority bonuses before
+  the 1st/15th effect-expiration pass. Expired live effects therefore remain in
+  that day's cached allocation bonus, while later direct handlers read the
+  updated live effect context.
+- Investment allocation now uses live priority validity for its numerator and
+  the last serialized/setter/trigger-refreshed total weight and diversity cache
+  for its denominator. The engine no longer normalizes every CP merely because
+  an investment tick or unrelated completion occurred.
+- Plan pip changes run through the setter-equivalent validation path. Completion
+  revalidation is limited to audited handler triggers and priorities that became
+  invalid during completion traversal.
+- Added the daily region cache before allocation, including occupied-filtered
+  resource/core counts and cached Oil/Mining/Core trigger availability.
+- Direct ordering/state-transition fixtures cover same-day expiry, stale-cache
+  preservation, and region-cache refresh. The focused projection, registry,
+  CLI, and package-only set passes 51 tests plus 13 subtests.
+- A two-day Knowledge-only observational CAL smoke completed with daily faction
+  cache, investment, region cache, and noon rest-cache transactions and no
+  runtime stop.
