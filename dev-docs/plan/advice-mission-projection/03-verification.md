@@ -42,12 +42,18 @@
 
 ## Progress
 
-- Not started.
+- Completed.
 
 ## Decision log
 
-- No decisions recorded yet.
+- A live save opened during mission assignment is valid smoke input: current active Advise missions reveal the queued policy while `advisingCouncilors` is intentionally empty after phase bookkeeping.
+- Whole-catalog verification currently reports unrelated research-template source-hash drift; the new nation-development catalog payload and every source hash, including mission/time templates and DLL, match the installed inputs.
+- The mutable CAL observational matrix is not a strict regression gate. Its current unrelated Government/mean-path expectations drifted with the save, while the targeted live WES Advise lifecycle smoke passed.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Focused validation passed 70 tests; the complete suite passed 247 tests with 9 environment-dependent skips.
+- The current live WES assignment resolved from an empty post-bookkeeping advisor state at `2125-04-02T09:51:00`; its already-paid order cost 0 future Influence, and the next saved-cadence renewal cost 10 Influence.
+- `nation_development` package parity passed against the installed Broken Earth templates and current DLL. The broader verifier's sole failure was pre-existing research overlay source-hash drift outside this change.
+- Plan validation passed for all three phases. Graphify refreshed to 2,308 nodes, 5,996 edges, and 139 communities; multigraph diagnostics found no malformed, missing-endpoint, dangling, self-loop, or duplicate edges.
+- Search verification found no runtime 14-day travel constant, adjustable Advise success probability, or obsolete continuous-renewal user documentation.

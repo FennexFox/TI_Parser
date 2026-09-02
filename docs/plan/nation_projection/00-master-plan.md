@@ -14,7 +14,7 @@
 - Clone save state into projection dataclasses; never mutate `IndexedState`.
 - Apply plan changes immediately before a verified investment transaction and evaluate segment/goal conditions only after a complete transaction.
 - Keep `nation.*` state separate from target-nation `factionContribution.*`; whole-faction future totals remain out of scope.
-- Treat advisor placement as `hypotheticalPolicy`, with successful continuous Advise renewal assumed.
+- Treat advisor placement as a desired repeat-order policy; the Advise lifecycle extension supersedes the former continuous-renewal assumption with saved phase cadence, clear/resolve gaps, automatic success, assignment movement, and renewal-cost reporting.
 - Replace the approximate date loop with verified DLL event boundaries and execute mutations on cloned state. Preserve verified authoritative prefixes while rolling back only the incomplete handler or phase that reaches an unsupported dependency.
 - Derive metric coverage and provenance from the dependencies actually read and written. Conditional rule coverage remains distinct from the coverage of each affected output metric.
 - Treat Population as a deterministic mean-input trajectory: replace each stochastic input with its mean, propagate `meanPath`, and never claim that the nonlinear trajectory equals the mathematical expectation of all stochastic paths.
@@ -75,7 +75,7 @@
 ## Known Risks And Assumptions
 
 - The installed game build may change; source hashes make such drift visible.
-- Exogenous events, player actions, mission failure/travel, and stochastic nation events are not replayed.
+- Exogenous events, player actions, target invalidation, detention, competing councilor orders, future faction affordability, and stochastic nation events are not replayed. Actionable Advise itself is automatic and moves at assignment.
 - A plan using any unsupported nonzero priority is incomplete and has no authoritative final state or ranking.
 - Periodic rules are implemented only when cadence and formulas are verified; otherwise limitations remain explicit.
 - Installed DLL/template inputs can drift independently of the repository. Catalog regeneration and provenance parity must fail visibly, while runtime remains package-only.

@@ -39,6 +39,10 @@
 
 ## Known Risks And Assumptions
 
-- Mission order within a resolution segment is randomized. Projection uses the exact mean stagger instant implied by `FinalizeCouncilorMissions.StaggerMissionResolutions` and marks it expected timing.
+- Mission order within a resolution segment is randomized. Projection uses the neutral mean stagger instant implied by `FinalizeCouncilorMissions.StaggerMissionResolutions` and marks it expected timing.
 - Future Influence availability, target invalidation, detention, and competing councilor orders are not forecast. Required Influence is reported and the policy assumes renewals stay actionable and funded.
 - Mission cadence changes with campaign age; repeat-change thresholds must not be frozen.
+
+## Overall Progress
+
+- Completed: discovery, implementation, focused/full regression, current-save Advise smoke, package parity for nation development, plan validation, documentation, and Graphify refresh.

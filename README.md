@@ -182,7 +182,13 @@ observed only after a complete investment or verified periodic transaction; a
 satisfied segment takes effect immediately before the next investment tick.
 `nation.*` metrics describe the nation, while `factionContribution.*` describes
 only the selected faction's share from that target nation. Advisor placement is
-a hypothetical policy that assumes successful continuous Advise renewal.
+a desired repeat-order policy. The projection reads the save's mission-phase
+cadence, clears active advisors at each phase, and reapplies them at the audited
+expected order-0 resolution time. Actionable Advise has automatic 100% success
+and `MoveToTarget` moves on assignment, so its travel duration is zero rather
+than distance-based. `advisorMissionProjection` reports every renewal, the
+inactive gap, and required Influence; future resource availability, target
+invalidation, detention, and competing orders remain held fixed.
 
 Projection mechanics are fail closed. Knowledge, Government, Welfare, Funding,
 Mission Control, and BuildArmy have authoritative paths; MC and BuildArmy

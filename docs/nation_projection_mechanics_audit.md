@@ -8,7 +8,7 @@ catalog data, diagnostics, and tests.
 ## Audited build
 
 - Assembly: `Assembly-CSharp.dll`
-- SHA-256: `5ec67c601a6ce39d985aa9830a99faa9844aee7d7e12ec5e28ea46ff020ba982`
+- SHA-256: `ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5`
 - Runtime data: packaged `nation_development_catalog.json`, selected by the
   save's exact scenario and verified through `catalog_manifest.json`
 - Source of truth: the installed DLL and templates used during the audit and
@@ -20,9 +20,11 @@ monthly nation work at month-day 1 00:00, daily investment at 10:30, and the
 resting cohesion/unrest cache at 12:00. It also confirmed priority enum
 completion traversal, persistent Economy fallback when a CP has no valid
 weight, live priority validity, Advisor conversion and rank decay, and the
-completion handlers listed below. Verified time-conversion and compound
-literals remain in Python rather than being treated as undocumented domain
-constants.
+recurring Advise mission lifecycle. Advise uses automatic resolution and moves
+at assignment, while mission-phase bookkeeping clears its persistent effect
+until the order-0 resolution segment reapplies it. Verified time-conversion and
+compound literals remain in Python rather than being treated as undocumented
+domain constants.
 
 Coverage is attached to an executed path, not only to a mechanic name. Static
 rules have one registry coverage. Conditional rules name a registered resolver
@@ -66,6 +68,7 @@ downgrade.
 | `nation.population.monthly-growth` | verified | expected | `TIRegionState.GrowPopulationByMonth` |
 | `nation.advisor.attribute-source` | verified | exact | `TICouncilorState.AdvisingBonus` |
 | `nation.advisor.stacking` | verified | exact | `TINationState.GetAdvisingScore` |
+| `nation.advisor.mission-lifecycle` | verified | expected | `TIMissionPhaseState.StartofTurnBookkeeping` and `FinalizeCouncilorMissions.StaggerMissionResolutions` |
 | `nation.faction-contribution` | verified | exact | `TINationState.GetMonthlyResearchFromControlPoint` and peer contribution methods |
 
 Mission Control placement uses resolver
@@ -195,8 +198,12 @@ the nation-UI result.
   before the next investment transaction.
 - `nation.*` is national state. `factionContribution.*` is only the selected
   faction's contribution from the target nation, never the faction-wide total.
-- Advisor plans carry `inputProvenance: "hypotheticalPolicy"`: travel, mission
-  failure, opportunity cost, and renewal gaps are outside the replay model.
+- Advisor plans carry `inputProvenance: "hypotheticalPolicy"`, and affected
+  metrics also carry `expectedMissionTiming`. Actionable Advise has 100% success;
+  `MoveToTarget` changes location at assignment, so travel time is zero. Active
+  effects are cleared at mission-phase bookkeeping and renewed at the neutral
+  mean order-0 stagger time. Renewal Influence is reported. Future affordability,
+  target validity, detention, and competing orders remain outside the replay model.
 - Other nations, wars, missions, events, ownership changes, and player actions
   are held fixed.
 
