@@ -8625,6 +8625,137 @@ def projection_advisor_profiles(
     return all_profiles, available
 
 
+def projection_advisor_mission_schedule(
+    indexed: IndexedState,
+    development: dict[str, Any],
+) -> nation_projection_layer.AdvisorMissionSchedule:
+    config = development.get("advisorMission")
+    if not isinstance(config, dict):
+        raise _projection_dependency_error(
+            indexed,
+            source="catalog-field",
+            field="advisorMission",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="packaged Advise mission mechanics are absent",
+        )
+    cost = config.get("cost")
+    phase_config = config.get("missionPhaseEvent")
+    if (
+        config.get("automaticSuccess") is not True
+        or config.get("movementRule") != "MoveToTarget"
+        or config.get("persistentEffect") is not True
+        or not isinstance(cost, dict)
+        or cost.get("type") != "TIMissionCost_Flat"
+        or cost.get("resource") != "Influence"
+        or not isinstance(phase_config, dict)
+    ):
+        raise _projection_dependency_error(
+            indexed,
+            source="catalog-field",
+            field="advisorMission",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="packaged Advise mission mechanics do not match the audited automatic MoveToTarget contract",
+        )
+    event = next((
+        entry.get("Value") or {}
+        for entry in type_entries(indexed, "TITimeEvent")
+        if (entry.get("Value") or {}).get("eventName") == "CouncilorMissionUpdate"
+        and not (entry.get("Value") or {}).get("archived")
+    ), None)
+    if not isinstance(event, dict):
+        raise _projection_dependency_error(
+            indexed,
+            source="save-state",
+            field="TITimeEvent.CouncilorMissionUpdate",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="active mission-phase event is absent",
+        )
+    next_phase = ti_datetime(event.get("triggerTime"))
+    repeat_type = event.get("repeatType")
+    if next_phase is None or not isinstance(repeat_type, str):
+        raise _projection_dependency_error(
+            indexed,
+            source="save-field",
+            field="CouncilorMissionUpdate.triggerTime/repeatType",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="mission-phase timing is invalid",
+        )
+    raw_changes = phase_config.get("repeatChanges")
+    triggered = event.get("repeatChangeTriggered")
+    if (
+        phase_config.get("templateName") != "CouncilorMissionUpdate"
+        or not isinstance(raw_changes, list)
+        or triggered is not None and not isinstance(triggered, list)
+    ):
+        raise _projection_dependency_error(
+            indexed,
+            source="catalog-or-save-field",
+            field="advisorMission.missionPhaseEvent/CouncilorMissionUpdate.repeatChangeTriggered",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="mission-phase repeat-change inputs are invalid",
+        )
+    triggered = triggered or []
+    repeat_changes: list[tuple[float, str, bool]] = []
+    for index, row in enumerate(raw_changes):
+        if not isinstance(row, dict):
+            continue
+        threshold = row.get("campaignYearsGreaterThan")
+        updated_type = row.get("repeatType")
+        saved_trigger = triggered[index] if index < len(triggered) else False
+        if (
+            not isinstance(threshold, (int, float)) or isinstance(threshold, bool)
+            or not math.isfinite(float(threshold)) or float(threshold) < 0
+            or not isinstance(updated_type, str) or not updated_type
+            or not isinstance(saved_trigger, bool)
+        ):
+            raise _projection_dependency_error(
+                indexed,
+                source="catalog-field",
+                field="advisorMission.missionPhaseEvent.repeatChanges",
+                rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+                reason="mission-phase repeat change is invalid",
+            )
+        repeat_changes.append((float(threshold), updated_type, saved_trigger))
+    cost_value = cost.get("value")
+    segments = config.get("resolutionSegmentsPerPhase")
+    resolution_order = config.get("resolutionOrder")
+    time_step = event.get("timeStep", 1)
+    start_month = event.get("startMonth", next_phase.month)
+    if (
+        not isinstance(cost_value, (int, float)) or isinstance(cost_value, bool)
+        or not math.isfinite(float(cost_value)) or cost_value < 0
+        or not isinstance(segments, (int, float)) or isinstance(segments, bool)
+        or not float(segments).is_integer() or int(segments) <= 0
+        or not isinstance(resolution_order, (int, float)) or isinstance(resolution_order, bool)
+        or not float(resolution_order).is_integer() or not 0 <= float(resolution_order) < int(segments)
+        or not isinstance(time_step, (int, float)) or isinstance(time_step, bool)
+        or not float(time_step).is_integer() or int(time_step) <= 0
+        or not isinstance(start_month, (int, float)) or isinstance(start_month, bool)
+        or not float(start_month).is_integer() or not 1 <= int(start_month) <= 12
+    ):
+        raise _projection_dependency_error(
+            indexed,
+            source="catalog-or-save-field",
+            field="advisorMission.cost/resolution and CouncilorMissionUpdate.timeStep/startMonth",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="mission lifecycle numeric inputs are invalid",
+        )
+    mission_phase = first_value(indexed, "TIMissionPhaseState") or {}
+    return nation_projection_layer.AdvisorMissionSchedule(
+        next_phase_at=next_phase,
+        repeat_type=repeat_type,
+        time_step=int(time_step),
+        start_month=int(start_month),
+        resolution_segments_per_phase=int(segments),
+        resolution_order=int(resolution_order),
+        automatic_success=True,
+        movement_rule="MoveToTarget",
+        influence_cost=float(cost_value),
+        repeat_changes=tuple(repeat_changes),
+        phase_active=mission_phase.get("phaseActive") is True,
+    )
+
+
 def _projection_dependency_error(
     indexed: IndexedState,
     *,
@@ -8809,6 +8940,7 @@ def extract_nation_projection_state(
     all_advisors: dict[int, nation_projection_layer.AdvisorProfile],
     owner_bonuses: dict[int, dict[str, float]],
     development: dict[str, Any],
+    advisor_schedule: nation_projection_layer.AdvisorMissionSchedule | None = None,
 ) -> nation_projection_layer.NationProjectionState:
     global_config = development.get("globalConfig") if isinstance(development.get("globalConfig"), dict) else {}
     nation_templates = development.get("nationTemplates") if isinstance(development.get("nationTemplates"), dict) else {}
@@ -8973,6 +9105,30 @@ def extract_nation_projection_state(
             destroyed=bool(army.get("destroyed")),
         ))
     current_advisors = tuple(all_advisors[councilor_id] for councilor_id in (ref_id(value) for value in nation.get("advisingCouncilors", [])) if councilor_id in all_advisors)
+    current_phase_assignments: list[nation_projection_layer.AdvisorProfile] = []
+    repeating_advisors: list[nation_projection_layer.AdvisorProfile] = []
+    prepaid_ids: set[int] = set()
+    current_ids = {profile.councilor_id for profile in current_advisors if profile.councilor_id is not None}
+    for entry in type_entries(indexed, "TICouncilorState"):
+        councilor = entry.get("Value") or {}
+        councilor_id = raw_state_id(entry)
+        if councilor_id is None or councilor_id not in all_advisors:
+            continue
+        mission = state_value_by_id(indexed, ref_id(councilor.get("activeMission")))
+        assigned_here = (
+            isinstance(mission, dict)
+            and mission.get("templateName") == "Advise"
+            and ref_id(mission.get("target")) == nation_id
+        )
+        if assigned_here:
+            current_phase_assignments.append(all_advisors[councilor_id])
+            prepaid_ids.add(councilor_id)
+        if (assigned_here or councilor_id in current_ids) and (
+            councilor.get("repeatOrder") is True or councilor.get("permanentAssignment") is True
+        ):
+            repeating_advisors.append(all_advisors[councilor_id])
+    advisor_policy = tuple(dict.fromkeys(repeating_advisors))
+    phase_assignments = tuple(dict.fromkeys(current_phase_assignments))
     admin = income_layer.adviser_attribute_bonus_from_values([profile.administration for profile in current_advisors])
     economy_score = _required_projection_number(indexed, nation, "economyScore", source="save-field", rule_id=Rules.NATION_IP_ECONOMY_SCORE.id)
     unrest_factor = 1.0 - max(as_float(nation.get("unrest"), 0.0) - 2.0, 0.0) / 10.0
@@ -9040,6 +9196,10 @@ def extract_nation_projection_state(
             "pcgdpToReduceUnrestBy1": _required_projection_number(indexed, global_state, "fixedPCGDPToReduceUnrestBy1", source="save-field", rule_id=Rules.NATION_PERIODIC_DERIVED_CACHE.id),
         },
         federation_economy_bonus=as_float(nation.get("restofFederationECOBonus_dailyCache"), 0.0),
+        advisor_policy=advisor_policy,
+        advisor_mission_schedule=advisor_schedule,
+        advisor_current_phase_assignments=phase_assignments,
+        advisor_assignment_prepaid_ids=frozenset(prepaid_ids),
     )
     return state
 
@@ -9072,7 +9232,16 @@ def calculate_nation_projection(
         owner = state_value_by_id(indexed, owner_id)
         if owner_id is not None and isinstance(owner, dict) and owner_id not in owner_bonuses:
             owner_bonuses[owner_id] = faction_priority_bonuses_for_projection(indexed, owner_id, owner, priorities, catalogs.traits, catalogs.effects)
-    state = extract_nation_projection_state(indexed, nation_id, nation, all_advisors, owner_bonuses, development)
+    advisor_schedule = projection_advisor_mission_schedule(indexed, development)
+    state = extract_nation_projection_state(
+        indexed,
+        nation_id,
+        nation,
+        all_advisors,
+        owner_bonuses,
+        development,
+        advisor_schedule,
+    )
     plans, goals = nation_projection_layer.parse_projection_document(plan_payload, state=state, councilors=available_advisors, priorities=priorities)
     contexts = faction_effect_contexts(indexed, faction_id)
     research_factor = apply_effect_modifiers(contexts, catalogs.effects, "ControlPointResearch", 1.0)
@@ -9140,7 +9309,7 @@ def calculate_nation_projection(
     source_notes = [
         "Runtime mechanics use packaged, hash-verified catalog data; raw templates and DLL are generator/audit inputs only.",
         "factionContribution.* is only the selected faction's contribution from the target nation.",
-        "Advisor policy assumes successful continuous Advise renewal without travel, failure or opportunity cost.",
+        "Advise uses the saved mission-phase cadence, automatic success, assignment movement, and expected order-0 resolution timing; renewal Influence is reported separately.",
         "Existing save-to-save comparisons are observational unless produced by a controlled no-action validation run.",
         "Climate and external resting-state inputs are held fixed at the save snapshot; population jitter uses deterministic mean input.",
     ]

@@ -35,7 +35,7 @@
 
 - `py -3 -m unittest tests.test_nation_projection tests.test_nation_projection_cli tests.test_runtime_catalogs tests.test_catalog_generators tests.test_mechanics_registry tests.test_parser_income`
 - `py -3 -m unittest discover -s tests -p 'test_*.py'`
-- `py -3 tools/ti_save_parser.py catalog-verify --catalog nation-development`
+- `py -3 tools/ti_save_parser.py --templates-dir '<installed Templates>' catalog-verify --scenario BrokenEarthScenario`
 
 ## Known Risks And Assumptions
 

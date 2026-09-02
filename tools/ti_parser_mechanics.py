@@ -428,6 +428,28 @@ class Rules:
         ("TINationState.GetAdvisingScore", "TICouncilorState.AdvisingBonus"),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_advisor_base_ip_and_rank_decay",),
     )
+    NATION_ADVISOR_MISSION_LIFECYCLE = MechanicRule(
+        "nation.advisor.mission-lifecycle", 1,
+        "Clear and renew Advise each mission phase using automatic success, assignment movement, and mean order-0 resolution timing.",
+        "verified", "expected",
+        (
+            "TIMissionPhaseState.StartofTurnBookkeeping",
+            "FinalizeCouncilorMissions.StaggerMissionResolutions",
+            "AssignCouncilorToMission.Execute",
+            "TIMissionResolution_Automatic.GetMissionOutcome",
+        ),
+        (
+            "TIMissionPhaseState.StartofTurnBookkeeping",
+            "TIMissionEffect_Advise.ApplyEffect",
+            "TITimeEvent.GetNextEventTime",
+        ),
+        (
+            "nationDevelopment.advisorMission",
+            "TITimeEvent.CouncilorMissionUpdate",
+        ),
+        deterministic=False,
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_repeated_advise_uses_phase_clear_and_expected_resolution",),
+    )
     NATION_FACTION_CONTRIBUTION = MechanicRule(
         "nation.faction-contribution", 1,
         "Convert the target nation's totals to the selected faction's active CP share.",
@@ -482,6 +504,7 @@ REGISTRY = {rule.id: rule for rule in (
     Rules.NATION_POPULATION_MONTHLY_GROWTH,
     Rules.NATION_ADVISOR_ATTRIBUTE_SOURCE,
     Rules.NATION_ADVISOR_STACKING,
+    Rules.NATION_ADVISOR_MISSION_LIFECYCLE,
     Rules.NATION_FACTION_CONTRIBUTION,
 )}
 

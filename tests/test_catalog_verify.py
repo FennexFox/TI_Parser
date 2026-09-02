@@ -68,6 +68,21 @@ class CatalogVerifyTests(unittest.TestCase):
             {"dataName": "globalConfig", "democracyDecreaseToMakeHostileClaim": 1.5},
         )
         write_json(
+            self.templates / "TIMissionTemplate.json",
+            [{
+                "dataName": "Advise",
+                "persistentEffect": True,
+                "resolutionOrder": 0,
+                "resolutionMethod": {"$type": "TIMissionResolution_Automatic"},
+                "movementRule": "MoveToTarget",
+                "cost": {"$type": "TIMissionCost_Flat", "resourceType": "Influence", "value": 10},
+            }],
+        )
+        write_json(
+            self.templates / "TITimeEventTemplate.json",
+            [{"dataName": "CouncilorMissionUpdate", "eventType": "Semimonthly", "repeatChanges": []}],
+        )
+        write_json(
             self.templates / "TINationTemplate.json",
             [{"dataName": "Nation_Test", "popGrowthModifier": 0.0}],
         )

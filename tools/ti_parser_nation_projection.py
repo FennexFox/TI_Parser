@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta
+import calendar as calendar_module
 import copy
 import math
 import operator
@@ -191,6 +192,21 @@ class AdvisorProfile:
         return value
 
 
+@dataclass(frozen=True)
+class AdvisorMissionSchedule:
+    next_phase_at: datetime
+    repeat_type: str
+    time_step: int
+    start_month: int
+    resolution_segments_per_phase: int
+    resolution_order: int
+    automatic_success: bool
+    movement_rule: str
+    influence_cost: float
+    repeat_changes: tuple[tuple[float, str, bool], ...] = ()
+    phase_active: bool = False
+
+
 @dataclass
 class NationProjectionState:
     nation_id: int
@@ -240,6 +256,10 @@ class NationProjectionState:
     metric_provenance: dict[str, set[str]] = field(default_factory=dict)
     metric_tracker: MetricDependencyTracker = field(default_factory=MetricDependencyTracker)
     federation_economy_bonus: float = 0.0
+    advisor_policy: tuple[AdvisorProfile, ...] | None = None
+    advisor_mission_schedule: AdvisorMissionSchedule | None = None
+    advisor_current_phase_assignments: tuple[AdvisorProfile, ...] = ()
+    advisor_assignment_prepaid_ids: frozenset[int] = frozenset()
 
     @property
     def population_millions(self) -> float:
@@ -1120,15 +1140,22 @@ def _seed_metric_evidence(state: NationProjectionState, context: ProjectionConte
     tracker.ensure("internal.economyScore", rule_ids=(Rules.NATION_IP_ECONOMY_SCORE.id,))
     tracker.ensure("internal.populationScaling")
     tracker.ensure("internal.hostileClaims")
-    tracker.ensure("internal.advisorAdministration", provenance=("hypotheticalPolicy",) if state.advisors else ())
-    tracker.ensure("internal.advisorScience", provenance=("hypotheticalPolicy",) if state.advisors else ())
+    advisor_provenance = ("hypotheticalPolicy",) if state.advisors else ()
+    if state.advisor_mission_schedule is not None:
+        advisor_provenance += ("expectedMissionTiming",)
+    advisor_rules = (Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,) if state.advisor_mission_schedule is not None else ()
+    tracker.ensure("internal.advisorAdministration", rule_ids=advisor_rules, provenance=advisor_provenance)
+    tracker.ensure("internal.advisorScience", rule_ids=advisor_rules, provenance=advisor_provenance)
     _refresh_public_metric_evidence(state, context)
 
 
 def _refresh_advisor_evidence(state: NationProjectionState) -> None:
     provenance = ("hypotheticalPolicy",) if state.advisors else ()
-    state.metric_tracker.record("internal.advisorAdministration", provenance=provenance)
-    state.metric_tracker.record("internal.advisorScience", provenance=provenance)
+    if state.advisor_mission_schedule is not None:
+        provenance += ("expectedMissionTiming",)
+    rules = (Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,) if state.advisor_mission_schedule is not None else ()
+    state.metric_tracker.record("internal.advisorAdministration", rule_ids=rules, provenance=provenance)
+    state.metric_tracker.record("internal.advisorScience", rule_ids=rules, provenance=provenance)
 
 
 def _refresh_public_metric_evidence(state: NationProjectionState, context: ProjectionContext) -> None:
@@ -1202,12 +1229,14 @@ def _condition_met(condition: MetricCondition, metrics: Mapping[str, float], ini
     return OPS[condition.op](value, condition.value)
 
 
-def _apply_segment(state: NationProjectionState, segment: PlanSegment) -> None:
+def _apply_segment(state: NationProjectionState, segment: PlanSegment, *, defer_advisors: bool = False) -> None:
     if segment.control_points is not None:
         for policy in segment.control_points:
             state.control_points[policy.control_point_id].pips = dict(policy.pips)
     if segment.advisors is not None:
-        state.advisors = segment.advisors
+        state.advisor_policy = segment.advisors
+        if not defer_advisors:
+            state.advisors = segment.advisors
 
 
 def _segment_met(segment: PlanSegment, day: int, metrics: Mapping[str, float], initial: Mapping[str, float]) -> bool:
@@ -1903,7 +1932,7 @@ def _projection_preflight(
     dormant: set[str] = set()
     implicit: list[dict[str, Any]] = []
     for segment_index, segment in enumerate(plan.segments):
-        _apply_segment(working, segment)
+        _apply_segment(working, segment, defer_advisors=working.advisor_mission_schedule is not None)
         for cp in sorted(working.control_points.values(), key=lambda value: value.position):
             effective: dict[str, int] = {}
             for name, value in cp.pips.items():
@@ -1937,7 +1966,53 @@ def _projection_preflight(
     }
 
 
-def _event_schedule(start: datetime, days: int, checkpoints: Iterable[int]) -> list[tuple[datetime, int, str, int]]:
+def _add_calendar_months(value: datetime, months: int = 1) -> datetime:
+    month_index = value.year * 12 + value.month - 1 + months
+    year, month_zero = divmod(month_index, 12)
+    month = month_zero + 1
+    day = min(value.day, calendar_module.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def _next_mission_phase(value: datetime, repeat_type: str, time_step: int, start_month: int) -> datetime:
+    if repeat_type == "Month":
+        return _add_calendar_months(value.replace(day=1, hour=0, minute=0, second=0, microsecond=0), max(time_step, 1))
+    if repeat_type == "Semimonthly":
+        if value.day == 1:
+            return value.replace(day=16, hour=12, minute=0, second=0, microsecond=0)
+        return _add_calendar_months(value.replace(day=1, hour=0, minute=0, second=0, microsecond=0))
+    if repeat_type == "WeekToMonth":
+        if value.day <= 7:
+            return value.replace(day=8, hour=6, minute=0, second=0, microsecond=0)
+        if value.day <= 14:
+            return value.replace(day=15, hour=12, minute=0, second=0, microsecond=0)
+        if value.day <= 21:
+            return value.replace(day=22, hour=18, minute=0, second=0, microsecond=0)
+        return _add_calendar_months(value.replace(day=1, hour=0, minute=0, second=0, microsecond=0))
+    if repeat_type == "EveryThreeWeeksToMonth":
+        phase = (value.month - start_month) % 3
+        if phase == 0 and value.day <= 21:
+            return value.replace(day=22, hour=0, minute=0, second=0, microsecond=0)
+        if phase == 0:
+            return _add_calendar_months(value.replace(day=16, hour=0, minute=0, second=0, microsecond=0))
+        if phase == 1:
+            return _add_calendar_months(value.replace(day=8, hour=0, minute=0, second=0, microsecond=0))
+        return _add_calendar_months(value.replace(day=1, hour=0, minute=0, second=0, microsecond=0))
+    if repeat_type == "Day":
+        return value.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=max(time_step, 1))
+    if repeat_type == "Hour":
+        return value.replace(minute=0, second=0, microsecond=0) + timedelta(hours=max(time_step, 1))
+    raise ProjectionInputError(f"Unsupported CouncilorMissionUpdate repeat type: {repeat_type}")
+
+
+def _event_schedule(
+    start: datetime,
+    days: int,
+    checkpoints: Iterable[int],
+    advisor_schedule: AdvisorMissionSchedule | None = None,
+    *,
+    days_in_campaign: float = 0.0,
+) -> list[tuple[datetime, int, str, int]]:
     horizon = start + timedelta(days=days)
     events: list[tuple[datetime, int, str, int]] = []
     calendar = start.date()
@@ -1958,6 +2033,51 @@ def _event_schedule(start: datetime, days: int, checkpoints: Iterable[int]) -> l
         calendar += timedelta(days=1)
     for checkpoint in sorted(set(checkpoints)):
         events.append((start + timedelta(days=checkpoint), 3, "checkpoint", checkpoint))
+    if advisor_schedule is not None:
+        phase = advisor_schedule.next_phase_at
+        repeat_type = advisor_schedule.repeat_type
+        start_month = advisor_schedule.start_month
+        changes = [list(change) for change in advisor_schedule.repeat_changes]
+        if advisor_schedule.phase_active:
+            hours_in_turn = max(24, int((phase - start).total_seconds() / 3600.0) - 24)
+            segment_hours = max(0.0, float(hours_in_turn) - 12.0) / advisor_schedule.resolution_segments_per_phase
+            resolution_delay = 0.25 + segment_hours * (advisor_schedule.resolution_order + 0.5)
+            resolution = start + timedelta(hours=resolution_delay)
+            if resolution <= horizon:
+                resolution_day = max(0, int((resolution - start).total_seconds() // 86400))
+                events.append((resolution, 0, "advisorResolution", resolution_day))
+        while phase <= horizon:
+            if phase < start:
+                phase = _next_mission_phase(
+                    phase,
+                    repeat_type,
+                    advisor_schedule.time_step,
+                    start_month,
+                )
+                continue
+            day = max(0, int((phase - start).total_seconds() // 86400))
+            events.append((phase, 0, "advisorPhase", day))
+            campaign_years = (days_in_campaign + (phase - start).total_seconds() / 86400.0) / 365.2421875
+            for change in changes:
+                threshold, updated_type, triggered = change
+                if not triggered and campaign_years > float(threshold):
+                    repeat_type = str(updated_type)
+                    start_month = phase.month
+                    change[2] = True
+            following = _next_mission_phase(
+                phase,
+                repeat_type,
+                advisor_schedule.time_step,
+                start_month,
+            )
+            hours_in_turn = max(24, int((following - phase).total_seconds() / 3600.0) - 24)
+            segment_hours = max(0.0, float(hours_in_turn) - 12.0) / advisor_schedule.resolution_segments_per_phase
+            resolution_delay = 0.25 + segment_hours * (advisor_schedule.resolution_order + 0.5)
+            resolution = phase + timedelta(hours=resolution_delay)
+            if resolution <= horizon:
+                resolution_day = max(0, int((resolution - start).total_seconds() // 86400))
+                events.append((resolution, 0, "advisorResolution", resolution_day))
+            phase = following
     return sorted(events, key=lambda row: (row[0], row[1]))
 
 
@@ -1997,11 +2117,15 @@ def run_projection(
     details: bool = False,
 ) -> dict[str, Any]:
     state = copy.deepcopy(initial_state)
+    if state.advisor_policy is None:
+        state.advisor_policy = state.advisors
+    defer_advisors = state.advisor_mission_schedule is not None
     state.metric_tracker = MetricDependencyTracker()
     _seed_metric_evidence(state, context)
     coverage = priority_coverage(context.priorities)
     unsupported, preflight = _projection_preflight(state, plan, context, coverage)
-    _apply_segment(state, plan.segments[0])
+    _apply_segment(state, plan.segments[0], defer_advisors=defer_advisors)
+    current_phase_uses_policy = plan.segments[0].advisors is not None
     _refresh_advisor_evidence(state)
     initial_metrics = _metrics(state, context)
     if unsupported:
@@ -2028,14 +2152,20 @@ def run_projection(
         }
     segment_index = 0
     transitions: list[dict[str, Any]] = [{"day": 0, "from": None, "to": 0, "reason": "planStart"}]
-    advisor_transitions: list[dict[str, Any]] = [{"day": 0, "advisors": [item.output() for item in state.advisors]}]
+    advisor_transitions: list[dict[str, Any]] = [{"day": 0, "reason": "activeAtStart", "advisors": [item.output() for item in state.advisors]}]
+    advisor_policy_transitions: list[dict[str, Any]] = [{
+        "day": 0,
+        "reason": "planStart",
+        "advisors": [item.output() for item in (state.advisor_policy or ())],
+    }]
     while segment_index < len(plan.segments) - 1 and _segment_met(plan.segments[segment_index], 0, _metrics(state, context), initial_metrics):
         prior = segment_index
         segment_index += 1
-        _apply_segment(state, plan.segments[segment_index])
+        _apply_segment(state, plan.segments[segment_index], defer_advisors=defer_advisors)
+        current_phase_uses_policy = current_phase_uses_policy or plan.segments[segment_index].advisors is not None
         _refresh_advisor_evidence(state)
         transitions.append({"day": 0, "from": prior, "to": segment_index, "reason": "satisfiedAtStart"})
-        advisor_transitions.append({"day": 0, "advisors": [item.output() for item in state.advisors]})
+        advisor_policy_transitions.append({"day": 0, "reason": "satisfiedAtStart", "advisors": [item.output() for item in (state.advisor_policy or ())]})
     transactions: list[dict[str, Any]] = []
     phase_trace: list[dict[str, Any]] = []
     completion_events: list[dict[str, Any]] = []
@@ -2044,7 +2174,18 @@ def run_projection(
     rule_executions: list[dict[str, Any]] = []
     goal_first = {name: (0 if _condition_met(condition, initial_metrics, initial_metrics) else None) for name, condition in goals}
     incomplete_reasons: list[str] = []
-    advisor_used = bool(state.advisors)
+    advisor_used = bool(state.advisors or state.advisor_policy)
+    advisor_renewals: list[dict[str, Any]] = []
+    current_phase_active = bool(state.advisor_mission_schedule and state.advisor_mission_schedule.phase_active)
+    queued_advisors: tuple[AdvisorProfile, ...] = (
+        tuple(state.advisor_policy or ())
+        if current_phase_active and current_phase_uses_policy
+        else state.advisor_current_phase_assignments
+        if current_phase_active
+        else ()
+    )
+    queued_phase_at: datetime | None = state.at if current_phase_active else None
+    current_phase_resolution_pending = current_phase_active
     pending_segment: int | None = None
     runtime_stop: ProjectionRuntimeStop | None = None
     runtime_stop_at: datetime | None = None
@@ -2071,7 +2212,13 @@ def run_projection(
                 "reason": reason,
             })
 
-    for moment, _order, kind, day_value in _event_schedule(state.at, days, checkpoints):
+    for moment, _order, kind, day_value in _event_schedule(
+        state.at,
+        days,
+        checkpoints,
+        state.advisor_mission_schedule,
+        days_in_campaign=initial_state.days_in_campaign,
+    ):
         state.days_in_campaign = initial_state.days_in_campaign + (moment - initial_state.at).total_seconds() / 86400.0
         if kind == "checkpoint":
             checkpoint_rows.append({"day": day_value, "at": moment.isoformat(), **_state_snapshot(state, context)})
@@ -2088,13 +2235,26 @@ def run_projection(
         if kind == "investment":
             investment_day = day_value
             if pending_segment is not None:
-                before = state.advisors
+                before_policy = state.advisor_policy
+                before_active = state.advisors
                 segment_index = pending_segment
                 pending_segment = None
-                _apply_segment(state, plan.segments[segment_index])
+                _apply_segment(state, plan.segments[segment_index], defer_advisors=defer_advisors)
                 _refresh_advisor_evidence(state)
-                if state.advisors != before:
-                    advisor_transitions.append({"day": investment_day, "at": moment.isoformat(), "advisors": [item.output() for item in state.advisors]})
+                if state.advisor_policy != before_policy:
+                    advisor_policy_transitions.append({
+                        "day": investment_day,
+                        "at": moment.isoformat(),
+                        "reason": "segmentPolicy",
+                        "advisors": [item.output() for item in (state.advisor_policy or ())],
+                    })
+                if not defer_advisors and state.advisors != before_active:
+                    advisor_transitions.append({
+                        "day": investment_day,
+                        "at": moment.isoformat(),
+                        "reason": "segmentPolicy",
+                        "advisors": [item.output() for item in state.advisors],
+                    })
         working = copy.deepcopy(state)
         try:
             if kind == "investment":
@@ -2114,8 +2274,70 @@ def run_projection(
                     at=moment,
                     quarterly=moment.month in {1, 4, 7, 10},
                 )
-            else:
+            elif kind == "rest":
                 transaction = _refresh_rest_caches(working, context, investment_day, at=moment)
+            elif kind == "advisorPhase":
+                queued_advisors = tuple(working.advisor_policy or ())
+                queued_phase_at = moment
+                working.advisors = ()
+                _refresh_advisor_evidence(working)
+                transaction = {
+                    "kind": "advisorMissionPhase",
+                    "day": day_value,
+                    "at": moment.isoformat(),
+                    "segmentIndex": segment_index,
+                    "mechanicRules": [Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id],
+                    "ruleExecutions": [{
+                        "ruleId": Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+                        "effectiveCoverage": "expected",
+                        "inputs": ["internal.advisorPolicy", "save.CouncilorMissionUpdate"],
+                        "outputs": ["internal.advisorAdministration", "internal.advisorScience"],
+                    }],
+                    "mutationTrace": [{"operation": "clearAdvisingCouncilors"}],
+                    "completions": [],
+                }
+            elif kind == "advisorResolution":
+                working.advisors = queued_advisors
+                _refresh_advisor_evidence(working)
+                schedule = working.advisor_mission_schedule
+                cost_each = schedule.influence_cost if schedule is not None else 0.0
+                prepaid_ids = working.advisor_assignment_prepaid_ids if current_phase_resolution_pending else frozenset()
+                payable_count = sum(
+                    1
+                    for advisor in queued_advisors
+                    if advisor.councilor_id is None or advisor.councilor_id not in prepaid_ids
+                )
+                renewal = {
+                    "phaseAt": queued_phase_at.isoformat() if queued_phase_at is not None else None,
+                    "resolvedAt": moment.isoformat(),
+                    "day": day_value,
+                    "advisors": [item.output() for item in queued_advisors],
+                    "successChance": 1.0,
+                    "movementRule": schedule.movement_rule if schedule is not None else None,
+                    "movementTiming": "assignment",
+                    "travelTimeDays": 0.0,
+                    "influenceCost": cost_each * payable_count,
+                    "costChargedAt": queued_phase_at.isoformat() if queued_phase_at is not None else None,
+                }
+                if queued_advisors:
+                    advisor_renewals.append(renewal)
+                transaction = {
+                    "kind": "advisorMissionResolution",
+                    "day": day_value,
+                    "at": moment.isoformat(),
+                    "segmentIndex": segment_index,
+                    "mechanicRules": [Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id],
+                    "ruleExecutions": [{
+                        "ruleId": Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+                        "effectiveCoverage": "expected",
+                        "inputs": ["internal.advisorPolicy", "save.CouncilorMissionUpdate"],
+                        "outputs": ["internal.advisorAdministration", "internal.advisorScience"],
+                    }],
+                    "mutationTrace": [{"operation": "applyAdvise", "advisorCount": len(queued_advisors)}],
+                    "completions": [],
+                }
+            else:
+                raise AssertionError(f"Unhandled projection event kind: {kind}")
         except ProjectionRuntimeStop as exc:
             runtime_stop = exc
             runtime_stop_at = moment
@@ -2137,6 +2359,16 @@ def run_projection(
                 coverage_resolver_id=execution.get("coverageResolverId"),
             )
         state = working
+        if kind == "advisorPhase":
+            advisor_transitions.append({"day": day_value, "at": moment.isoformat(), "reason": "missionPhaseClear", "advisors": []})
+        elif kind == "advisorResolution":
+            advisor_transitions.append({
+                "day": day_value,
+                "at": moment.isoformat(),
+                "reason": "adviseResolved",
+                "advisors": [item.output() for item in state.advisors],
+            })
+            current_phase_resolution_pending = False
         transactions.append(transaction)
         completion_events.extend(transaction.get("completions", []))
         used.update(transaction.get("mechanicRules", []))
@@ -2149,13 +2381,21 @@ def run_projection(
             })
         evaluate_boundary(
             investment_day,
-            "conditionSatisfiedAfterInvestmentTransaction" if kind == "investment" else "conditionSatisfiedAfterPeriodicTransaction",
+            (
+                "conditionSatisfiedAfterInvestmentTransaction"
+                if kind == "investment"
+                else "conditionSatisfiedAfterAdvisorMission"
+                if kind in {"advisorPhase", "advisorResolution"}
+                else "conditionSatisfiedAfterPeriodicTransaction"
+            ),
             moment,
         )
         condition_phase = {
             "monthly": "condition.afterMonthly",
             "investment": "condition.afterInvestment",
             "rest": "condition.afterRest",
+            "advisorPhase": "condition.afterAdvisorPhase",
+            "advisorResolution": "condition.afterAdvisorResolution",
         }[kind]
         phase_trace.append({
             "at": moment.isoformat(),
@@ -2215,6 +2455,17 @@ def run_projection(
         "lastAuthoritativeState": state_snapshot,
         "segmentTransitions": transitions,
         "advisorTransitions": advisor_transitions,
+        "advisorPolicyTransitions": advisor_policy_transitions,
+        "advisorMissionProjection": ({
+            "timing": "expectedResolutionOrder",
+            "successChance": 1.0,
+            "movementRule": state.advisor_mission_schedule.movement_rule,
+            "movementTiming": "assignment",
+            "travelTimeDays": 0.0,
+            "renewalCount": len(advisor_renewals),
+            "totalInfluenceCost": sum(float(row["influenceCost"]) for row in advisor_renewals),
+            "renewals": advisor_renewals,
+        } if state.advisor_mission_schedule is not None else None),
         "completionEvents": completion_events,
         "checkpoints": checkpoint_rows,
         "goalResults": [{"name": name, "met": goal_first[name] is not None, "firstMetDay": goal_first[name]} for name, _ in goals],
@@ -2250,6 +2501,8 @@ def run_projection(
         "limitations": incomplete_reasons + [
             "Exogenous events, missions, wars, ownership changes and player actions are held fixed.",
             "Population uses a deterministic mean-input trajectory; it is not guaranteed to equal the expectation of all stochastic trajectories.",
+            "Advise is automatic and moves on assignment; within-segment randomized resolution order uses its exact mean timing.",
+            "Advise renewal Influence is reported but future faction resources, target invalidation and competing councilor orders are held fixed.",
         ],
     }
     if details:

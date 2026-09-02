@@ -1,5 +1,36 @@
 {
   "base": {
+    "advisorMission": {
+      "automaticSuccess": true,
+      "cost": {
+        "resource": "Influence",
+        "type": "TIMissionCost_Flat",
+        "value": 10.0
+      },
+      "missionPhaseEvent": {
+        "initialRepeatType": "WeekToMonth",
+        "repeatChanges": [
+          {
+            "campaignYearsGreaterThan": 0.325,
+            "repeatType": "Semimonthly"
+          },
+          {
+            "campaignYearsGreaterThan": 15.0,
+            "repeatType": "EveryThreeWeeksToMonth"
+          },
+          {
+            "campaignYearsGreaterThan": 30.166,
+            "repeatType": "Month"
+          }
+        ],
+        "templateName": "CouncilorMissionUpdate"
+      },
+      "movementRule": "MoveToTarget",
+      "persistentEffect": true,
+      "resolutionOrder": 0,
+      "resolutionSegmentsPerPhase": 5,
+      "templateName": "Advise"
+    },
     "bilateralTemplates": {
       "Alliance2026_AGO2026_SWA": {
         "dataName": "Alliance2026_AGO2026_SWA",
@@ -60495,7 +60526,7 @@
     "name": "build_runtime_catalogs",
     "version": "1"
   },
-  "payloadFingerprint": "992b874388ea7efccb7b512638360be875071b4599c3af0a064e34c6cdb16f00",
+  "payloadFingerprint": "35cbf11a30cef07a18da8b25dcd6769ffc90b5ccb2ac70e123575afa2e97f919",
   "scenarioOverrides": {
     "2003Scenario": {
       "bilateralTemplates": {
@@ -96286,7 +96317,7 @@
     },
     {
       "name": "TerraInvicta_Data/Managed/Assembly-CSharp.dll",
-      "sha256": "5ec67c601a6ce39d985aa9830a99faa9844aee7d7e12ec5e28ea46ff020ba982"
+      "sha256": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5"
     },
     {
       "name": "base/TIBilateralTemplate.json",
@@ -96305,6 +96336,10 @@
       "sha256": "46f48a2466f1ff975f76d959ff9a668f97f199637147c6aa925f85439ec15cba"
     },
     {
+      "name": "base/TIMissionTemplate.json",
+      "sha256": "97c56bde8b2e3c69b79ad838c23808a02d0b7f6b927f64e88a6cf587dfb12067"
+    },
+    {
       "name": "base/TINationTemplate.json",
       "sha256": "1633bf56d634eb52a90807c04e98ef289902a3130b44bafe9617b9760907bd75"
     },
@@ -96315,6 +96350,10 @@
     {
       "name": "base/TIStartTimeTemplate.json",
       "sha256": "bff6d95716b36642be7084db2d3fe9b2a6b34de0da9644eeaa986fd366a871b9"
+    },
+    {
+      "name": "base/TITimeEventTemplate.json",
+      "sha256": "44bf3ba6d21a32215ebac2430be8f13cf97ceecd010b8e64d09ea882dbca5e6d"
     }
   ],
   "supportedScenarios": [

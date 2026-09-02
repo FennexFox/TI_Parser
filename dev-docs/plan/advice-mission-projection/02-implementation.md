@@ -51,12 +51,17 @@
 
 ## Progress
 
-- Not started.
+- Completed.
 
 ## Decision log
 
 - Template facts are generated data; cadence and mean-stagger algorithms are Python mechanics.
+- A save opened during mission assignment uses its active Advise orders as the current queue and does not charge their already-spent Influence again.
+- Future policy includes only repeat/permanent assignments unless a plan explicitly supplies `advisors`.
+- Repeat-type transitions reset `startMonth`, matching `TITimeEvent.CheckChangeRepeatTime`.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Generated data now packages automatic resolution, `MoveToTarget`, flat Influence cost, resolution order/segment count, and cadence transitions with source hashes.
+- Runtime separates active effects from desired orders, models phase clear and expected resolution events, and reports success, zero travel duration, costs, transitions, and provenance.
+- Focused lifecycle, open-phase, cadence-transition, catalog, parser-extraction, and registry tests pass.

@@ -52,7 +52,7 @@
 - `TIMissionResolution_Automatic` makes actionable Advise success exactly 100%.
 - `MoveToTarget` changes location during assignment; there is no distance-derived travel duration.
 - `StartofTurnBookkeeping` clears advisors every phase, and repeat orders reapply them after resolution.
-- Random order-0 placement is represented by its exact mean stagger time.
+- Random order-0 placement is represented by the neutral mean stagger time implied by the audited segment spacing.
 
 ## Outcomes / Retrospective
 

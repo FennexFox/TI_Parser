@@ -98,6 +98,33 @@ class RuntimeCatalogTests(unittest.TestCase):
         )
         write_json(self.templates / "TIGlobalConfig.json", {"dataName": "globalConfig"})
         write_json(
+            self.templates / "TIMissionTemplate.json",
+            [
+                {
+                    "dataName": "Advise",
+                    "persistentEffect": True,
+                    "resolutionOrder": 0,
+                    "resolutionMethod": {"$type": "TIMissionResolution_Automatic"},
+                    "movementRule": "MoveToTarget",
+                    "cost": {"$type": "TIMissionCost_Flat", "resourceType": "Influence", "value": 10},
+                },
+                {"dataName": "LateMission", "resolutionOrder": 4},
+            ],
+        )
+        write_json(
+            self.templates / "TITimeEventTemplate.json",
+            [{
+                "dataName": "CouncilorMissionUpdate",
+                "eventType": "WeekToMonth",
+                "repeatChanges": [
+                    {
+                        "triggerCondition": {"$type": "TIGlobalCondition_fCampaignDuration_years", "strValue": "0.325"},
+                        "updateEventType": "Semimonthly",
+                    },
+                ],
+            }],
+        )
+        write_json(
             self.templates / "TINationTemplate.json",
             [
                 {"dataName": "ModernNation"},
@@ -300,6 +327,23 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.assertEqual(broken["globalConfig"]["controlPointIPFactor"]["value"], 0.62)
         self.assertEqual(broken["globalConfig"]["nationalInvestmentArmyFactorHome"]["value"], 0.2)
         self.assertEqual(broken["globalConfig"]["numPrioritiesForLegitimize"]["value"], 100)
+        self.assertEqual(
+            modern["advisorMission"],
+            {
+                "templateName": "Advise",
+                "automaticSuccess": True,
+                "movementRule": "MoveToTarget",
+                "persistentEffect": True,
+                "resolutionOrder": 0,
+                "resolutionSegmentsPerPhase": 2,
+                "cost": {"type": "TIMissionCost_Flat", "resource": "Influence", "value": 10.0},
+                "missionPhaseEvent": {
+                    "templateName": "CouncilorMissionUpdate",
+                    "initialRepeatType": "WeekToMonth",
+                    "repeatChanges": [{"campaignYearsGreaterThan": 0.325, "repeatType": "Semimonthly"}],
+                },
+            },
+        )
 
         envelope = json.loads((self.output / "nation_development_catalog.json").read_text(encoding="utf-8"))
         source_names = {source["name"] for source in envelope["sourceFiles"]}
@@ -309,6 +353,8 @@ class RuntimeCatalogTests(unittest.TestCase):
                 "base/TIRegionTemplate.json",
                 "base/TIMapRegionTemplate.json",
                 "base/TIStartTimeTemplate.json",
+                "base/TIMissionTemplate.json",
+                "base/TITimeEventTemplate.json",
                 "2003Scenario/TINationTemplate.json",
                 "2003Scenario/TIRegionTemplate.json",
                 "2003Scenario/TIStartTimeTemplate.json",

@@ -121,6 +121,22 @@ def state(*, pips=None, cp_count=1, progress=None, advisors=(), at=None, annual_
     )
 
 
+def advisor_schedule(next_phase_at, *, phase_active=False, repeat_changes=(), start_month=1):
+    return projection.AdvisorMissionSchedule(
+        next_phase_at=next_phase_at,
+        repeat_type="Semimonthly",
+        time_step=1,
+        start_month=start_month,
+        resolution_segments_per_phase=5,
+        resolution_order=0,
+        automatic_success=True,
+        movement_rule="MoveToTarget",
+        influence_cost=10.0,
+        repeat_changes=repeat_changes,
+        phase_active=phase_active,
+    )
+
+
 class NationProjectionPlanTests(unittest.TestCase):
     @mechanic_rule_test(Rules.NATION_ADVISOR_ATTRIBUTE_SOURCE.id, evidence="stateTransition")
     def test_saved_and_virtual_advisor_validation(self):
@@ -176,6 +192,90 @@ class NationProjectionTransactionTests(unittest.TestCase):
         initial.economy_score = 1.0
         initial.unrest = 0
         self.assertAlmostEqual(projection._base_ip(initial, context()), 1.25)
+
+    @mechanic_rule_test(Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id, evidence="expectedValue")
+    def test_repeated_advise_uses_phase_clear_and_expected_resolution(self):
+        initial = state(at=datetime(2030, 1, 2))
+        initial.advisor_mission_schedule = advisor_schedule(datetime(2030, 1, 16, 12))
+        advisor = projection.AdvisorProfile("virtual", "admin", 20, 0)
+        plan = projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, (advisor,)),))
+
+        result = projection.run_projection(initial, plan, context(), days=32, details=True)
+
+        renewals = result["advisorMissionProjection"]["renewals"]
+        self.assertEqual(len(renewals), 2)
+        self.assertEqual(result["advisorMissionProjection"]["totalInfluenceCost"], 20.0)
+        self.assertEqual(renewals[0]["successChance"], 1.0)
+        self.assertEqual(renewals[0]["movementRule"], "MoveToTarget")
+        self.assertEqual(renewals[0]["travelTimeDays"], 0.0)
+        self.assertEqual(renewals[0]["phaseAt"], "2030-01-16T12:00:00")
+        self.assertEqual(renewals[0]["resolvedAt"], "2030-01-17T21:51:00")
+
+        investments = {row["at"]: row for row in result["transactions"] if row["kind"] == "investment"}
+        base_ip = (1000.0 ** 0.35) * 0.9
+        self.assertAlmostEqual(investments["2030-01-17T10:30:00"]["baseInvestmentPointsMonth"], base_ip)
+        self.assertAlmostEqual(investments["2030-01-18T10:30:00"]["baseInvestmentPointsMonth"], base_ip * 1.2)
+        reasons = [row["reason"] for row in result["advisorTransitions"]]
+        self.assertIn("missionPhaseClear", reasons)
+        self.assertIn("adviseResolved", reasons)
+        self.assertIn("expectedMissionTiming", result["metricCoverage"]["nation.baseInvestmentPointsMonth"]["provenance"])
+
+    def test_mission_phase_recurrence_matches_audited_calendar(self):
+        self.assertEqual(
+            projection._next_mission_phase(datetime(2030, 1, 1), "Semimonthly", 1, 1),
+            datetime(2030, 1, 16, 12),
+        )
+        self.assertEqual(
+            projection._next_mission_phase(datetime(2030, 1, 22, 18), "WeekToMonth", 1, 1),
+            datetime(2030, 2, 1),
+        )
+        self.assertEqual(
+            projection._next_mission_phase(datetime(2030, 1, 22), "EveryThreeWeeksToMonth", 1, 1),
+            datetime(2030, 2, 16),
+        )
+
+    def test_repeat_change_resets_start_month_for_three_week_cadence(self):
+        schedule = advisor_schedule(
+            datetime(2045, 1, 16, 12),
+            start_month=3,
+            repeat_changes=((15.0, "EveryThreeWeeksToMonth", False),),
+        )
+
+        events = projection._event_schedule(
+            datetime(2045, 1, 2),
+            50,
+            (),
+            schedule,
+            days_in_campaign=15.0 * 365.2421875 + 1,
+        )
+        phases = [moment for moment, _order, kind, _day in events if kind == "advisorPhase"]
+
+        self.assertEqual(
+            phases[:3],
+            [datetime(2045, 1, 16, 12), datetime(2045, 1, 22), datetime(2045, 2, 16)],
+        )
+
+    def test_open_mission_phase_resolves_prepaid_assignment_before_next_phase(self):
+        advisor = projection.AdvisorProfile("saved", "advisor", 20, 0, 42)
+        initial = state(at=datetime(2030, 1, 1))
+        initial.advisors = ()
+        initial.advisor_policy = (advisor,)
+        initial.advisor_current_phase_assignments = (advisor,)
+        initial.advisor_assignment_prepaid_ids = frozenset({42})
+        initial.advisor_mission_schedule = advisor_schedule(datetime(2030, 1, 16, 12), phase_active=True)
+        plan = projection.PriorityPlan("current", (projection.PlanSegment(None, None, None, None),))
+
+        result = projection.run_projection(initial, plan, context(), days=3, details=True)
+
+        renewal = result["advisorMissionProjection"]["renewals"][0]
+        self.assertEqual(renewal["phaseAt"], "2030-01-01T00:00:00")
+        self.assertEqual(renewal["resolvedAt"], "2030-01-02T09:51:00")
+        self.assertEqual(renewal["day"], 1)
+        self.assertEqual(renewal["influenceCost"], 0.0)
+        investments = {row["at"]: row for row in result["transactions"] if row["kind"] == "investment"}
+        base_ip = (1000.0 ** 0.35) * 0.9
+        self.assertAlmostEqual(investments["2030-01-01T10:30:00"]["baseInvestmentPointsMonth"], base_ip)
+        self.assertAlmostEqual(investments["2030-01-02T10:30:00"]["baseInvestmentPointsMonth"], base_ip * 1.2)
 
     @mechanic_rule_test(Rules.NATION_IP_ECONOMY_SCORE.id, evidence="expectedValue")
     def test_economy_score_recomputes_from_literal_gdp(self):

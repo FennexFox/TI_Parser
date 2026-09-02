@@ -821,6 +821,58 @@ def _nation_development_payload(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _advisor_mission_payload(templates_dir: Path) -> dict[str, Any]:
+    mission_path = templates_dir / "TIMissionTemplate.json"
+    event_path = templates_dir / "TITimeEventTemplate.json"
+    mission_rows = index_raw_rows(mission_path)
+    event_rows = index_raw_rows(event_path)
+    advise = mission_rows.get("Advise")
+    mission_event = event_rows.get("CouncilorMissionUpdate")
+    if not isinstance(advise, dict) or not isinstance(mission_event, dict):
+        raise CatalogError("Advise or CouncilorMissionUpdate template is missing")
+    resolution = advise.get("resolutionMethod")
+    cost = advise.get("cost")
+    if not isinstance(resolution, dict) or not isinstance(cost, dict):
+        raise CatalogError("Advise resolution or cost template is invalid")
+    orders = {
+        float(row.get("resolutionOrder", 0))
+        for row in mission_rows.values()
+        if isinstance(row.get("resolutionOrder", 0), (int, float))
+        and not isinstance(row.get("resolutionOrder", 0), bool)
+    }
+    repeat_changes = []
+    for change in mission_event.get("repeatChanges") or []:
+        condition = change.get("triggerCondition") if isinstance(change, dict) else None
+        if not isinstance(condition, dict):
+            continue
+        try:
+            threshold = float(condition.get("strValue"))
+        except (TypeError, ValueError):
+            raise CatalogError("CouncilorMissionUpdate repeat threshold is invalid") from None
+        repeat_changes.append({
+            "campaignYearsGreaterThan": threshold,
+            "repeatType": str(change.get("updateEventType") or ""),
+        })
+    return {
+        "templateName": "Advise",
+        "automaticSuccess": resolution.get("$type") == "TIMissionResolution_Automatic",
+        "movementRule": advise.get("movementRule"),
+        "persistentEffect": bool(advise.get("persistentEffect")),
+        "resolutionOrder": int(advise.get("resolutionOrder", 0)),
+        "resolutionSegmentsPerPhase": len(orders),
+        "cost": {
+            "type": cost.get("$type"),
+            "resource": cost.get("resourceType"),
+            "value": float(cost.get("value", 0.0)),
+        },
+        "missionPhaseEvent": {
+            "templateName": "CouncilorMissionUpdate",
+            "initialRepeatType": mission_event.get("eventType"),
+            "repeatChanges": repeat_changes,
+        },
+    }
+
+
 def build_nation_development_catalog(
     templates_dir: Path,
     scenario_dirs: dict[str, Path],
@@ -829,6 +881,7 @@ def build_nation_development_catalog(
 ) -> dict[str, Any]:
     config_path = templates_dir / "TIGlobalConfig.json"
     base = _nation_development_payload(_global_config(config_path))
+    base["advisorMission"] = _advisor_mission_payload(templates_dir)
     base_template_rows: dict[str, dict[str, dict[str, Any]]] = {}
     for collection, (filename, fields, compiled_defaults) in NATION_DEVELOPMENT_TEMPLATE_FIELDS.items():
         rows = index_raw_rows(templates_dir / filename)
@@ -836,6 +889,8 @@ def build_nation_development_catalog(
         base[collection] = normalized_development_collection(rows, fields, compiled_defaults)
     sources = [
         source_entry(config_path, "base/TIGlobalConfig.json"),
+        source_entry(templates_dir / "TIMissionTemplate.json", "base/TIMissionTemplate.json"),
+        source_entry(templates_dir / "TITimeEventTemplate.json", "base/TITimeEventTemplate.json"),
         *scenario_metadata_sources(templates_dir, scenario_dirs),
     ]
     for filename, _fields, _compiled_defaults in NATION_DEVELOPMENT_TEMPLATE_FIELDS.values():
