@@ -1,6 +1,9 @@
 # Parser runtime data
 .ti_cache/
 
+# ChatGPT connector
+.chatgpt/
+
 # Python caches, coverage, and local environments
 __pycache__/
 *.py[cod]
