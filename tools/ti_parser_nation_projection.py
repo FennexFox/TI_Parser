@@ -271,6 +271,7 @@ class NationProjectionState:
     pcgdp_tracker: dict[int, float] = field(default_factory=dict)
     military: bool = False
     space_flight_program: bool = False
+    federation_space_program: bool | None = False
     nuclear_program: bool = False
     can_build_space_defenses: bool = False
     can_build_sto: bool = False
@@ -795,7 +796,7 @@ def _priority_valid(state: NationProjectionState, priority: str, context: Projec
         ocean_types = [region.ocean_type for region in state.regions.values()]
         coastal_regions = (
             sum(ocean_type in {"Yes", "Seasonal"} for ocean_type in ocean_types)
-            if all(ocean_type in {"No", "None", "Yes", "Seasonal"} for ocean_type in ocean_types)
+            if all(isinstance(ocean_type, str) and ocean_type in {"No", "None", "Yes", "Seasonal"} for ocean_type in ocean_types)
             else None
         )
     per_capita_gdp = state.gdp / (state.population_millions * 1_000_000.0) if state.population_millions else 0.0
@@ -806,6 +807,7 @@ def _priority_valid(state: NationProjectionState, priority: str, context: Projec
         "gdp": state.gdp,
         "spaceFlightProgram": state.space_flight_program,
         "missionControlHasCapacity": mission_control_capacity,
+        "federationSpaceProgram": state.federation_space_program,
         "allowedArmies": allowed_armies,
         "currentArmies": len(state.standard_armies),
         "canBuildNavy": can_build_navy({

@@ -8440,6 +8440,23 @@ def first_control_point(indexed: IndexedState, nation: dict[str, Any]) -> dict[s
     return points[0] if points else None
 
 
+def federation_space_program(indexed: IndexedState, nation: dict[str, Any]) -> bool | None:
+    """TIFederationState.SetSpaceProgramValue: any member has spaceflight."""
+    reference = nation.get("federation")
+    if reference is None:
+        return False
+    federation = state_value_by_id(indexed, ref_id(reference))
+    if not isinstance(federation, dict) or not isinstance(federation.get("members"), list):
+        return None
+    values = []
+    for member_ref in federation["members"]:
+        member = state_value_by_id(indexed, ref_id(member_ref))
+        values.append(member.get("spaceFlightProgram") if isinstance(member, dict) else None)
+    if any(value is True for value in values):
+        return True
+    return False if all(value is False for value in values) else None
+
+
 def _nation_ui_priority_validity(
     indexed: IndexedState,
     nation: dict[str, Any],
@@ -8511,7 +8528,7 @@ def _nation_ui_priority_validity(
     ocean_types = [region.get("oceanType") for region in region_values]
     coastal_regions = (
         sum(ocean_type in {"Yes", "Seasonal"} for ocean_type in ocean_types)
-        if regions_complete and all(ocean_type in {"No", "None", "Yes", "Seasonal"} for ocean_type in ocean_types)
+        if regions_complete and all(isinstance(ocean_type, str) and ocean_type in {"No", "None", "Yes", "Seasonal"} for ocean_type in ocean_types)
         else None
     )
     build_navy = can_build_navy({
@@ -8532,6 +8549,7 @@ def _nation_ui_priority_validity(
         "gdp": nation.get("GDP"),
         "spaceFlightProgram": nation.get("spaceFlightProgram") if isinstance(nation.get("spaceFlightProgram"), bool) else None,
         "missionControlHasCapacity": mission_capacity,
+        "federationSpaceProgram": federation_space_program(indexed, nation),
         "allowedArmies": allowed_armies if regions_complete else None,
         "currentArmies": current_armies,
         "canBuildNavy": build_navy,
@@ -8691,9 +8709,10 @@ def calculate_nation_ui(
         per_capita_gdp=pc_gdp,
     )
     navy_validity = priority_validity.get("Military_BuildNavy")
-    can_have_navy = navy_validity.valid if navy_validity is not None else None
-    max_navies = allowed_armies if can_have_navy else (0 if can_have_navy is False else None)
-    navies_can_build = max(0, armies["count"] - armies["navies"]) if can_have_navy else (0 if can_have_navy is False else None)
+    can_have_navy = nation_can_have_navy(nation, pc_gdp)
+    max_navies = allowed_armies if can_have_navy else 0
+    can_build = navy_validity.valid if navy_validity is not None else None
+    navies_can_build = max(0, armies["count"] - armies["navies"]) if can_build else (0 if can_build is False else None)
     control_point_weights = _nation_ui_control_point_weights(control_points, priority_validity)
     representative_cp = first_control_point(indexed, nation) or {}
     total_weight = int(as_float(representative_cp.get("totalWeightsForControlPoint"), 0.0))
@@ -9606,6 +9625,7 @@ def extract_nation_projection_state(
         pcgdp_tracker=_serialized_numeric_tracker(indexed, nation.get("tracker_PCGDP_ByQuarter"), field="tracker_PCGDP_ByQuarter", rule_id=Rules.NATION_PERIODIC_DERIVED_CACHE.id),
         military=_required_projection_bool(indexed, nation, "military", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
         space_flight_program=_required_projection_bool(indexed, nation, "spaceFlightProgram", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
+        federation_space_program=federation_space_program(indexed, nation),
         nuclear_program=_required_projection_bool(indexed, nation, "nuclearProgram", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
         can_build_space_defenses=_required_projection_bool(indexed, nation, "canBuildSpaceDefenses", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
         can_build_sto=_required_projection_bool(indexed, nation, "canBuildSTOSquadrons", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),

@@ -1,5 +1,6 @@
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -189,6 +190,23 @@ class ScenarioRuleTests(unittest.TestCase):
         self.assertIsNone(unknown_validity["MissionControl"].valid)
         self.assertIsNone(unknown_diagnostics["consistent"])
         self.assertIn("MissionControl", unknown_diagnostics["unknownPriorities"])
+
+    def test_navy_capacity_survives_no_convertible_armies(self):
+        indexed = self._build_indexed("BrokenEarthScenario")
+        nation = core.state_value_by_id(indexed, 21)
+        nation.update({"military": True, "numControlPoints": 4})
+        core.state_value_by_id(indexed, 41)["oceanType"] = "Yes"
+        with (
+            patch.object(ti, "find_faction_state", return_value=(10, core.state_value_by_id(indexed, 10))),
+            patch.object(ti, "nation_army_details", return_value={
+                "count": 2, "navies": 2, "standardArmies": 0, "navalScore": 0, "armies": [],
+            }),
+            patch.object(ti, "nation_allowed_armies", return_value=2),
+        ):
+            result = ti.calculate_nation_ui(indexed, None, nation["templateName"])
+        self.assertEqual(result["military"]["maxNavies"], 2)
+        self.assertEqual(result["military"]["naviesCanBuild"], 0)
+        self.assertFalse(result["priorities"]["validityByPriority"]["Military_BuildNavy"]["valid"])
 
     def test_nation_ui_build_navy_uses_serialized_ocean_type(self):
         indexed = self._build_indexed("BrokenEarthScenario")

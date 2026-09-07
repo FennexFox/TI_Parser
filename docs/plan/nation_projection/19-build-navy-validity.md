@@ -71,7 +71,9 @@
 - Strict plan validation passed for all 19 phase files.
 - The opt-in real-save assertion passed against `C:\Users\techn\OneDrive\문서\My Games\TerraInvicta\Saves\ExitSave.gz`; the observed ocean-state distribution was `Yes: 236`, `No: 119`, and `Seasonal: 8`.
 - That run exposed and fixed two independent projection wiring defects: a stale unsupported `hab_module_templates` keyword and a test helper that passed the `(bonuses, baseBonuses)` tuple where extraction requires the first mapping.
-- The complete opt-in real-save suite still has a pre-existing `MissionControl` completion-event expectation that does not hold for this save; it is outside this phase's BuildNavy scope.
+- Final review found that MissionControl also accepts a federation space program. DLL `ValidPriority` and `TIFederationState.SetSpaceProgramValue` confirm that any member's spaceflight program qualifies. UI and projection now share this derived input; unresolved references remain unknown. External member state is held fixed during projection.
+- Restored the separate maximum-navy capacity calculation and added a public UI regression for a nation with only naval armies.
+- Final validation: general suite `289 passed, 12 skipped, 25 subtests passed`; full opt-in ExitSave suite `11 passed, 16 subtests passed`; strict plan validation and diff whitespace checks passed.
 
 ## Decision log
 

@@ -115,6 +115,11 @@ def evaluate_priority_validity(priority: str, view: Mapping[str, Any]) -> Priori
         return PriorityValidityResult(valid, "funding remains below its GDP-derived cap" if valid else "funding reached its GDP-derived cap")
     if priority == "MissionControl":
         program = _boolean(view, "spaceFlightProgram")
+        federation = _boolean(view, "federationSpaceProgram")
+        if federation is True:
+            program = True
+        elif program is False and federation is None:
+            return _unknown("federationSpaceProgram")
         candidate = _boolean(view, "missionControlHasCapacity")
         if program is None or candidate is None:
             return _unknown(*(

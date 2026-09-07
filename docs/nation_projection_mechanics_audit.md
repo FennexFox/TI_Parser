@@ -245,6 +245,13 @@ comes from serialized `TIRegionState.oceanType`; `Yes` and `Seasonal` match
 in UI and fail closed during projection extraction. BuildNavy completion itself
 remains unsupported.
 
+MissionControl accepts either the nation's own spaceflight program or its
+federation's program. `TIFederationState.SetSpaceProgramValue` derives that flag
+from `members.Any(x => x.spaceFlightProgram)`. Missing federation/member data
+stays unknown unless a known program already satisfies the predicate. External
+member programs are held fixed during the projection horizon. Maximum navy
+capacity remains separate from current BuildNavy action eligibility.
+
 ## User-facing transaction and metric semantics
 
 - All allocations, completions, and immediate downstream effects in one game

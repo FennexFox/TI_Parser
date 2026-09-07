@@ -31,6 +31,12 @@ class NationPriorityValidityTests(unittest.TestCase):
         self.assertIsNone(result.valid)
         self.assertEqual(result.dependencies[0]["field"], "missionControlHasCapacity")
 
+    def test_mission_control_can_use_federation_space_program(self):
+        view = {"spaceFlightProgram": False, "missionControlHasCapacity": True}
+        self.assertTrue(evaluate_priority_validity("MissionControl", {**view, "federationSpaceProgram": True}).valid)
+        self.assertFalse(evaluate_priority_validity("MissionControl", {**view, "federationSpaceProgram": False}).valid)
+        self.assertIsNone(evaluate_priority_validity("MissionControl", view).valid)
+
     def test_capability_priorities(self):
         self.assertTrue(evaluate_priority_validity("Military_FoundMilitary", {"military": False}).valid)
         self.assertTrue(evaluate_priority_validity("Military_InitiateNuclearProgram", {"military": True, "nuclearProgram": False}).valid)

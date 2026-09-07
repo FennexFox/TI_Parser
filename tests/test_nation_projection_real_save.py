@@ -284,7 +284,7 @@ class NationProjectionRealSaveTests(unittest.TestCase):
         state, context, development = self._projection_state_context()
 
         mc_candidates = self._expected_mc_candidates(state, context)
-        if len(mc_candidates) == 1:
+        if len(mc_candidates) == 1 and projection._priority_valid(state, "MissionControl", context):
             mc_plan = self._all_cp_plan(
                 "mc-knowledge", {"MissionControl": 2, "Knowledge": 1}, days=365, details=True
             )
