@@ -1,0 +1,75 @@
+# Phase 02: Scenario rules and DLC template overlays
+
+## Goal
+
+- Make parser calculations and template lookup scenario-aware without changing standard campaigns.
+
+## Scope
+
+- Scenario identity helpers and DLC template-source resolution.
+- Base-plus-overlay named-template merging and cache fingerprinting.
+- Broken Earth army cost and CP-maintenance multiplier.
+- Campaign customization scaling and public-opinion Influence effects.
+
+## Non-goals
+
+- Recompute save-owned values such as base national investment-point production.
+- Model global rules not consumed by an existing parser output.
+
+## Affected files
+
+- `tools/ti_parser_core.py`
+- `tools/ti_parser_cli.py`
+- `tools/ti_parser_snapshot.py`
+- `tools/ti_save_parser.py`
+- focused unit tests
+
+## Implementation steps
+
+- Add canonical scenario and template-source helpers.
+- Merge named templates in base-to-scenario order.
+- Add an immutable scenario-rule profile and apply it to nation calculations.
+- Apply the active national IP multiplier and Influence effect context.
+- Expose scenario/template provenance in parser output and cache identity.
+
+## Acceptance criteria
+
+- Standard and 2003 army costs remain 60; Broken Earth is 40.
+- Custom national IP multiplier scales all priority costs exactly once.
+- Broken Earth CP usage uses the save's campaign-start GDP scale and is then multiplied
+  by 0.7 before cap/overage calculations.
+- Scenario-only tech/project/effect templates resolve from the active DLC overlay.
+- 2003/BE public-opinion Influence modifiers affect nation income.
+
+## Validation commands
+
+- `python -m unittest discover -s tests -v`
+
+## Manual smoke tests
+
+- `python -m tools.ti_parser_cli --help`
+
+## Rollback risks
+
+- Reverting only part of the template-source changes can desynchronize cache identity from reads.
+
+## Progress
+
+- Complete.
+
+## Decision log
+
+- Named templates are merged base-first and selected-scenario-second by `dataName`.
+- Known Dark Skies paths are fast-path hints; `TIMetaTemplate.json` discovery is the fallback.
+- Only values not already represented in saved calculated fields are overridden in parser math.
+- Cache schema version is 5 and records every selected template directory.
+
+## Outcomes / Retrospective
+
+- The CLI resolves scenario template sources once from the save before dispatch.
+- Nation UI exposes the active scenario rule profile and applies BE army cost 40.
+- Topbar CP usage applies the BE 0.7 start-time multiplier. Phase 4 corrects the missing
+  campaign-start GDP scale in the same calculation.
+- Priority costs honor an enabled positive `nationalIPMultiplier`.
+- Public-opinion Influence now consumes the active saved effect names and selected scenario definitions.
+- Snapshot time metadata retains master and scenario template names.

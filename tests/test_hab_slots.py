@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -115,9 +116,11 @@ class HabSlotSummaryTests(unittest.TestCase):
         else:
             self.assertTrue(records[-1]["sectorOwnedByHabFaction"])
 
-        result = ti.calculate_hab_slots(indexed, None, "ResistCouncil", include_all=True)
+        with patch.object(ti, "load_hab_module_catalog", return_value=templates):
+            result = ti.calculate_hab_slots(indexed, None, "ResistCouncil", include_all=True)
         self.assertEqual(result["habs"][0]["slots"], expected)
-        filtered = ti.calculate_hab_slots(indexed, None, "ResistCouncil", include_all=False)
+        with patch.object(ti, "load_hab_module_catalog", return_value=templates):
+            filtered = ti.calculate_hab_slots(indexed, None, "ResistCouncil", include_all=False)
         self.assertEqual(len(filtered["habs"]), 1 if expected["empty"] > 0 else 0)
 
     def test_t1_outpost_future_placeholders_are_locked(self):

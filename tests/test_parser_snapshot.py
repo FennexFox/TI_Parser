@@ -40,6 +40,8 @@ class ParserSnapshotTests(unittest.TestCase):
                         "Value": {
                             "ID": {"value": 1},
                             "templateName": "TITimeState",
+                            "masterMetaTemplateName": "TerraInvictaScenario",
+                            "scenarioMetaTemplateName": "BrokenEarthScenario",
                             "daysInCampaign": 12,
                             "currentQuarterSinceStart": 3,
                             "currentDateTime": {"year": 2035, "month": 6, "day": 2},
@@ -108,6 +110,8 @@ class ParserSnapshotTests(unittest.TestCase):
             self.assertEqual(wrapped["schemaVersion"], ti.SCHEMA_VERSION)
             self.assertEqual(wrapped["currentID"], 42)
             self.assertEqual(wrapped["time"]["daysInCampaign"], 12)
+            self.assertEqual(wrapped["time"]["masterMetaTemplateName"], "TerraInvictaScenario")
+            self.assertEqual(wrapped["time"]["scenarioMetaTemplateName"], "BrokenEarthScenario")
             self.assertEqual(wrapped["metadata"]["playerFactionName"], "Resistance")
             self.assertEqual(wrapped["global"]["nuclearStrikes"], 1)
             self.assertEqual(wrapped["factions"][0]["template"], "ResistCouncil")

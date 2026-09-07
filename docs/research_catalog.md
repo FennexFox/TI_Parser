@@ -10,12 +10,18 @@ python .\tools\build_research_catalog.py
 
 Important interpretation notes:
 
+- Schema version `2` packages strict runtime rows under `base.techs` and `base.projects` while retaining the legacy graph views below.
+- Payload fingerprint: `e4e1275eb46f1de57a5e1e41fe1722efa65d7e9256f3086d6e56964533b21aca`.
+- Supported scenarios: `2003Scenario`, `2026Scenario`, `2030Scenario`, `2070Scenario`, `BrokenEarthScenario`, `FullScenario`, `ModernScenario`, `SkirmishModeScenario`, `SkirmishScenario`, `TestScenario`.
+- Scenario overrides are sparse row maps merged only after an exact supported-scenario match; unsupported scenarios do not inherit base data.
 - `requirements` in the JSON is the canonical source for prerequisite logic.
 - `prerequisiteNodes` and `edges` are derived from research-node leaves only and intentionally omit objective, milestone, faction, and nation gates.
 - `altPrereq0` is represented as an OR alternative for the first `prereqs` entry.
+- Disabled projects are excluded from the legacy candidate graph but retained in `base.projects` for strict save-reference diagnostics.
 
 Node count: `867` total, `149` global techs, `718` projects.
-Graph edge count: `1720`.
+Runtime row count: `149` techs, `750` projects.
+Graph edge count: `1718`.
 
 ## Global Techs
 
@@ -30,7 +36,7 @@ Graph edge count: `1720`.
 | 자기력 조작 | MagneticForceManipulation | tech | Energy | 2500 | AdvancedMagnetics |
 | 정전기 추진 | ElectrostaticPropulsion | tech | Energy | 3000 | DeepSpacePropulsionConcepts + VacuumElectrostaticPrinciples |
 | 입자 광선 | ParticleCannon | tech | Energy | 5000 | VacuumElectrostaticPrinciples + HighEnergyLasers |
-| 고제 노심 핵분열 시스템 | SolidCoreFissionSystems | tech | Energy | 5000 | NuclearFissioninSpace |
+| 고체 노심 핵분열 시스템 | SolidCoreFissionSystems | tech | Energy | 5000 | NuclearFissioninSpace |
 | 반물질 격납 | AntimatterContainment | tech | Energy | 10000 | AdvancedHydrogenContainment + AdvancedAtomicManipulation |
 | 용융 노심 핵분열 시스템 | MoltenCoreFissionSystems | tech | Energy | 10000 | SolidCoreFissionSystems + AdvancedCarbonManipulation |
 | 정전기 플라즈마 가둠 | ElectrostaticPlasmaConfinement | tech | Energy | 15000 | NuclearFusioninSpace + VacuumElectrostaticPrinciples |
@@ -60,7 +66,7 @@ Graph edge count: `1720`.
 | 자가 수리 소프트웨어 | SelfRepairingSoftware | tech | InformationScience | 10000 | AdvancedNeuralNetworks |
 | 양자 컴퓨팅 | QuantumComputing | tech | InformationScience | 15000 | AdvancedAtomicManipulation + AdvancedNeuralNetworks + AdvancedHeatManagementConcepts |
 | 양자 암호화 | QuantumEncryption | tech | InformationScience | 20000 | QuantumComputing + SelfRepairingSoftware |
-| 적응 인공지능 | AppliedArtificialIntelligence | tech | InformationScience | 25000 | AdvancedNeuralNetworks + QuantumComputing |
+| 적응 인공지능 | AppliedArtificialIntelligence | tech | InformationScience | 25000 | QuantumComputing |
 | 화이트칼라 자동화 | WhiteCollarAutomation | tech | InformationScience | 40000 | ArrivalInternationalDevelopment + SelfRepairingSoftware + AppliedArtificialIntelligence |
 | 관리 알고리즘 | AdministrationAlgorithms | tech | InformationScience | 50000 | WhiteCollarAutomation + QuantumEncryption |
 | 미래 기술: 정보 과학 | FutureTechInformationScience | tech | InformationScience | 100000 |  |
@@ -76,9 +82,9 @@ Graph edge count: `1720`.
 | 변환 파지 | TransformPhages | tech | LifeScience | 10000 | PredictiveGenetics + Cybernetics |
 | 생명체 설계자 | DesignerLifeforms | tech | LifeScience | 30000 | MolecularAssemblers + TransformPhages + ArrivalLaw |
 | 식민 거주지 | ColonyHabs | tech | LifeScience | 35000 | OurSpaceFuture + ExtendedSpaceSurvival + SettlementHabs |
-| 정신 및 기계 | MindandMachine | tech | LifeScience | 35000 | AppliedArtificialIntelligence + Cybernetics + ArrivalPsychology |
-| 링형 거주지 | OrbitalTorusHabs | tech | LifeScience | 35000 | OurSpaceFuture + ExtendedSpaceSurvival + OrbitalRingHabs |
-| 유전자 | Genies | tech | LifeScience | 50000 | TransformPhages + AppliedArtificialIntelligence |
+| 정신 그리고 기계 | MindandMachine | tech | LifeScience | 35000 | AppliedArtificialIntelligence + Cybernetics + ArrivalPsychology |
+| 고리형 거주지 | OrbitalTorusHabs | tech | LifeScience | 35000 | OurSpaceFuture + ExtendedSpaceSurvival + OrbitalRingHabs |
+| 지니 | Genies | tech | LifeScience | 50000 | TransformPhages + AppliedArtificialIntelligence |
 | 기후 변화 완화 | ClimateChangeMitigation | tech | LifeScience | 100000 | DesignerLifeforms + CleanEnergy + AdministrationAlgorithms |
 | 미래 기술: 생명 과학 | FutureTechLifeScience | tech | LifeScience | 100000 |  |
 | 첨단 탄소 조작 | AdvancedCarbonManipulation | tech | Materials | 1000 |  |
@@ -89,7 +95,7 @@ Graph edge count: `1720`.
 | 차세대 항공우주 | NextGenerationAerospace | tech | Materials | 5000 | CarbonNanotubes + AdvancedChemicalRocketry |
 | 초합금 | Superalloys | tech | Materials | 5000 | AdvancedAtomicManipulation |
 | 첨단 원자 조작 | AdvancedAtomicManipulation | tech | Materials | 10000 | AdvancedCarbonManipulation + PhotonicComputing |
-| 슈퍼 커패시터 | Supercapacitors | tech | Materials | 10000 | CarbonNanotubes + AdvancedSuperconductors |
+| 대용량 축전기 | Supercapacitors | tech | Materials | 10000 | CarbonNanotubes + AdvancedSuperconductors |
 | 초전도 자석 | SuperconductingMagnets | tech | Materials | 10000 | MagneticForceManipulation + AdvancedSuperconductors |
 | 다이아몬도이드 | Diamondoids | tech | Materials | 15000 | CarbonNanotubes + MolecularAssemblers |
 | 중성자학 | Neutronics | tech | Materials | 15000 | AdvancedAtomicManipulation + AdvancedNeuralNetworks + ParticleCannon |
@@ -98,14 +104,14 @@ Graph edge count: `1720`.
 | 핵분열 펄서 추진기 | FissionPulseDrives | tech | Materials | 25000 | SolidCoreFissionSystems + CarbonNanotubes + ElectromagneticPropulsion |
 | 분자 조립기 | MolecularAssemblers | tech | Materials | 25000 | QuantumComputing |
 | 고온 초전도체 | HighTemperatureSuperconductors | tech | Materials | 40000 | AdvancedSuperconductors + AdvancedAtomicManipulation + AdvancedHeatManagementConcepts |
-| 울트라 커패시터 | Ultracapacitors | tech | Materials | 40000 | Supercapacitors + MolecularAssemblers |
+| 초고용량 축전기 | Ultracapacitors | tech | Materials | 40000 | Supercapacitors + MolecularAssemblers |
 | 중형 펄서 추진 | HeavyPulsedPropulsion | tech | Materials | 50000 | AdvancedFissionSystems + FissionPulseDrives + ImprovedShipbuildingTechniques |
-| 타이타닉 우주선 | TitanicSpacecraft | tech | Materials | 60000 | FleetLogistics + Diamondoids |
+| 초거대 우주선 | TitanicSpacecraft | tech | Materials | 60000 | FleetLogistics + Diamondoids |
 | 미래 기술: 재료 | FutureTechMaterials | tech | Materials | 100000 |  |
 | 우주 전쟁의 원칙 | PrinciplesofSpaceWarfare | tech | MilitaryScience | 1000 | OrbitalShipbuilding |
-| 지향성 에너지 전투 원칙 | DirectedEnergyWarfareDoctrine | tech | MilitaryScience | 2500 | PrinciplesofSpaceWarfare |
-| 운동성 전투 원칙 | KineticsWarfareDoctrine | tech | MilitaryScience | 2500 | PrinciplesofSpaceWarfare |
-| 미사일 전투 원칙 | MissileWarfareDoctrine | tech | MilitaryScience | 2500 | PrinciplesofSpaceWarfare |
+| 지향성 에너지 전투 교리 | DirectedEnergyWarfareDoctrine | tech | MilitaryScience | 2500 | PrinciplesofSpaceWarfare |
+| 운동성 전투 교리 | KineticsWarfareDoctrine | tech | MilitaryScience | 2500 | PrinciplesofSpaceWarfare |
+| 미사일 전투 교리 | MissileWarfareDoctrine | tech | MilitaryScience | 2500 | PrinciplesofSpaceWarfare |
 | 지상 군사 과학 | TerrestrialMilitaryScience | tech | MilitaryScience | 3000 | WeAreNotAlone |
 | 적외선 전투 레이저 | InfraredCombatLasers | tech | MilitaryScience | 5000 | HighEnergyLasers + DirectedEnergyWarfareDoctrine |
 | 우주 군사화 | MilitarizationofSpace | tech | MilitaryScience | 5000 | PrinciplesofSpaceWarfare |
@@ -337,14 +343,14 @@ Graph edge count: `1720`.
 | 농업 복합단지 | Project_AgricultureComplex | project | LifeScience | 5000 | (Project_RingCore OR Project_ColonyCore) + Project_Farm + DesignerLifeforms |
 | 탄소 재포집 기술 | Project_CarbonRecaptureTechnologies | project | LifeScience | 5000 | ClimateChangeMitigation |
 | 생태 안정화 프로그램 | Project_EcologicalStabilizationPrograms | project | LifeScience | 5000 | DesignerLifeforms |
-| 링형 거주지 코어 | Project_RingCore | project | LifeScience | 5000 | Project_OrbitalCore + OrbitalTorusHabs |
+| 고리형 거주지 코어 | Project_RingCore | project | LifeScience | 5000 | Project_OrbitalCore + OrbitalTorusHabs |
 | 우주 병원 | Project_GeriatricsFacility | project | LifeScience | 5000 | Project_RingCore + Project_OrbitalHospital + TransformPhages |
 | 가속도 약물학 | Project_AccelerationPharmaceuticals | project | LifeScience | 10000 | ExtendedSpaceSurvival |
 | 기후 기관 | Project_ClimateInstitute | project | LifeScience | 10000 | Project_RingCore + Project_ClimateResearchCenter + IntegratedEarthSpaceEconomy |
 | 생명 과학 연구원 | Project_LifeScienceInstitute | project | LifeScience | 10000 | (Project_RingCore OR Project_ColonyCore) + Project_LifeScienceResearchCenter + AppliedArtificialIntelligence |
 | 온보딩 변형물질 주입 | Project_OnboardingInjections | project | LifeScience | 10000 | TransformPhages + Project_CovertOperations |
 | 단독개체 바이러스 | Project_SingletonViruses | project | LifeScience | 10000 | TargetedBiologicalWarfare |
-| -고중력 재조합 | Project_High-GRecombinants | project | LifeScience | 20000 | Genies + Project_AccelerationPharmaceuticals |
+| 고중력 재조합 | Project_High-GRecombinants | project | LifeScience | 20000 | Genies + Project_AccelerationPharmaceuticals |
 | 미생물 드릴 | Project_MicrobialDrills | project | LifeScience | 20000 | InSituResourceUtilization + DesignerLifeforms + Project_ThermalMiningTechniques |
 | 침입종 차단 | Project_InvasiveSpeciesContainment | project | LifeScience | 30000 | DesignerLifeforms + Project_XenologicalCulls + Project_WarDogNecropsy + milestone:AccessWarDogCorpus + faction:DestroyCouncil/ResistCouncil/ExploitCouncil/CooperateCouncil/EscapeCouncil/AppeaseCouncil |
 | DNA 복구 | Project_DNARepairs | project | LifeScience | 50000 | TransformPhages + SelfRepairingSoftware + MolecularAssemblers |
@@ -357,7 +363,7 @@ Graph edge count: `1720`.
 | 반물질 포획기 | Project_AntimatterTrap | project | Materials | 500 | Project_PlatformCore + AntimatterContainment |
 | 몰리브덴 파이프 라디에이터 | Project_MolybdenumPipeRadiator | project | Materials | 500 | OrbitalShipbuilding |
 | 수리실 | Project_RepairBay | project | Materials | 500 | MilitarizationofSpace |
-| 우주 정거장 | Project_SpaceDock | project | Materials | 500 | (Project_PlatformCore OR Project_OutpostCore) + OrbitalShipbuilding |
+| 우주 도크 | Project_SpaceDock | project | Materials | 500 | (Project_PlatformCore OR Project_OutpostCore) + OrbitalShipbuilding |
 | 반물질 수확기 | Project_AntimatterHarvester | project | Materials | 1000 | Project_OrbitalCore + Project_AntimatterTrap |
 | 장갑 보강재 | Project_ArmorStruts | project | Materials | 1000 | Superalloys + OrbitalShipbuilding |
 | 자동 태양 거울 | Project_AutomatedSolarMirror | project | Materials | 1000 | Project_AutomatedPlatformCore + Project_SolarMirror |
@@ -746,11 +752,11 @@ Graph edge count: `1720`.
 | 연구 캠퍼스 | Project_ResearchCampus | project | SpaceScience | 2500 | (Project_OrbitalCore OR Project_SettlementCore) + QuantumComputing |
 | 식민지 채굴단지 | Project_ColonyMiningComplex | project | SpaceScience | 3000 | Project_ColonyCore + Project_SettlementMiningComplex + Superalloys |
 | 고성능 펄서 추진기 | Project_AdvancedPulsarDrive | project | SpaceScience | 4000 | SuperconductingMagnets + Project_PulsarDrive + Project_SolidCoreFissionReactorV |
-| 고성능 화학 로켓 | Project_AdvancedInterplanetaryRockets | project | SpaceScience | 5000 | AdvancedHydrogenContainment + Project_ImprovedInterplanetaryRockets |
+| 장거리 화학 로켓 | Project_AdvancedInterplanetaryRockets | project | SpaceScience | 5000 | AdvancedHydrogenContainment + Project_ImprovedInterplanetaryRockets |
 | 반물질 미세분열 추진기 | Project_AntimatterMicrofissionDrive | project | SpaceScience | 5000 | AntimatterContainment + FissionPulseDrives |
 | 자동화된 태양광 전초기지 키트 | Project_AutomatedSolarOutpostKit | project | SpaceScience | 5000 | Project_AutomatedSolarCollector + Project_AutomatedMiningComplex |
 | 버너 추진기 | Project_BurnerDrive | project | SpaceScience | 5000 | Superalloys + Project_GasCoreFissionReactorII |
-| 먼지 플라즈마 추진기 | Project_DustyPlasmaDrive | project | SpaceScience | 5000 | Project_GasCoreFissionReactorI + MagneticNozzles + Project_FissionFragDrive + HighTemperatureSuperconductors |
+| 먼지 플라즈마 추진기 | Project_DustyPlasmaDrive | project | SpaceScience | 5000 | MagneticNozzles + Project_GasCoreFissionReactorI + Project_FissionFragDrive |
 | 핵분열 회전 추진기 | Project_FissionSpinnerDrive | project | SpaceScience | 5000 | Project_LarsDrive + Project_MoltenCoreFissionReactorII |
 | 헬륨-3 광산 | Project_Helium-3Mine | project | SpaceScience | 5000 | Project_RingCore + DeuteriumHelium3Fusion + MissiontoJupiter + SpaceMiningandRefining |
 | 극소자기 오리온 추진기 | Project_MinimagOrion | project | SpaceScience | 5000 | Project_Z-pinchMicrofissionDrive |
@@ -781,7 +787,7 @@ Graph edge count: `1720`.
 | 중수소 노바 등 | Project_DeuteronNovaLantern | project | SpaceScience | 25000 | MagneticNozzles + Project_InertialConfinementFusionReactorII |
 | 중수소 폴리웰 추진기 | Project_DeuteronPolywellDrive | project | SpaceScience | 25000 | MagneticNozzles + Project_HybridConfinementFusionReactorII |
 | 제타 중수소 추진기 | Project_ZetaDeuteronDrive | project | SpaceScience | 25000 | MagneticNozzles + Project_ZPinchFusionReactorII |
-| 헬리온 원한체 등 | Project_HelionTorusLantern | project | SpaceScience | 30000 | MagneticNozzles + Project_FusionTokamakIII |
+| 헬리온 원환체 등 | Project_HelionTorusLantern | project | SpaceScience | 30000 | MagneticNozzles + Project_FusionTokamakIII |
 | 포세이돈 랜턴 | Project_NeutronFluxLantern | project | SpaceScience | 35000 | AdvancedFissionSystems |
 | 헬륨 플라스마젯 등 | Project_HelionPlasmajetLantern | project | SpaceScience | 45000 | MagneticNozzles + Project_HybridConfinementFusionReactorIII |
 | 반물질 플라즈마 노심 토치 | Project_AntimatterPlasmaCoreTorch | project | SpaceScience | 50000 | AntimatterPropulsion + Project_AntimatterPlasmaCoreReactorII + Project_AntimatterPulsedPlasmaCoreLantern |
@@ -866,7 +872,7 @@ Graph edge count: `1720`.
 | 히드라 심문 | Project_HydraInterrogation | project | Xenology | 20000 | Project_HydraLanguage + Project_AlienContainment + objective:CaptureAHydra + faction:CooperateCouncil/DestroyCouncil/EscapeCouncil/ExploitCouncil/ResistCouncil |
 | 전술적 혼란 유도 | Project_OperationalMisdirection | project | Xenology | 20000 | FleetLogistics + Project_StrategicDeception + faction:DestroyCouncil/ResistCouncil/ExploitCouncil/CooperateCouncil/EscapeCouncil/AppeaseCouncil |
 | 페로사이트 노출 네트워크 추적 | Project_PherocyteExposureNetworkTracing | project | Xenology | 20000 | WhiteCollarAutomation + Project_Pherocytes + faction:DestroyCouncil/ResistCouncil/ExploitCouncil/CooperateCouncil/EscapeCouncil/AppeaseCouncil |
-| 페로사이트 대량 방출기 | Project_PherocyteMassEmitter | project | Xenology | 20000 | Project_PherocyteMastery + Project_PherocyteEmitter |
+| 페로사이트 대량 방출기 | Project_PherocyteMassEmitter | project | Xenology | 20000 | Project_PherocyteMastery + Project_PherocyteEmitter + faction:ExploitCouncil |
 | 정책입안자 행동분석 | Project_PolicymakerBehaviorialAnalysis | project | Xenology | 20000 | ArrivalGovernance + WhiteCollarAutomation + Project_Pherocytes + faction:DestroyCouncil/ResistCouncil/ExploitCouncil/CooperateCouncil/EscapeCouncil/AppeaseCouncil |
 | 납치 예측 모델링 | Project_PredictiveAbductionModeling | project | Xenology | 20000 | WhiteCollarAutomation + Project_HydraInterrogation + faction:DestroyCouncil/ResistCouncil/ExploitCouncil/CooperateCouncil/EscapeCouncil/AppeaseCouncil |
 | 지역 보안 점검 | Project_RegionalSecuritySweeps | project | Xenology | 20000 | NetworkedGlobalDefense + Project_PherocyteDeconOperations + Project_RapidResponseTeams + faction:DestroyCouncil/ResistCouncil/ExploitCouncil/CooperateCouncil/EscapeCouncil |

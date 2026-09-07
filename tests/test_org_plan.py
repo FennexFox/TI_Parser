@@ -35,7 +35,173 @@ def org(state_id, *, tier, **values):
     }
 
 
+def eligibility_fixture(*, controlled=False, matching_homeland=False, traits_by_id=None, direct_control_point_nation=False):
+    traits_by_id = traits_by_id or {}
+    councilor_home_nations = {10: 21 if matching_homeland else 22, 11: 22}
+    region_entries = []
+    councilor_entries = []
+    for councilor_id, nation_id in councilor_home_nations.items():
+        region_id = 100 + councilor_id
+        region_entries.append(
+            {
+                "Key": ref(region_id),
+                "Value": {"ID": ref(region_id), "nation": ref(nation_id)},
+            }
+        )
+        councilor_entries.append(
+            {
+                "Key": ref(councilor_id),
+                "Value": {
+                    "ID": ref(councilor_id),
+                    "displayName": f"Councilor {councilor_id}",
+                    "homeRegion": ref(region_id),
+                    "traitTemplateNames": list(traits_by_id.get(councilor_id, ())),
+                    "orgs": [],
+                },
+            }
+        )
+    region_entries.append(
+        {
+            "Key": ref(120),
+            "Value": {"ID": ref(120), "nation": ref(21)},
+        }
+    )
+    faction = {
+        "ID": ref(1),
+        "templateName": "ResistCouncil",
+        "displayName": "Resistance",
+        "councilors": [ref(10), ref(11)],
+        "controlPoints": [ref(31)] if controlled else [],
+    }
+    gamestates = {
+        "TIFactionState": [{"Key": ref(1), "Value": faction}],
+        "TICouncilorState": councilor_entries,
+        "TIRegionState": region_entries,
+        "TINationState": [
+            {
+                "Key": ref(21),
+                "Value": {
+                    "ID": ref(21),
+                    "templateName": "NationA",
+                    "displayName": "Nation A",
+                    "controlPoints": [ref(31)],
+                },
+            },
+            {
+                "Key": ref(22),
+                "Value": {
+                    "ID": ref(22),
+                    "templateName": "NationB",
+                    "displayName": "Nation B",
+                    "controlPoints": [],
+                },
+            },
+        ],
+        # Deliberately omit the nation field to cover the nation-state fallback.
+        "TIControlPointState": [
+            {
+                "Key": ref(31),
+                "Value": {"ID": ref(31), **({"nation": ref(21)} if direct_control_point_nation else {})},
+            }
+        ],
+    }
+    indexed = ti.build_index({"gamestates": gamestates})
+    profiles = {
+        councilor_id: {
+            **profile(councilor_id, 3, traits=traits_by_id.get(councilor_id, ())),
+            "councilor": ti.state_value_by_id(indexed, councilor_id),
+        }
+        for councilor_id in (10, 11)
+    }
+    return indexed, faction, profiles
+
+
 class OrgPlanTests(unittest.TestCase):
+    def test_roster_summary_enforces_fifteen_org_maximum_separately_from_administration(self):
+        orgs = {org_id: org(org_id, tier=1) for org_id in range(1, 17)}
+        councilor = profile(10, 25)
+
+        at_limit = ti.org_plan_roster_summary(councilor, orgs, range(1, 16))
+        over_limit = ti.org_plan_roster_summary(councilor, orgs, range(1, 17))
+
+        self.assertEqual(at_limit["orgCount"], 15)
+        self.assertEqual(at_limit["freeOrgSlots"], 0)
+        self.assertTrue(at_limit["validAdministrationCapacity"])
+        self.assertTrue(at_limit["validOrgCount"])
+        self.assertTrue(at_limit["validCapacity"])
+        self.assertTrue(at_limit["validRoster"])
+        self.assertEqual(over_limit["orgCount"], 16)
+        self.assertEqual(over_limit["freeOrgSlots"], -1)
+        self.assertTrue(over_limit["validAdministrationCapacity"])
+        self.assertFalse(over_limit["validOrgCount"])
+        self.assertTrue(over_limit["validCapacity"])
+        self.assertFalse(over_limit["validRoster"])
+
+    def test_fourteenth_org_can_receive_fifteenth_without_replacement(self):
+        orgs = {org_id: org(org_id, tier=1) for org_id in range(1, 16)}
+        orgs[15]["science"] = 3
+        councilor = profile(10, 25, range(1, 15))
+
+        action = ti.org_plan_best_assignment(
+            councilor,
+            orgs,
+            councilor["assignedOrgIds"],
+            15,
+            "market",
+            {},
+            "science",
+        )
+
+        self.assertIsNotNone(action)
+        self.assertEqual(action["removedOrgs"], [])
+        self.assertEqual(action["orgCountBefore"], 14)
+        self.assertEqual(action["orgCountAfter"], 15)
+        self.assertEqual(action["freeOrgSlotsAfter"], 0)
+        self.assertTrue(action["validOrgCountAfter"])
+
+    def test_full_roster_replaces_one_org_instead_of_assigning_sixteenth(self):
+        orgs = {org_id: org(org_id, tier=1) for org_id in range(1, 17)}
+        orgs[16]["science"] = 3
+        councilor = profile(10, 25, range(1, 16))
+
+        action = ti.org_plan_best_assignment(
+            councilor,
+            orgs,
+            councilor["assignedOrgIds"],
+            16,
+            "market",
+            {},
+            "science",
+        )
+
+        self.assertIsNotNone(action)
+        self.assertEqual(len(action["removedOrgs"]), 1)
+        self.assertEqual(action["orgCountBefore"], 15)
+        self.assertEqual(action["orgCountAfter"], 15)
+        self.assertTrue(action["validOrgCountAfter"])
+        self.assertTrue(action["validRosterAfter"])
+
+    def test_overfull_roster_removes_enough_orgs_to_return_to_limit(self):
+        orgs = {org_id: org(org_id, tier=1) for org_id in range(1, 18)}
+        orgs[17]["science"] = 3
+        councilor = profile(10, 25, range(1, 17))
+
+        action = ti.org_plan_best_assignment(
+            councilor,
+            orgs,
+            councilor["assignedOrgIds"],
+            17,
+            "market",
+            {},
+            "science",
+        )
+
+        self.assertIsNotNone(action)
+        self.assertEqual(len(action["removedOrgs"]), 2)
+        self.assertEqual(action["orgCountBefore"], 16)
+        self.assertEqual(action["orgCountAfter"], 15)
+        self.assertTrue(action["validOrgCountAfter"])
+
     def test_administration_bonus_can_fund_incoming_org_tier(self):
         orgs = {1: org(1, tier=2, administration=2)}
 
@@ -96,6 +262,28 @@ class OrgPlanTests(unittest.TestCase):
         self.assertEqual(plan["actions"][0]["councilorId"], 10)
         self.assertEqual(plan["marketAcquisitions"], 1)
         self.assertNotIn(1, plan["remainingMarketOrgIds"])
+
+    def test_committee_search_never_exceeds_org_limit_across_multiple_actions(self):
+        orgs = {org_id: org(org_id, tier=1) for org_id in range(1, 18)}
+        orgs[16]["science"] = 3
+        orgs[17]["command"] = 3
+        councilor = profile(10, 25, range(1, 16))
+
+        plan = ti.search_org_committee_plan(
+            [councilor],
+            orgs,
+            market_ids=[16, 17],
+            inventory_ids=[],
+            resources={},
+            focus="balanced",
+            max_actions=2,
+            beam_width=4,
+        )
+
+        self.assertEqual(len(plan["actions"]), 2)
+        self.assertTrue(all(action["orgCountAfter"] <= 15 for action in plan["actions"]))
+        self.assertEqual(plan["finalRoster"][0]["orgCount"], 15)
+        self.assertTrue(plan["finalRoster"][0]["validOrgCount"])
 
     def test_committee_search_excludes_unaffordable_market_org(self):
         orgs = {1: org(1, tier=1, science=10, costMoney=100)}
@@ -162,6 +350,328 @@ class OrgPlanTests(unittest.TestCase):
 
         self.assertIsNone(blocked)
         self.assertIsNotNone(eligible)
+
+    def test_nation_interest_is_satisfied_by_faction_control_not_owner_nationality(self):
+        indexed, faction, profiles = eligibility_fixture(controlled=True)
+        candidate = org(1, tier=1, templateName="NationalOrg", homeRegion=ref(120))
+        templates = {"NationalOrg": {"requiresNationality": True}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+
+        self.assertTrue(row["factionEligibility"]["eligible"])
+        self.assertEqual(row["factionEligibility"]["nationInterest"]["satisfiedBy"], ["controlledNation"])
+        self.assertEqual([item["id"] for item in row["eligibleCouncilors"]], [10, 11])
+        self.assertEqual(row["ineligibleReasons"], [])
+
+    def test_nation_interest_uses_control_point_direct_nation_reference(self):
+        indexed, faction, profiles = eligibility_fixture(controlled=True, direct_control_point_nation=True)
+        candidate = org(1, tier=1, templateName="NationalOrg", homeRegion=ref(120))
+
+        row = ti.org_plan_candidate_row(
+            indexed,
+            faction,
+            profiles,
+            candidate,
+            "market",
+            {"NationalOrg": {"requiresNationality": True}},
+        )
+
+        self.assertEqual(row["factionEligibility"]["nationInterest"]["satisfiedBy"], ["controlledNation"])
+
+    def test_public_assignment_helper_recovers_faction_from_councilor_roster(self):
+        indexed, _faction, profiles = eligibility_fixture(matching_homeland=True)
+        candidate = org(1, tier=1, templateName="NationalOrg", homeRegion=ref(120), science=3)
+
+        action = ti.org_plan_best_assignment(
+            profiles[11],
+            {1: candidate},
+            [],
+            1,
+            "market",
+            {},
+            "science",
+            indexed=indexed,
+            org_templates={"NationalOrg": {"requiresNationality": True}},
+        )
+
+        self.assertIsNotNone(action)
+        self.assertTrue(action["candidate"]["factionEligibility"]["eligible"])
+
+    def test_one_councilor_homeland_satisfies_nation_interest_for_whole_faction(self):
+        indexed, faction, profiles = eligibility_fixture(matching_homeland=True)
+        candidate = org(1, tier=1, templateName="NationalOrg", homeRegion=ref(120))
+        templates = {"NationalOrg": {"requiresNationality": True}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+
+        self.assertEqual(row["factionEligibility"]["nationInterest"]["satisfiedBy"], ["councilorHomeNation"])
+        self.assertEqual([item["id"] for item in row["eligibleCouncilors"]], [10, 11])
+
+    def test_missing_nation_interest_is_explicit_for_every_councilor(self):
+        indexed, faction, profiles = eligibility_fixture()
+        candidate = org(1, tier=1, templateName="NationalOrg", homeRegion=ref(120))
+        templates = {"NationalOrg": {"requiresNationality": True}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+
+        reason = "faction lacks interest in required nation: Nation A"
+        self.assertFalse(row["factionEligibility"]["eligible"])
+        self.assertEqual(row["factionEligibility"]["reasons"], [reason])
+        self.assertEqual(row["eligibleCouncilors"], [])
+        self.assertEqual([item["reasons"] for item in row["ineligibleReasons"]], [[reason], [reason]])
+
+    def test_unresolved_required_home_nation_is_reported(self):
+        indexed, faction, profiles = eligibility_fixture(controlled=True)
+        candidate = org(1, tier=1, templateName="NationalOrg", homeRegion=ref(999))
+
+        row = ti.org_plan_candidate_row(
+            indexed,
+            faction,
+            profiles,
+            candidate,
+            "market",
+            {"NationalOrg": {"requiresNationality": True}},
+        )
+
+        self.assertFalse(row["factionEligibility"]["eligible"])
+        self.assertEqual(
+            row["factionEligibility"]["reasons"],
+            ["nation interest requirement could not be resolved"],
+        )
+
+    def test_candidate_row_exposes_owner_trait_requirements_and_reasons(self):
+        indexed, faction, profiles = eligibility_fixture(
+            controlled=True,
+            traits_by_id={10: ("Government",), 11: ("Criminal",)},
+        )
+        profiles[11]["assignedOrgIds"] = list(range(1000, 1015))
+        candidate = org(1, tier=1, templateName="GovernmentOrg", homeRegion=ref(120))
+        templates = {
+            "GovernmentOrg": {
+                "requiresNationality": True,
+                "requiredOwnerTraits": ["Government"],
+                "prohibitedOwnerTraits": ["Criminal"],
+            }
+        }
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+
+        self.assertEqual(
+            row["requirements"],
+            {
+                "templateResolution": {
+                    "catalogAvailable": True,
+                    "templateName": "GovernmentOrg",
+                    "resolved": True,
+                },
+                "requiresNationInterest": True,
+                "homeNation": {
+                    "id": 21,
+                    "type": "TINationState",
+                    "template": "NationA",
+                    "code": "NationA",
+                    "display": "Nation A",
+                },
+                "requiredOwnerTraits": ["Government"],
+                "prohibitedOwnerTraits": ["Criminal"],
+                "restrictedFactionIdeologies": [],
+                "requiredFactionAffinities": [],
+            },
+        )
+        self.assertEqual(row["eligibleCouncilors"], [{"id": 10, "display": "Councilor 10"}])
+        self.assertEqual(row["ineligibleReasons"][0]["id"], 11)
+        self.assertEqual(
+            row["ineligibleReasons"][0]["reasons"],
+            ["missing required owner traits: Government", "prohibited owner traits: Criminal"],
+        )
+        criminal_capacity = next(
+            item
+            for item in row["orgCountCapacity"]["councilors"]
+            if item["id"] == row["ineligibleReasons"][0]["id"]
+        )
+        self.assertTrue(criminal_capacity["requiresReplacement"])
+        self.assertEqual(criminal_capacity["minimumOrgRemovals"], 1)
+
+    def test_candidate_row_reports_when_org_count_requires_replacement(self):
+        indexed, faction, profiles = eligibility_fixture()
+        profiles[10]["assignedOrgIds"] = list(range(1000, 1015))
+        profiles[11]["assignedOrgIds"] = list(range(2000, 2014))
+        candidate = org(1, tier=1)
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", {})
+
+        capacity_by_id = {
+            item["id"]: item
+            for item in row["orgCountCapacity"]["councilors"]
+        }
+        self.assertEqual(row["orgCountCapacity"]["maxOrgCount"], 15)
+        self.assertTrue(capacity_by_id[10]["requiresReplacement"])
+        self.assertEqual(capacity_by_id[10]["minimumOrgRemovals"], 1)
+        self.assertFalse(capacity_by_id[10]["directAssignmentWithinLimit"])
+        self.assertFalse(capacity_by_id[11]["requiresReplacement"])
+        self.assertEqual(capacity_by_id[11]["freeOrgSlotsAfterDirectAssignment"], 0)
+
+    def test_committee_search_uses_faction_wide_councilor_homeland_interest(self):
+        indexed, faction, profiles = eligibility_fixture(matching_homeland=True)
+        profiles[10]["baseAttributes"]["Science"] = 24
+        candidate = org(1, tier=1, templateName="NationalOrg", homeRegion=ref(120), science=3)
+
+        plan = ti.search_org_committee_plan(
+            profiles,
+            {1: candidate},
+            market_ids=[1],
+            inventory_ids=[],
+            resources={},
+            focus="science",
+            max_actions=1,
+            beam_width=2,
+            indexed=indexed,
+            org_templates={"NationalOrg": {"requiresNationality": True}},
+            faction=faction,
+        )
+
+        self.assertEqual(len(plan["actions"]), 1)
+        self.assertEqual(plan["actions"][0]["councilorId"], 11)
+        self.assertTrue(plan["actions"][0]["candidate"]["requirements"]["requiresNationInterest"])
+        self.assertTrue(plan["actions"][0]["candidate"]["factionEligibility"]["eligible"])
+
+    def test_committee_search_keeps_org_when_faction_lacks_nation_interest(self):
+        indexed, faction, profiles = eligibility_fixture()
+        candidate = org(1, tier=1, templateName="NationalOrg", homeRegion=ref(120), science=3)
+
+        plan = ti.search_org_committee_plan(
+            profiles,
+            {1: candidate},
+            market_ids=[1],
+            inventory_ids=[],
+            resources={},
+            focus="science",
+            max_actions=1,
+            beam_width=2,
+            indexed=indexed,
+            org_templates={"NationalOrg": {"requiresNationality": True}},
+            faction=faction,
+        )
+
+        self.assertEqual(plan["actions"], [])
+        self.assertEqual(plan["remainingMarketOrgIds"], [1])
+
+    def test_restricted_faction_ideology_blocks_every_councilor(self):
+        indexed, faction, profiles = eligibility_fixture()
+        faction["templateName"] = "CooperateCouncil"
+        candidate = org(1, tier=1, templateName="RestrictedOrg", science=5)
+        templates = {"RestrictedOrg": {"restricted": ["Cooperate"]}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+
+        reason = "faction ideology is restricted: Cooperate"
+        self.assertFalse(row["factionEligibility"]["eligible"])
+        self.assertEqual(row["factionEligibility"]["reasons"], [reason])
+        self.assertEqual(row["eligibleCouncilors"], [])
+        self.assertEqual([item["reasons"] for item in row["ineligibleReasons"]], [[reason], [reason]])
+        self.assertEqual(row["requirements"]["restrictedFactionIdeologies"], ["Cooperate"])
+
+    def test_restricted_faction_ideology_allows_other_factions(self):
+        indexed, faction, profiles = eligibility_fixture()
+        candidate = org(1, tier=1, templateName="RestrictedOrg")
+        templates = {"RestrictedOrg": {"restricted": ["Cooperate"]}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+
+        self.assertTrue(row["factionEligibility"]["eligible"])
+        self.assertEqual(row["factionEligibility"]["ideology"]["faction"], "Resist")
+        self.assertEqual([item["id"] for item in row["eligibleCouncilors"]], [10, 11])
+
+    def test_normal_org_affinity_is_not_a_hard_faction_requirement(self):
+        indexed, faction, profiles = eligibility_fixture()
+        candidate = org(1, tier=1, templateName="AffinityOrg")
+        templates = {"AffinityOrg": {"orgType": "Security", "affinities": ["Exploit"]}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+
+        self.assertTrue(row["factionEligibility"]["eligible"])
+        self.assertEqual(row["requirements"]["requiredFactionAffinities"], [])
+
+    def test_faction_org_requires_matching_affinity(self):
+        indexed, faction, profiles = eligibility_fixture()
+        candidate = org(1, tier=1, templateName="FactionOrg")
+        templates = {"FactionOrg": {"orgType": "Faction", "affinities": ["Cooperate"]}}
+
+        blocked = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "ownedInventory", templates)
+        faction["templateName"] = "CooperateCouncil"
+        eligible = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "ownedInventory", templates)
+
+        self.assertFalse(blocked["factionEligibility"]["eligible"])
+        self.assertEqual(blocked["eligibleCouncilors"], [])
+        self.assertEqual(
+            blocked["factionEligibility"]["reasons"],
+            ["faction org does not support faction ideology: Resist"],
+        )
+        self.assertTrue(eligible["factionEligibility"]["eligible"])
+        self.assertEqual(eligible["requirements"]["requiredFactionAffinities"], ["Cooperate"])
+
+    def test_committee_search_skips_higher_stat_ideology_restricted_org(self):
+        indexed, faction, profiles = eligibility_fixture()
+        faction["templateName"] = "CooperateCouncil"
+        candidates = {
+            1: org(1, tier=1, templateName="RestrictedOrg", science=10),
+            2: org(2, tier=1, templateName="AllowedOrg", science=2),
+        }
+        templates = {
+            "RestrictedOrg": {"restricted": ["Cooperate"]},
+            "AllowedOrg": {},
+        }
+
+        plan = ti.search_org_committee_plan(
+            profiles,
+            candidates,
+            market_ids=[1, 2],
+            inventory_ids=[],
+            resources={},
+            focus="science",
+            max_actions=1,
+            beam_width=4,
+            indexed=indexed,
+            org_templates=templates,
+            faction=faction,
+        )
+
+        self.assertEqual([action["candidate"]["id"] for action in plan["actions"]], [2])
+        self.assertEqual(plan["remainingMarketOrgIds"], [1])
+
+    def test_missing_template_is_not_recommendation_eligible_when_catalog_is_loaded(self):
+        indexed, faction, profiles = eligibility_fixture()
+        candidate = org(1, tier=1, templateName="MissingOrg", science=10)
+        templates = {"KnownOrg": {}}
+
+        row = ti.org_plan_candidate_row(indexed, faction, profiles, candidate, "market", templates)
+        action = ti.org_plan_best_assignment(
+            profiles[10],
+            {1: candidate},
+            [],
+            1,
+            "market",
+            {},
+            "science",
+            indexed=indexed,
+            org_templates=templates,
+            faction=faction,
+        )
+
+        reason = "org template could not be resolved: MissingOrg"
+        self.assertFalse(row["factionEligibility"]["eligible"])
+        self.assertEqual(row["factionEligibility"]["reasons"], [reason])
+        self.assertEqual(row["eligibleCouncilors"], [])
+        self.assertEqual(
+            row["recommendationEligibility"],
+            {
+                "eligible": False,
+                "basis": "eligibleCouncilors",
+                "eligibleCouncilorCount": 0,
+                "eligibleCouncilorIds": [],
+            },
+        )
+        self.assertIsNone(action)
 
 
 if __name__ == "__main__":

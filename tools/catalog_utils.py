@@ -50,12 +50,17 @@ def parse_languages(value: str | None) -> list[str]:
 
 
 def write_json_output(path: Path, value: Any) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
+    return write_utf8_lf(path, json.dumps(value, ensure_ascii=False, indent=2))
 
 
 def write_text_output(path: Path, content: str) -> Path:
+    return write_utf8_lf(path, content)
+
+
+def write_utf8_lf(path: Path, content: str) -> Path:
+    """Write deterministic UTF-8 bytes with LF endings and one trailing LF."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    canonical = content.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n") + "\n"
+    path.write_bytes(canonical.encode("utf-8"))
     return path

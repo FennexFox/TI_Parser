@@ -8,23 +8,31 @@ from pathlib import Path
 from typing import Any
 
 from ti_parser_core import (
+    CalculationDependency,
+    CalculationDependencyError,
     IndexedState,
+    TemplateSource,
     build_index,
     cache_key,
     campaign_code,
     clean_numbers,
-    file_fingerprint,
     first_value,
     load_save,
-    load_trait_templates,
     ref_id,
     ref_summary,
     region_nation_summary,
     resolve_ref,
     save_fingerprint,
+    scenario_template_name,
     short_type,
     snapshot_fingerprint,
+    template_source_paths,
     type_entries,
+)
+from ti_parser_catalogs import (
+    CatalogIntegrityError,
+    UnsupportedCatalogScenarioError,
+    load_runtime_catalogs,
 )
 
 
@@ -45,6 +53,8 @@ def time_summary(indexed: IndexedState) -> dict[str, Any]:
         "currentQuarterSinceStart": time_state.get("currentQuarterSinceStart"),
         "currentDateTime": current,
         "template": time_state.get("templateName"),
+        "masterMetaTemplateName": time_state.get("masterMetaTemplateName"),
+        "scenarioMetaTemplateName": time_state.get("scenarioMetaTemplateName"),
     }
 
 
@@ -343,8 +353,15 @@ def trait_attribute_mods(
     for trait_name in trait_names:
         trait = trait_templates.get(trait_name)
         if not trait:
-            warnings.append(f"missing trait template: {trait_name}")
-            continue
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="trait",
+                    name=str(trait_name),
+                    context="snapshot.councilor-attributes",
+                    scenario=None,
+                    reason="save references a trait absent from the packaged catalog",
+                )
+            )
         stat_mods = trait.get("statMods") if isinstance(trait.get("statMods"), list) else []
         for mod in stat_mods:
             if not isinstance(mod, dict) or not mod.get("stat"):
@@ -571,11 +588,44 @@ def summarize_fleets(indexed: IndexedState) -> list[dict[str, Any]]:
 def build_snapshot(
     save_path: Path,
     data: dict[str, Any],
-    templates_dir: Path | None,
+    templates_dir: TemplateSource,
     config: SnapshotConfig,
 ) -> dict[str, Any]:
     indexed = build_index(data)
-    trait_templates = load_trait_templates(templates_dir)
+    scenario = scenario_template_name(indexed)
+    if not scenario:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="scenario",
+                name="scenarioMetaTemplateName",
+                context="snapshot",
+                scenario=None,
+                reason="save does not identify a canonical supported scenario",
+            )
+        )
+    try:
+        runtime_catalogs = load_runtime_catalogs(scenario)
+    except UnsupportedCatalogScenarioError as exc:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="scenario",
+                name=exc.scenario,
+                context="snapshot",
+                scenario=scenario,
+                reason=str(exc),
+            )
+        ) from exc
+    except CatalogIntegrityError as exc:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="catalog-integrity",
+                name="runtime bundle",
+                context="snapshot",
+                scenario=scenario,
+                reason=str(exc),
+            )
+        ) from exc
+    trait_templates = runtime_catalogs.traits
     type_counts = {
         short_type(full_type): len(entries) if isinstance(entries, list) else 1
         for full_type, entries in indexed.gamestates.items()
@@ -591,7 +641,8 @@ def build_snapshot(
         "schemaVersion": config.schema_version,
         "cacheFingerprint": snapshot_fingerprint(save_path, templates_dir),
         "source": save_fingerprint(save_path),
-        "templateSource": file_fingerprint(templates_dir / "TITraitTemplate.json" if templates_dir else None),
+        "templateSource": [],
+        "calculationDiagnostics": runtime_catalogs.calculation_diagnostics(),
         "currentID": (data.get("currentID") or {}).get("value"),
         "time": time_summary(indexed),
         "metadata": metadata_summary(indexed),
@@ -607,7 +658,7 @@ def build_snapshot(
 def load_or_build_snapshot(
     save_path: Path,
     cache_dir: Path,
-    templates_dir: Path | None,
+    templates_dir: TemplateSource,
     config: SnapshotConfig,
     refresh: bool = False,
 ) -> tuple[dict[str, Any], Path, bool]:

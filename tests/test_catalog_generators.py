@@ -8,8 +8,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import build_module_catalog as mc
+import build_location_catalog as lc
 import build_research_catalog as rc
+import build_runtime_catalogs as runtime_builder
 import catalog_utils as cu
+import ti_parser_catalogs as runtime_catalogs
 
 
 def write_json(path: Path, value: object) -> None:
@@ -23,6 +26,141 @@ def write_text(path: Path, content: str) -> None:
 
 
 class CatalogGeneratorTests(unittest.TestCase):
+    def test_nation_development_rejects_boolean_numeric_config_values(self):
+        payload = runtime_builder._nation_development_payload({
+            "priority_MC": True,
+            "coreEcoRegionGDPModifier": False,
+        })
+
+        self.assertEqual(payload["priorities"]["MissionControl"]["investmentCost"], 25.0)
+        self.assertEqual(
+            payload["priorities"]["MissionControl"]["valueOrigin"],
+            "TIGlobalConfig compiled field initializer",
+        )
+        self.assertEqual(payload["globalConfig"]["coreEcoRegionGDPModifier"]["value"], 1.25)
+        self.assertEqual(
+            payload["globalConfig"]["coreEcoRegionGDPModifier"]["valueOrigin"],
+            "TIGlobalConfig compiled field initializer",
+        )
+
+    def test_catalog_writers_emit_utf8_lf_with_one_trailing_newline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            json_path = root / "catalog.json"
+            text_path = root / "catalog.md"
+
+            cu.write_json_output(json_path, {"label": "한글", "value": 1})
+            cu.write_text_output(text_path, "first\r\nsecond\r\n\r\n")
+
+            json_bytes = json_path.read_bytes()
+            text_bytes = text_path.read_bytes()
+            self.assertEqual(json_bytes.decode("utf-8"), '{\n  "label": "한글",\n  "value": 1\n}\n')
+            self.assertEqual(text_bytes, b"first\nsecond\n")
+            self.assertNotIn(b"\r", json_bytes + text_bytes)
+
+    def test_location_catalog_normalizes_body_navigable_and_orbit_without_zero_filling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            templates_dir = Path(tmp) / "Templates"
+            write_json(
+                templates_dir / "TISpaceBodyTemplate.json",
+                [
+                    {
+                        "dataName": "Mars",
+                        "friendlyName": "Mars",
+                        "barycenterName": "Sol",
+                        "objectType": "Planet",
+                        "atmosphere": "Thin",
+                        "semiMajorAxis_AU": 1.523679,
+                        "equatorialRadius_km": 3396.2,
+                        "mass_kg": 6.4171e23,
+                        "oblateness": 0.00648,
+                        "rotationPeriod_strHours": "24.6230",
+                        "irradiatedMultiplier": 1,
+                        "maxHabSize": 4,
+                    },
+                    {
+                        "dataName": "Mercury",
+                        "friendlyName": "Mercury",
+                        "barycenterName": "Sol",
+                        "objectType": "Planet",
+                        "atmosphere": "Trace",
+                        "semiMajorAxis_AU": 0.387099,
+                        "equatorialRadius_km": 2493.7,
+                        "mass_kg": 3.3011e23,
+                        "oblateness": 0.0,
+                        "rotationPeriod_strHours": "1407.6",
+                        "irradiatedMultiplier": 2,
+                        "maxHabSize": 4,
+                    }
+                ],
+            )
+            write_json(
+                templates_dir / "TINavigableTemplate.json",
+                [
+                    {
+                        "dataName": "SunMarsL1",
+                        "lagrangeValue": "L1",
+                        "relatedObject": "Mars",
+                        "orbits": ["SunMarsL1Orbit"],
+                        "maxHabSize": 3,
+                    }
+                ],
+            )
+            write_json(
+                templates_dir / "TIOrbitTemplate.json",
+                [
+                    {
+                        "dataName": "LowMercuryOrbit",
+                        "barycenterName": "Mercury",
+                        "radialOrbit": True,
+                        "synch": False,
+                        "irradiatedMultiplier": 2.0,
+                    },
+                    {
+                        "dataName": "SunMarsL1Orbit",
+                        "barycenterName": "SunMarsL1",
+                        "semiMajorAxis_km": 3500,
+                        "irradiatedMultiplier": 1,
+                    },
+                ],
+            )
+
+            catalog = lc.build_catalog(templates_dir)
+
+            self.assertEqual(catalog["schemaVersion"], 2)
+            self.assertEqual(catalog["source"]["spaceBodyTemplate"]["file"], "TISpaceBodyTemplate.json")
+            self.assertEqual(catalog["source"]["navigableTemplate"]["file"], "TINavigableTemplate.json")
+            self.assertEqual(catalog["source"]["orbitTemplate"]["file"], "TIOrbitTemplate.json")
+            self.assertEqual(len(catalog["source"]["spaceBodyTemplate"]["sha256"]), 64)
+            self.assertEqual(catalog["counts"], {"spaceBodies": 2, "navigables": 1, "orbits": 2})
+            self.assertEqual(catalog["byDataName"]["spaceBodies"], {"Mars": 0, "Mercury": 1})
+            self.assertEqual(catalog["byDataName"]["navigables"], {"SunMarsL1": 0})
+            self.assertEqual(
+                catalog["byDataName"]["orbits"],
+                {"LowMercuryOrbit": 0, "SunMarsL1Orbit": 1},
+            )
+            body = catalog["spaceBodies"][catalog["byDataName"]["spaceBodies"]["Mercury"]]
+            navigable = catalog["navigables"][0]
+            orbit = catalog["orbits"][0]
+            self.assertEqual(body["mass_kg"], 3.3011e23)
+            self.assertEqual(body["oblateness"], 0)
+            self.assertEqual(body["meanRadius_km"], 2493.7)
+            self.assertEqual(body["maxRadius_km"], 2493.7)
+            self.assertEqual(
+                navigable,
+                {
+                    "dataName": "SunMarsL1",
+                    "lagrangeValue": "L1",
+                    "relatedObject": "Mars",
+                    "orbits": ["SunMarsL1Orbit"],
+                    "maxHabSize": 3,
+                    "locationKind": "LagrangePoint",
+                },
+            )
+            self.assertTrue(orbit["radialOrbit"])
+            self.assertFalse(orbit["synch"])
+            self.assertEqual(orbit["irradiatedMultiplier"], 2)
+
     def test_module_catalog_build_and_markdown_use_localized_fixture(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -169,7 +307,14 @@ class CatalogGeneratorTests(unittest.TestCase):
                         "factionAlways": ["ResistCouncil"],
                         "orgGranted": "Org_Gamma",
                         "resourcesGranted": [{"resource": "Money", "amount": 5}],
-                    }
+                    },
+                    {
+                        "dataName": "Project_Disabled",
+                        "friendlyName": "Disabled Project",
+                        "techCategory": "Energy",
+                        "researchCost": 1,
+                        "disable": True,
+                    },
                 ],
             )
             write_text(
@@ -202,13 +347,34 @@ class CatalogGeneratorTests(unittest.TestCase):
             catalog = rc.build_catalog(templates_dir, cu.parse_languages("kor,en"))
             markdown = rc.build_markdown(catalog, "kor")
 
-            self.assertEqual(catalog["schemaVersion"], 1)
+            self.assertEqual(catalog["schemaVersion"], 2)
+            runtime_catalogs.validate_catalog_envelope(catalog)
+            self.assertEqual(catalog["generator"], {"name": "build_research_catalog", "version": "2"})
+            self.assertIn("2026Scenario", catalog["supportedScenarios"])
+            self.assertIn("2003Scenario", catalog["supportedScenarios"])
+            self.assertEqual(len(catalog["payloadFingerprint"]), 64)
+            self.assertEqual(
+                [item["name"] for item in catalog["sourceFiles"]],
+                sorted(item["name"] for item in catalog["sourceFiles"]),
+            )
+            self.assertTrue(all(len(item["sha256"]) == 64 for item in catalog["sourceFiles"]))
             self.assertEqual(catalog["source"]["techTemplate"]["file"], "TITechTemplate.json")
             self.assertEqual(catalog["source"]["projectTemplate"]["file"], "TIProjectTemplate.json")
+            self.assertEqual(len(catalog["source"]["techTemplate"]["sha256"]), 64)
             self.assertEqual(catalog["counts"]["total"], 3)
             self.assertEqual(catalog["counts"]["byKind"], {"tech": 2, "project": 1})
             self.assertEqual(catalog["counts"]["edges"], 3)
             self.assertEqual(catalog["unknownPrerequisites"], [])
+
+            runtime_project = catalog["base"]["projects"]["Project_Gamma"]
+            self.assertEqual(runtime_project["dataName"], "Project_Gamma")
+            self.assertEqual(runtime_project["techCategory"], "SpaceScience")
+            self.assertEqual(runtime_project["researchCost"], 250)
+            self.assertEqual(runtime_project["resourcesGranted"], [{"resource": "Money", "value": 5}])
+            self.assertEqual(runtime_project["AI_criticalTech"], False)
+            self.assertIn("Project_Disabled", catalog["base"]["projects"])
+            self.assertNotIn("Project_Disabled", catalog["byDataName"])
+            self.assertTrue(catalog["base"]["projects"]["Project_Disabled"]["disable"])
 
             project = catalog["nodes"][catalog["byDataName"]["Project_Gamma"]]
             self.assertEqual(project["displayName"]["kor"], "감마 프로젝트")
@@ -227,6 +393,93 @@ class CatalogGeneratorTests(unittest.TestCase):
             self.assertIn("알파 기술", markdown)
             self.assertIn("감마 프로젝트", markdown)
             self.assertIn("Node count: `3` total, `2` global techs, `1` projects.", markdown)
+            self.assertIn("Schema version `2`", markdown)
+
+            first = json.dumps(catalog, ensure_ascii=False, sort_keys=True)
+            (templates_dir / "TITechTemplate.json").touch()
+            second = json.dumps(
+                rc.build_catalog(templates_dir, cu.parse_languages("kor,en")),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            self.assertEqual(first, second)
+
+    def test_research_catalog_scenario_overlay_is_exact_and_base_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            templates_dir = root / "Templates"
+            overlay_dir = root / "Overlay"
+            write_json(
+                templates_dir / "TITechTemplate.json",
+                [
+                    {
+                        "dataName": "Tech_Alpha",
+                        "friendlyName": "Alpha",
+                        "techCategory": "Energy",
+                        "researchCost": 100,
+                    }
+                ],
+            )
+            write_json(
+                templates_dir / "TIProjectTemplate.json",
+                [
+                    {
+                        "dataName": "Project_Alpha",
+                        "friendlyName": "Project Alpha",
+                        "techCategory": "Energy",
+                        "researchCost": 200,
+                    }
+                ],
+            )
+            write_json(
+                overlay_dir / "TITechTemplate.json",
+                [
+                    {
+                        "dataName": "Tech_Alpha",
+                        "researchCost": 125,
+                    },
+                    {
+                        "dataName": "Tech_2003",
+                        "friendlyName": "Millennium Tech",
+                        "techCategory": "SocialScience",
+                        "researchCost": 300,
+                    },
+                ],
+            )
+
+            catalog = rc.build_catalog(
+                templates_dir,
+                [],
+                scenario_template_dirs={"2003Scenario": overlay_dir},
+                supported_scenarios=["ModernScenario", "2003Scenario"],
+            )
+
+            standard = rc.select_runtime_payload(catalog, "ModernScenario")
+            millennium = rc.select_runtime_payload(catalog, "2003Scenario")
+            self.assertEqual(standard["techs"]["Tech_Alpha"]["researchCost"], 100)
+            self.assertNotIn("Tech_2003", standard["techs"])
+            self.assertEqual(millennium["techs"]["Tech_Alpha"]["researchCost"], 125)
+            self.assertEqual(millennium["techs"]["Tech_2003"]["techCategory"], "SocialScience")
+            with self.assertRaisesRegex(rc.ResearchCatalogError, "Unsupported research scenario"):
+                rc.select_runtime_payload(catalog, "UnknownScenario")
+
+    def test_research_catalog_rejects_duplicate_runtime_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            templates_dir = Path(tmp) / "Templates"
+            write_json(
+                templates_dir / "TITechTemplate.json",
+                [
+                    {"dataName": "Duplicate", "techCategory": "Energy", "researchCost": 1},
+                    {"dataName": "Duplicate", "techCategory": "Energy", "researchCost": 2},
+                ],
+            )
+            write_json(
+                templates_dir / "TIProjectTemplate.json",
+                [{"dataName": "Project_One", "techCategory": "Energy", "researchCost": 1}],
+            )
+
+            with self.assertRaisesRegex(rc.ResearchCatalogError, "Duplicate research dataName"):
+                rc.build_catalog(templates_dir, [])
 
 
 if __name__ == "__main__":

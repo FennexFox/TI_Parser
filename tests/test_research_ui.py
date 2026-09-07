@@ -20,6 +20,17 @@ def add_state(gamestates, type_name, state_id, value):
     return value
 
 
+def add_human_player(gamestates, faction, faction_id=1, player_id=2):
+    faction["player"] = ref(player_id)
+    add_state(
+        gamestates,
+        "TIPlayerState",
+        player_id,
+        {"templateName": "TestPlayer", "isAI": False, "faction": ref(faction_id)},
+    )
+    add_state(gamestates, "TIMetadataState", player_id + 1000, {"playerFactionName": faction["displayName"]})
+
+
 def build_research_fixture(*, docked=False):
     gamestates = {}
     faction = add_state(
@@ -47,6 +58,7 @@ def build_research_fixture(*, docked=False):
             ],
         },
     )
+    add_human_player(gamestates, faction)
     add_state(
         gamestates,
         "TIGlobalResearchState",
@@ -73,7 +85,307 @@ def build_research_fixture(*, docked=False):
     return indexed, faction
 
 
+def build_mission_control_fixture():
+    gamestates = {}
+    faction = add_state(
+        gamestates,
+        "TIFactionState",
+        1,
+        {
+            "templateName": "ResistCouncil",
+            "displayName": "Resistance",
+            "baseIncomes_year": {"MissionControl": 2.0},
+            "missionControlUsage": 5.0,
+            "habSectors": [ref(11)],
+        },
+    )
+    add_human_player(gamestates, faction)
+    add_state(
+        gamestates,
+        "TIHabState",
+        10,
+        {
+            "displayName": "Mission Control Test Hab",
+            "faction": ref(1),
+            "sectors": [ref(11)],
+            "anyCoreCompleted": True,
+        },
+    )
+    add_state(
+        gamestates,
+        "TISectorState",
+        11,
+        {
+            "faction": ref(1),
+            "hab": ref(10),
+            "habModules": [ref(20), ref(21), ref(22), ref(23), ref(24)],
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabModuleState",
+        20,
+        {
+            "templateName": "CommandCenter",
+            "priorModuleTemplateName": "OperationsCenter",
+            "priorModuleCompleted": True,
+            "constructionCompleted": False,
+            "powered": False,
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabModuleState",
+        21,
+        {
+            "templateName": "OperationsCenter",
+            "constructionCompleted": False,
+            "powered": False,
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabModuleState",
+        22,
+        {
+            "templateName": "ResearchCampus",
+            "constructionCompleted": False,
+            "powered": False,
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabModuleState",
+        23,
+        {
+            "templateName": "OperationsCenter",
+            "constructionCompleted": False,
+            "powered": False,
+            "destroyed": True,
+        },
+    )
+    add_state(
+        gamestates,
+        "TIHabModuleState",
+        24,
+        {
+            "templateName": "OperationsCenter",
+            "constructionCompleted": True,
+            "powered": True,
+        },
+    )
+    templates = {
+        "OperationsCenter": {"dataName": "OperationsCenter", "missionControl": 4},
+        "CommandCenter": {"dataName": "CommandCenter", "missionControl": 10},
+        "ResearchCampus": {"dataName": "ResearchCampus", "missionControl": -1},
+    }
+    return ti.build_index({"gamestates": gamestates}), faction, templates
+
+
 class ResearchUiTests(unittest.TestCase):
+    def test_topbar_counts_upgrading_operations_center_and_projects_queue(self):
+        indexed, _, hab_templates = build_mission_control_fixture()
+        templates = ti.ResearchTemplates({}, {}, {}, hab_templates, {}, {}, {})
+
+        with (
+            patch.object(ti, "TOPBAR_RESOURCES", ("MissionControl",)),
+            patch.object(ti, "faction_control_point_maintenance", return_value={}),
+        ):
+            result = ti.calculate_topbar(indexed, None, include_details=True, research_templates=templates)
+
+        mission_control = result["resources"]["MissionControl"]
+        self.assertEqual(mission_control["capacity"], 10.0)
+        self.assertEqual(mission_control["usage"], 5.0)
+        self.assertEqual(mission_control["available"], 5.0)
+        self.assertEqual(mission_control["components"]["habs"], 8.0)
+        self.assertEqual(
+            mission_control["projectedAfterCurrentQueue"],
+            {
+                "capacity": 20.0,
+                "usage": 6.0,
+                "available": 14.0,
+                "capacityChange": 10.0,
+                "habCapacityChange": 10.0,
+                "effectsChange": 0.0,
+                "usageChange": 1,
+                "headroomChange": 9.0,
+                "moduleChanges": [
+                    {
+                        "template": "CommandCenter",
+                        "priorTemplate": "OperationsCenter",
+                        "count": 1,
+                        "capacityChange": 6,
+                        "usageChange": 0,
+                        "headroomChange": 6,
+                    },
+                    {
+                        "template": "OperationsCenter",
+                        "priorTemplate": None,
+                        "count": 1,
+                        "capacityChange": 4,
+                        "usageChange": 0,
+                        "headroomChange": 4,
+                    },
+                    {
+                        "template": "ResearchCampus",
+                        "priorTemplate": None,
+                        "count": 1,
+                        "capacityChange": 0,
+                        "usageChange": 1,
+                        "headroomChange": -1,
+                    },
+                ],
+            },
+        )
+
+    def test_queue_projection_applies_mission_control_disruption(self):
+        indexed, _, hab_templates = build_mission_control_fixture()
+        templates = ti.ResearchTemplates(
+            {},
+            {"DisruptMC": {"operation": "Multiplicative", "value": 0.5}},
+            {},
+            hab_templates,
+            {},
+            {},
+            {},
+        )
+
+        with (
+            patch.object(ti, "TOPBAR_RESOURCES", ("MissionControl",)),
+            patch.object(
+                ti,
+                "faction_effect_contexts",
+                return_value={"MissionControlDisruption_PCT": ["DisruptMC"]},
+            ),
+            patch.object(ti, "faction_control_point_maintenance", return_value={}),
+        ):
+            result = ti.calculate_topbar(indexed, None, include_details=True, research_templates=templates)
+
+        mission_control = result["resources"]["MissionControl"]
+        projected = mission_control["projectedAfterCurrentQueue"]
+        self.assertEqual(mission_control["capacity"], 5.0)
+        self.assertEqual(projected["capacity"], 10.0)
+        self.assertEqual(projected["capacityChange"], 5.0)
+        self.assertEqual(projected["habCapacityChange"], 10.0)
+        self.assertEqual(projected["effectsChange"], -5.0)
+        self.assertEqual(projected["usage"], 6.0)
+        self.assertEqual(projected["available"], 4.0)
+        self.assertEqual(projected["headroomChange"], 4.0)
+
+    def test_queue_projection_reapplies_fixed_mission_control_effect(self):
+        indexed, _, hab_templates = build_mission_control_fixture()
+        templates = ti.ResearchTemplates(
+            {},
+            {"FixedMC": {"operation": "SetToFixedValue", "value": 7.0}},
+            {},
+            hab_templates,
+            {},
+            {},
+            {},
+        )
+
+        with (
+            patch.object(ti, "TOPBAR_RESOURCES", ("MissionControl",)),
+            patch.object(
+                ti,
+                "faction_effect_contexts",
+                return_value={"MissionControlDisruption_PCT": ["FixedMC"]},
+            ),
+            patch.object(ti, "faction_control_point_maintenance", return_value={}),
+        ):
+            result = ti.calculate_topbar(indexed, None, include_details=True, research_templates=templates)
+
+        mission_control = result["resources"]["MissionControl"]
+        projected = mission_control["projectedAfterCurrentQueue"]
+        self.assertEqual(mission_control["capacity"], 7.0)
+        self.assertEqual(projected["capacity"], 7.0)
+        self.assertEqual(projected["capacityChange"], 0.0)
+        self.assertEqual(projected["habCapacityChange"], 10.0)
+        self.assertEqual(projected["effectsChange"], -10.0)
+        self.assertEqual(projected["available"], 1.0)
+        self.assertEqual(projected["headroomChange"], -1.0)
+
+    def test_research_breakdown_applies_mc_effect_to_upgrading_operations_center(self):
+        indexed, _, hab_templates = build_mission_control_fixture()
+        templates = ti.ResearchTemplates(
+            {},
+            {"DisruptMC": {"operation": "Multiplicative", "value": 0.5}},
+            {},
+            hab_templates,
+            {},
+            {},
+            {},
+        )
+
+        with patch.object(
+            ti,
+            "faction_effect_contexts",
+            return_value={"MissionControlDisruption_PCT": ["DisruptMC"]},
+        ):
+            result = ti.calculate_research_breakdown(
+                indexed,
+                None,
+                include_details=True,
+                templates=templates,
+            )
+
+        mission_control = result["missionControl"]
+        self.assertEqual(mission_control["max"], 5.0)
+        self.assertEqual(mission_control["available"], 0.0)
+        self.assertEqual(mission_control["excessUsedForResearch"], 0.0)
+        self.assertEqual(mission_control["components"]["habs"], 8)
+        self.assertEqual(mission_control["components"]["effects"], -5.0)
+
+    def test_foreign_sector_module_does_not_contribute_mission_control(self):
+        record = {
+            "templateName": "OperationsCenter",
+            "template": {"missionControl": 4},
+            "completed": True,
+            "powered": True,
+            "destroyed": False,
+            "decommissioning": False,
+            "sectorOwnedByHabFaction": False,
+        }
+
+        self.assertEqual(ti.hab_module_current_mission_control(record), 0)
+        self.assertEqual(ti.hab_module_projected_mission_control(record), 0)
+
+    def test_research_breakdown_mc_keeps_prior_operations_center_visible(self):
+        indexed, faction, hab_templates = build_mission_control_fixture()
+
+        research_month, mission_control, details = ti.hab_research_and_mc(
+            indexed,
+            faction,
+            hab_templates,
+            {},
+        )
+
+        self.assertEqual(research_month, 0.0)
+        self.assertEqual(mission_control, 8)
+        self.assertEqual(len(details), 1)
+        self.assertEqual(details[0]["missionControl"], 8)
+
+    def test_planning_prefers_current_queue_mission_control_projection(self):
+        self.assertEqual(
+            ti.mission_control_available_for_planning(
+                {
+                    "resources": {
+                        "MissionControl": {
+                            "available": 5,
+                            "projectedAfterCurrentQueue": {"available": 14},
+                        }
+                    }
+                }
+            ),
+            14.0,
+        )
+        self.assertEqual(
+            ti.mission_control_available_for_planning(
+                {"resources": {"MissionControl": {"available": 5}}}
+            ),
+            5.0,
+        )
+
     def test_topbar_records_before_distribution_research_in_shared_cache(self):
         indexed = ti.build_index({"gamestates": {}})
         faction = {"ID": ref(7), "templateName": "ResistCouncil", "resources": {"Research": 4.0}}
@@ -93,6 +405,7 @@ class ResearchUiTests(unittest.TestCase):
             patch.object(ti, "faction_max_mission_control_components", return_value={"total": 0.0}),
             patch.object(ti, "faction_control_point_maintenance", return_value={}),
             patch.object(ti, "calculate_research_breakdown", return_value=research),
+            patch.object(ti, "faction_is_player", return_value=True),
         ):
             result = ti.calculate_topbar(indexed, None, research_templates=templates, base_daily_cache=cache)
 
@@ -124,8 +437,14 @@ class ResearchUiTests(unittest.TestCase):
             ti.active_slots_with_category(
                 indexed,
                 faction,
-                {"GlobalSpace": {"techCategory": "SpaceScience"}},
                 {
+                    "GlobalSpace": {"techCategory": "SpaceScience"},
+                    "GlobalLife": {"techCategory": "LifeScience"},
+                    "GlobalInfo": {"techCategory": "InformationScience"},
+                },
+                {
+                    "ProjectXeno": {"techCategory": "Xenology"},
+                    "ProjectMilitary": {"techCategory": "MilitaryScience"},
                     "ProjectSpace": {"techCategory": "SpaceScience"},
                     "ProjectPausedSpace": {"techCategory": "SpaceScience"},
                 },
@@ -159,8 +478,16 @@ class ResearchUiTests(unittest.TestCase):
             faction,
             0,
             100.0,
-            {"GlobalSpace": {"techCategory": "SpaceScience"}},
-            {"ProjectSpace": {"techCategory": "SpaceScience"}},
+            {
+                "GlobalSpace": {"techCategory": "SpaceScience"},
+                "GlobalLife": {"techCategory": "LifeScience"},
+                "GlobalInfo": {"techCategory": "InformationScience"},
+            },
+            {
+                "ProjectXeno": {"techCategory": "Xenology"},
+                "ProjectMilitary": {"techCategory": "MilitaryScience"},
+                "ProjectSpace": {"techCategory": "SpaceScience"},
+            },
             {},
             {},
             {},
@@ -184,8 +511,16 @@ class ResearchUiTests(unittest.TestCase):
             faction,
             0,
             100.0,
-            {"GlobalSpace": {"techCategory": "SpaceScience"}},
-            {"ProjectSpace": {"techCategory": "SpaceScience"}},
+            {
+                "GlobalSpace": {"techCategory": "SpaceScience"},
+                "GlobalLife": {"techCategory": "LifeScience"},
+                "GlobalInfo": {"techCategory": "InformationScience"},
+            },
+            {
+                "ProjectXeno": {"techCategory": "Xenology"},
+                "ProjectMilitary": {"techCategory": "MilitaryScience"},
+                "ProjectSpace": {"techCategory": "SpaceScience"},
+            },
             {},
             {},
             {},
@@ -194,6 +529,146 @@ class ResearchUiTests(unittest.TestCase):
 
         self.assertAlmostEqual(points["modifiers"]["category"]["components"]["fleets"], 0.0)
         self.assertAlmostEqual(points["daily"], 20.0)
+
+    def assert_dependency(self, raised, *, kind, name, context):
+        missing = raised.exception.missing_dependencies
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(set(missing[0]), {"kind", "name", "context", "scenario", "reason"})
+        self.assertEqual(missing[0]["kind"], kind)
+        self.assertEqual(missing[0]["name"], name)
+        self.assertEqual(missing[0]["context"], context)
+        self.assertIsNone(missing[0]["scenario"])
+        self.assertTrue(missing[0]["reason"])
+
+    def test_missing_computer_scientist_trait_fails_project_facilities_closed(self):
+        gamestates = {}
+        faction = add_state(gamestates, "TIFactionState", 1, {"councilors": [ref(2)]})
+        add_state(gamestates, "TICouncilorState", 2, {"traitTemplateNames": ["ComputerScientist"]})
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.project_facility_counts(indexed, faction, {}, {}, {})
+
+        self.assert_dependency(
+            raised,
+            kind="trait",
+            name="ComputerScientist",
+            context="project.facilities.trait",
+        )
+
+    def test_missing_applying_cern_org_fails_project_facilities_closed(self):
+        gamestates = {}
+        faction = add_state(gamestates, "TIFactionState", 1, {"councilors": [ref(2)]})
+        add_state(gamestates, "TICouncilorState", 2, {"orgs": [ref(3)]})
+        add_state(
+            gamestates,
+            "TIOrgState",
+            3,
+            {"templateName": "CERN", "applyingBonuses": True, "projectCapacityGranted": 2},
+        )
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.project_facility_counts(indexed, faction, {}, {}, {})
+
+        self.assert_dependency(
+            raised,
+            kind="org",
+            name="CERN",
+            context="project.facilities.org",
+        )
+
+    def test_missing_active_energy_lab_fails_project_facilities_closed(self):
+        gamestates = {}
+        faction = add_state(gamestates, "TIFactionState", 1, {"habSectors": [ref(11)]})
+        add_state(gamestates, "TISectorState", 11, {"habModules": [ref(20)]})
+        add_state(
+            gamestates,
+            "TIHabModuleState",
+            20,
+            {"templateName": "EnergyLab", "constructionCompleted": True, "powered": True},
+        )
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.project_facility_counts(indexed, faction, {}, {}, {})
+
+        self.assert_dependency(
+            raised,
+            kind="hab-module",
+            name="EnergyLab",
+            context="project.facilities.hab",
+        )
+
+    def test_missing_weighted_research_definition_fails_closed(self):
+        indexed, faction = build_research_fixture()
+
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.active_slots_with_category(indexed, faction, {}, {}, "SpaceScience")
+
+        self.assert_dependency(
+            raised,
+            kind="research-tech",
+            name="GlobalSpace",
+            context="research.category.active-tech",
+        )
+
+    def test_missing_fleet_design_and_utility_fail_closed(self):
+        indexed, faction = build_research_fixture(docked=False)
+        faction["shipDesigns"] = []
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.faction_fleet_category_modifier(indexed, faction, {}, "SpaceScience")
+        self.assert_dependency(
+            raised,
+            kind="ship-design",
+            name="ScienceShip",
+            context="research.category.fleet-design",
+        )
+
+        indexed, faction = build_research_fixture(docked=False)
+        with self.assertRaises(ti.CalculationDependencyError) as raised:
+            ti.faction_fleet_category_modifier(indexed, faction, {}, "SpaceScience")
+        self.assert_dependency(
+            raised,
+            kind="ship-utility",
+            name="MobileSpaceScienceLab",
+            context="research.category.fleet-utility",
+        )
+
+    def test_optional_modifier_sources_and_unused_slots_remain_valid(self):
+        gamestates = {}
+        faction = add_state(
+            gamestates,
+            "TIFactionState",
+            1,
+            {
+                "councilors": [ref(2)],
+                "researchWeights": [0, 1, 0, 0, 1, 0],
+                "orgProjectSlotUnlocked": False,
+            },
+        )
+        add_state(gamestates, "TICouncilorState", 2, {"orgs": [ref(3)]})
+        add_state(gamestates, "TIOrgState", 3, {"templateName": "CERN", "applyingBonuses": False})
+        add_state(
+            gamestates,
+            "TIGlobalResearchState",
+            4,
+            {"techProgress": [{"techTemplateName": "MissingZeroWeight"}, {}, {}]},
+        )
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        self.assertEqual(ti.project_facility_counts(indexed, faction, {}, {}, {}), {"base": 0.0, "traits": 0.0, "orgs": 0.0, "habs": 0.0})
+        self.assertEqual(ti.active_slots_with_category(indexed, faction, {}, {}, "SpaceScience"), 0)
+        self.assertEqual(ti.research_points_to_slot(indexed, faction, 0, 100.0, {}, {}, {}, {}, {}, {})["daily"], 0.0)
+        self.assertEqual(ti.research_points_to_slot(indexed, faction, 4, 100.0, {}, {}, {}, {}, {}, {})["daily"], 0.0)
+
+        docked_indexed, docked_faction = build_research_fixture(docked=True)
+        self.assertEqual(ti.faction_fleet_category_modifier(docked_indexed, docked_faction, {}, "SpaceScience"), 0.0)
+        self.assertEqual(ti.faction_fleet_category_modifier(docked_indexed, docked_faction, {}, "LifeScience"), 0.0)
+
+        empty_indexed, empty_faction = build_research_fixture(docked=False)
+        empty_faction["shipDesigns"][0]["moduleTemplateEntries"] = [{"moduleName": "Empty"}]
+        self.assertEqual(ti.faction_fleet_category_modifier(empty_indexed, empty_faction, {}, "SpaceScience"), 0.0)
 
 
 if __name__ == "__main__":

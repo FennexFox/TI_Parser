@@ -19,9 +19,14 @@ from types import MappingProxyType
 from typing import Any
 
 from ti_parser_core import (
+    CalculationDependency,
+    CalculationDependencyError,
     DEFAULT_CACHE_DIR,
     SAVE_GLOB,
     IndexedState,
+    LocationCatalogError,
+    SolarPowerDataError,
+    TemplateSource,
     apply_effect_modifiers,
     as_float,
     build_index,
@@ -34,11 +39,14 @@ from ti_parser_core import (
     effect_modifier_delta,
     faction_effect_contexts,
     file_fingerprint,
+    faction_is_human_player,
     find_faction_state,
     find_latest_save,
     first_value,
     json_default,
     load_named_templates,
+    load_hab_module_catalog,
+    load_location_catalog,
     load_save,
     load_trait_templates,
     match_raw_state,
@@ -50,21 +58,46 @@ from ti_parser_core import (
     region_nation_summary,
     resolve_ref,
     resolve_save_path,
+    resolve_scenario_templates,
     resolve_templates_dir,
     save_fingerprint,
+    scenario_template_name,
     short_type,
     snapshot_fingerprint,
     state_value_by_id,
+    template_source_value,
     type_entries,
+    module_catalog_diagnostics,
+    location_catalog_diagnostics,
 )
+from ti_parser_catalogs import (
+    CatalogIntegrityError,
+    RuntimeCatalogs,
+    UnsupportedCatalogScenarioError,
+    load_runtime_catalogs,
+    resolve_required_definition,
+)
+from ti_parser_ai import calculate_ai_fleet_diagnostics
+from ti_parser_claims import calculate_nation_claims
+from ti_parser_verify import verify_catalogs
 import ti_parser_snapshot as snapshot_layer
 import ti_parser_income as income_layer
 import ti_parser_hab as hab_layer
 import ti_parser_org as org_layer
+import ti_parser_nation_projection as nation_projection_layer
+from ti_parser_mechanics import Rules
+from ti_parser_nation_validity import (
+    MIN_CONTROL_POINTS_FOR_NAVY,
+    MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION,
+    PCGDP_FOR_NAVY_EXCEPTION,
+    PriorityValidityResult,
+    can_build_navy,
+    evaluate_priority_validity,
+)
 from ti_parser_snapshot import SnapshotConfig
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 DEFAULT_MAX_COUNCILOR_ATTRIBUTE = 25
 DAYS_PER_YEAR = 365.2422
 DEFAULT_GLOBAL_CONFIG = {
@@ -92,11 +125,83 @@ DEFAULT_GLOBAL_CONFIG = {
     "baselineMaxHumanCombatAcceleration_g": 3.0,
     "smallShipyardPenaltyPowerPerTier": 1.5,
 }
+
+
+def calculation_catalogs(indexed: IndexedState, context: str) -> RuntimeCatalogs:
+    """Load the validated package-only bundle for the save's exact scenario."""
+
+    scenario = scenario_template_name(indexed)
+    if not scenario:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="scenario",
+                name="scenarioMetaTemplateName",
+                context=context,
+                scenario=None,
+                reason="save does not identify a canonical supported scenario",
+            )
+        )
+    catalog_files = [
+        "effect_catalog.json",
+        "trait_catalog.json",
+        "org_catalog.json",
+        "research_catalog.json",
+        "ship_catalog.json",
+        "nation_claim_catalog.json",
+    ]
+    if context in {"nation-ui", "nation-projection"}:
+        catalog_files.append("nation_development_catalog.json")
+    try:
+        return load_runtime_catalogs(
+            scenario,
+            catalog_files=catalog_files,
+        )
+    except UnsupportedCatalogScenarioError as exc:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="scenario",
+                name=exc.scenario,
+                context=context,
+                scenario=scenario,
+                reason=str(exc),
+            )
+        ) from exc
+    except CatalogIntegrityError as exc:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="catalog-integrity",
+                name="runtime bundle",
+                context=context,
+                scenario=scenario,
+                reason=str(exc),
+            )
+        ) from exc
+
+
+def required_catalog_row(
+    indexed: IndexedState,
+    rows: dict[str, dict[str, Any]],
+    kind: str,
+    name: Any,
+    context: str,
+    reason: str = "referenced definition cannot be resolved from runtime data",
+) -> dict[str, Any]:
+    """Resolve a referenced catalog row or stop the calculation as incomplete."""
+
+    return resolve_required_definition(
+        rows,
+        name,
+        kind,
+        context,
+        scenario_template_name(indexed),
+        reason,
+    )
+
+
+DEFAULT_CP_MAINTENANCE_GDP_SCALE = 1_000_000_000.0
+CP_MAINTENANCE_CAMPAIGN_START_GDP_FACTOR = 6.26e-06
 MIN_POPULATION_FOR_FIRST_ARMY_MILLIONS = 5.0
 MIN_POPULATION_FOR_ADDITIONAL_ARMIES_PER_MILLIONS = 25.0
-MIN_CONTROL_POINTS_FOR_NAVY = 4
-MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION = 3
-PCGDP_FOR_NAVY_EXCEPTION = 40000.0
 STANDARD_GRAVITY_MPS2 = 9.806650161743164
 GRAVITATIONAL_CONSTANT = 6.67384e-11
 ASTRONOMICAL_UNIT_KM = 149_597_870.7
@@ -115,6 +220,23 @@ NATION_PRIORITY_ROWS = (
     ("BuildArmy", "군대 창설", "Military_BuildArmy", "Military_BuildArmy", 60),
     ("BuildNavy", "해군 건설", "Military_BuildNavy", "Military_BuildNavy", 100),
     ("BuildNuclearWeapons", "핵무기", "Military_BuildNuclearWeapons", "Military_BuildNuclearWeapons", 40),
+)
+
+
+@dataclass(frozen=True)
+class ScenarioRules:
+    build_army_priority_cost: float = 60.0
+    control_point_maintenance_multiplier: float = 1.0
+
+
+DEFAULT_SCENARIO_RULES = ScenarioRules()
+SCENARIO_RULE_OVERRIDES = MappingProxyType(
+    {
+        "BrokenEarthScenario": ScenarioRules(
+            build_army_priority_cost=40.0,
+            control_point_maintenance_multiplier=0.7,
+        ),
+    }
 )
 NATION_INACTIVE_PRIORITY_KEYS = (
     "Government",
@@ -140,6 +262,21 @@ HAB_MONTHLY_RESOURCES = (
     "Influence",
     "Operations",
     "Projects",
+)
+TOPBAR_EFFECT_CONTEXTS = frozenset(
+    {
+        "ControlPointMaintenance",
+        "MissionControlDisruption_PCT",
+        "SpaceMiningBonus",
+        "MiningWaterBonus",
+        "MiningVolatilesBonus",
+        "MiningMetalsBonus",
+        "MiningNoblesBonus",
+        "MiningFissilesBonus",
+        "PublicOpinionInfluence",
+        "ControlPointResearch",
+        "HabResearchProduction",
+    }
 )
 HAB_INCOME_FIELDS = {
     "Money": "incomeMoney_month",
@@ -325,9 +462,9 @@ SHIP_PLAN_UTILITY_TEMPLATE_FILES = (
     ("heatSink", "TIHeatSinkTemplate.json"),
 )
 SHIP_PLAN_SHIPYARD_TIERS = {
-    1: {"template": "SpaceDock", "constructionTimeModifier": 1.0},
-    2: {"template": "Shipyard", "constructionTimeModifier": 0.8},
-    3: {"template": "Spaceworks", "constructionTimeModifier": 0.6},
+    1: "SpaceDock",
+    2: "Shipyard",
+    3: "Spaceworks",
 }
 SHIP_PLAN_SELF_POWERED_DRIVE_CLASSES = {
     "Chemical",
@@ -504,10 +641,17 @@ org_plan_normalize_focus = org_layer.org_plan_normalize_focus
 org_plan_objective_score = org_layer.org_plan_objective_score
 org_plan_final_attributes = org_layer.org_plan_final_attributes
 org_plan_roster_summary = org_layer.org_plan_roster_summary
+MAX_ORGS_PER_COUNCILOR = org_layer.MAX_ORGS_PER_COUNCILOR
 org_plan_attribute_delta = org_layer.org_plan_attribute_delta
 org_plan_org_row = org_layer.org_plan_org_row
 org_plan_region_nation_id = org_layer.org_plan_region_nation_id
+org_plan_controlled_nation_ids = org_layer.org_plan_controlled_nation_ids
+org_plan_nation_interest = org_layer.org_plan_nation_interest
+org_plan_requirement_summary = org_layer.org_plan_requirement_summary
+org_plan_faction_eligibility = org_layer.org_plan_faction_eligibility
+org_plan_councilor_faction = org_layer.org_plan_councilor_faction
 org_plan_owner_eligibility = org_layer.org_plan_owner_eligibility
+org_plan_candidate_row = org_layer.org_plan_candidate_row
 org_plan_major_attributes = org_layer.org_plan_major_attributes
 councilor_org_plan_profile = org_layer.councilor_org_plan_profile
 org_plan_best_assignment = org_layer.org_plan_best_assignment
@@ -628,8 +772,21 @@ def nation_boost_contribution_month(indexed: IndexedState, nation: dict[str, Any
     return income_layer.nation_boost_contribution_month(indexed, nation, faction_id)
 
 
-def nation_influence_contribution_month(indexed: IndexedState, nation: dict[str, Any], faction: dict[str, Any]) -> float:
-    return income_layer.nation_influence_contribution_month(indexed, nation, faction, INCOME_CONFIG)
+def nation_influence_contribution_month(
+    indexed: IndexedState,
+    nation: dict[str, Any],
+    faction: dict[str, Any],
+    effect_contexts: dict[str, list[str]] | None = None,
+    effect_templates: dict[str, dict[str, Any]] | None = None,
+) -> float:
+    base = income_layer.nation_influence_contribution_month(indexed, nation, faction, INCOME_CONFIG)
+    modifier = apply_effect_modifiers(
+        effect_contexts or {},
+        effect_templates or {},
+        "PublicOpinionInfluence",
+        1.0,
+    )
+    return base * modifier
 
 
 def nation_adviser_science_bonus(
@@ -738,6 +895,18 @@ def hab_module_active_record(record: dict[str, Any]) -> bool:
     return hab_layer.hab_module_active_record(record)
 
 
+def get_effective_module_state(record: dict[str, Any], at_date: datetime | None = None) -> dict[str, Any]:
+    return hab_layer.get_effective_module_state(record, at_date)
+
+
+def hab_module_current_mission_control(record: dict[str, Any]) -> int:
+    return hab_layer.hab_module_current_mission_control(record)
+
+
+def hab_module_projected_mission_control(record: dict[str, Any]) -> int:
+    return hab_layer.hab_module_projected_mission_control(record)
+
+
 def hab_core_module_record(records: list[dict[str, Any]]) -> dict[str, Any] | None:
     return hab_layer.hab_core_module_record(records)
 
@@ -815,8 +984,8 @@ def hab_crew(records: list[dict[str, Any]]) -> int:
     return hab_layer.hab_crew(records)
 
 
-def hab_administration_modifier(records: list[dict[str, Any]]) -> float:
-    return hab_layer.hab_administration_modifier(records)
+def hab_administration_modifier(records: list[dict[str, Any]], at_date: datetime | None = None) -> float:
+    return hab_layer.hab_administration_modifier(records, at_date)
 
 
 def hab_farm_crew_discount(records: list[dict[str, Any]], any_core_completed: bool) -> int:
@@ -835,6 +1004,7 @@ def hab_monthly_resource_income(
     effect_contexts: dict[str, list[str]] | None = None,
     effect_templates: dict[str, dict[str, Any]] | None = None,
     mining_rate: float = 1.0,
+    at_date: datetime | None = None,
 ) -> dict[str, float]:
     return hab_layer.hab_monthly_resource_income(
         hab,
@@ -848,6 +1018,7 @@ def hab_monthly_resource_income(
         effect_contexts=effect_contexts,
         effect_templates=effect_templates,
         mining_rate=mining_rate,
+        at_date=at_date,
         config=HAB_CONFIG,
         faction_councilor_ids=faction_councilor_ids,
     )
@@ -859,7 +1030,11 @@ def space_body_template(
 ) -> dict[str, Any]:
     if not body:
         return {}
-    return (body_templates or {}).get(str(body.get("templateName") or ""), {})
+    template_name = str(body.get("templateName") or "")
+    template = (body_templates or {}).get(template_name)
+    if template is None and template_name:
+        raise LocationCatalogError(f"Space-body template {template_name!r} is missing from the packaged location catalog")
+    return template or {}
 
 
 def space_body_mean_radius_km(template: dict[str, Any]) -> float:
@@ -879,6 +1054,9 @@ def space_body_mean_radius_km(template: dict[str, Any]) -> float:
 
 
 def space_body_max_radius_km(template: dict[str, Any]) -> float:
+    normalized_radius = as_float(template.get("maxRadius_km"), 0.0)
+    if normalized_radius > 0.0:
+        return normalized_radius
     dimensions = [
         dimension
         for field in ("dimensionX_km", "dimensionY_km", "dimensionZ_km")
@@ -964,11 +1142,22 @@ def orbit_template_semi_major_axis_km(
         semi_major_axis_km = space_body_mean_radius_km(barycenter_template) + altitude_km
     elif semi_major_axis_km <= 0.0 and semi_major_axis_au > 0.0:
         semi_major_axis_km = semi_major_axis_au * ASTRONOMICAL_UNIT_KM
+    elif semi_major_axis_km <= 0.0 and orbit_template.get("synch"):
+        mass_kg = as_float(barycenter_template.get("mass_kg"), 0.0)
+        rotation_hours = as_float(barycenter_template.get("rotationPeriod_strHours"), 0.0)
+        if mass_kg > 0.0 and rotation_hours > 0.0:
+            rotation_seconds = rotation_hours * 3600.0
+            semi_major_axis_km = (
+                GRAVITATIONAL_CONSTANT * mass_kg * rotation_seconds * rotation_seconds / (4.0 * math.pi * math.pi)
+            ) ** (1.0 / 3.0) / 1000.0
     elif semi_major_axis_km <= 0.0 and orbit_template.get("radialOrbit"):
         semi_major_axis_km = space_body_max_radius_km(barycenter_template) * 3.25
 
     max_radius_km = space_body_max_radius_km(barycenter_template)
-    hill_radius_km = as_float(barycenter_template.get("Hill Radius in km"), 0.0)
+    hill_radius_km = as_float(
+        barycenter_template.get("hillRadius_km", barycenter_template.get("Hill Radius in km")),
+        0.0,
+    )
     if semi_major_axis_km > 0.0 and max_radius_km > 0.0:
         if hill_radius_km > 0.0:
             semi_major_axis_km = min(semi_major_axis_km, hill_radius_km)
@@ -986,7 +1175,10 @@ def space_body_orbit_solar_visibility(
     semi_major_axis_km = orbit_template_semi_major_axis_km(orbit_template, template)
     mean_radius_km = space_body_mean_radius_km(template)
     if semi_major_axis_km <= 0.0 or mean_radius_km <= 0.0:
-        return 1.0
+        raise SolarPowerDataError(
+            f"Cannot derive orbital solar visibility for {orbit_template.get('dataName') or '<unknown orbit>'}: "
+            "the packaged location catalog lacks resolvable orbit radius or body radius data."
+        )
     visibility = 1.0 - math.atan(mean_radius_km / semi_major_axis_km) / math.pi
 
     parent = state_value_by_id(indexed, ref_id(body.get("barycenter")))
@@ -1030,7 +1222,10 @@ def lagrange_solar_visibility(
     secondary_mass_kg = as_float(secondary_template.get("mass_kg"), 0.0)
     primary_mass_kg = as_float(primary_template.get("mass_kg"), 0.0)
     if min(secondary_orbit_km, secondary_radius_km, primary_radius_km, secondary_mass_kg, primary_mass_kg) <= 0.0:
-        return 1.0
+        raise SolarPowerDataError(
+            f"Cannot derive L2 solar visibility for {lagrange.get('templateName') or '<unknown Lagrange point>'}: "
+            "the packaged location catalog lacks required radius, mass, or orbit data."
+        )
 
     shadow_length_km = secondary_orbit_km * secondary_radius_km / primary_radius_km
     hill_ratio = (secondary_mass_kg / (3.0 * primary_mass_kg)) ** (1.0 / 3.0)
@@ -1051,7 +1246,8 @@ def hab_natural_solar_multiplier(
     hab: dict[str, Any],
     body_templates: dict[str, dict[str, Any]],
     orbit_templates: dict[str, dict[str, Any]],
-) -> float | None:
+) -> float:
+    validate_hab_solar_context(indexed, hab, body_templates, orbit_templates)
     barycenter = hab_barycenter_state(indexed, hab)
     distance_au = natural_space_object_sun_distance_au(indexed, barycenter, body_templates)
     if hab.get("habType") == "Base" or hab.get("habSite"):
@@ -1060,12 +1256,12 @@ def hab_natural_solar_multiplier(
         if str(template.get("objectType") or "") == "Star":
             return 1.0
         if distance_au is None or distance_au <= 0.0 or not body:
-            return None
+            raise_solar_power_data_error(hab, "solar distance could not be derived from the body template chain")
         site = state_value_by_id(indexed, ref_id(hab.get("habSite")))
         return space_body_surface_solar_visibility(indexed, body, site, body_templates) / (distance_au * distance_au)
 
     if distance_au is None or distance_au <= 0.0:
-        return None
+        raise_solar_power_data_error(hab, "solar distance could not be derived from the body template chain")
     orbit_state = state_value_by_id(indexed, ref_id(hab.get("orbitState"))) or {}
     orbit_template = orbit_templates.get(str(orbit_state.get("templateName") or ""), {})
     if barycenter.get("secondaryObject"):
@@ -1073,6 +1269,86 @@ def hab_natural_solar_multiplier(
     else:
         visibility = space_body_orbit_solar_visibility(indexed, barycenter, orbit_template, body_templates)
     return visibility / (distance_au * distance_au)
+
+
+def solar_hab_label(hab: dict[str, Any]) -> str:
+    return str(hab.get("displayName") or hab.get("templateName") or ref_id(hab.get("ID")) or "<unknown hab>")
+
+
+def raise_solar_power_data_error(hab: dict[str, Any], detail: str) -> None:
+    raise SolarPowerDataError(
+        f"Cannot calculate Solar_Power_Variable_Output at {solar_hab_label(hab)}: {detail}. "
+        "Nominal module power is not a valid fallback."
+    )
+
+
+def require_solar_body_template(
+    hab: dict[str, Any],
+    body: dict[str, Any] | None,
+    body_templates: dict[str, dict[str, Any]],
+    role: str,
+) -> dict[str, Any]:
+    if not body:
+        raise_solar_power_data_error(hab, f"{role} body state is unresolved")
+    template_name = str(body.get("templateName") or "")
+    if not template_name:
+        raise_solar_power_data_error(hab, f"{role} body state has no templateName")
+    template = body_templates.get(template_name)
+    if not isinstance(template, dict) or not template:
+        raise_solar_power_data_error(hab, f"required body template {template_name!r} ({role}) is missing")
+    return template
+
+
+def validate_hab_solar_context(
+    indexed: IndexedState,
+    hab: dict[str, Any],
+    body_templates: dict[str, dict[str, Any]],
+    orbit_templates: dict[str, dict[str, Any]],
+) -> None:
+    """Fail closed when a variable-output solar calculation lacks location templates."""
+
+    if not body_templates:
+        raise_solar_power_data_error(hab, "the space-body template catalog is missing or empty")
+    barycenter = hab_barycenter_state(indexed, hab)
+    if not barycenter:
+        raise_solar_power_data_error(hab, "the hab barycenter state is unresolved")
+
+    surface = hab.get("habType") == "Base" or bool(hab.get("habSite"))
+    if surface:
+        body = state_value_by_id(indexed, ref_id(hab.get("barycenter")))
+        require_solar_body_template(hab, body, body_templates, "surface")
+        if hab.get("habSite") and not state_value_by_id(indexed, ref_id(hab.get("habSite"))):
+            raise_solar_power_data_error(hab, "the hab-site state is unresolved")
+        parent = state_value_by_id(indexed, ref_id((body or {}).get("barycenter")))
+        if parent:
+            require_solar_body_template(hab, parent, body_templates, "surface parent")
+    else:
+        orbit_state = state_value_by_id(indexed, ref_id(hab.get("orbitState")))
+        if not orbit_state:
+            raise_solar_power_data_error(hab, "the orbit state is unresolved")
+        orbit_template_name = str(orbit_state.get("templateName") or "")
+        if not orbit_template_name:
+            raise_solar_power_data_error(hab, "the orbit state has no templateName")
+        if not orbit_templates:
+            raise_solar_power_data_error(hab, "the orbit template catalog is missing or empty")
+        orbit_template = orbit_templates.get(orbit_template_name)
+        if not isinstance(orbit_template, dict) or not orbit_template:
+            raise_solar_power_data_error(hab, f"required orbit template {orbit_template_name!r} is missing")
+
+        if barycenter.get("secondaryObject"):
+            secondary = state_value_by_id(indexed, ref_id(barycenter.get("secondaryObject")))
+            require_solar_body_template(hab, secondary, body_templates, "Lagrange secondary")
+            primary = state_value_by_id(indexed, ref_id((secondary or {}).get("barycenter")))
+            if primary:
+                require_solar_body_template(hab, primary, body_templates, "Lagrange primary")
+        else:
+            require_solar_body_template(hab, barycenter, body_templates, "orbital barycenter")
+            parent = state_value_by_id(indexed, ref_id(barycenter.get("barycenter")))
+            if parent:
+                require_solar_body_template(hab, parent, body_templates, "orbital parent")
+                grandparent = state_value_by_id(indexed, ref_id(parent.get("barycenter")))
+                if grandparent:
+                    require_solar_body_template(hab, grandparent, body_templates, "orbital grandparent")
 
 
 def hab_solar_mirror_bonus(
@@ -1101,19 +1377,22 @@ def hab_module_power(
 ) -> int:
     template_power = int(as_float(template.get("power"), 0.0))
     rules = hab_template_special_rules(template)
-    if indexed is not None and hab is not None and body_templates:
-        if "Solar_Power_Variable_Output" in rules:
-            multiplier = hab_natural_solar_multiplier(indexed, hab, body_templates, orbit_templates or {})
-            if multiplier is None:
-                return template_power
-            output = int(round(multiplier * as_float(template.get("power"), 0.0)))
-            output += hab_solar_mirror_bonus(
-                indexed,
-                hab,
-                ref_id(hab.get("faction")),
-                int(as_float(template.get("tier"), 0.0)),
+    if "Solar_Power_Variable_Output" in rules:
+        if indexed is None or hab is None:
+            raise SolarPowerDataError(
+                "Solar_Power_Variable_Output requires indexed hab and location-template context; "
+                "nominal module power is not a valid fallback."
             )
-            return min(output, int(MAX_SOLAR_POWER_MULTIPLIER * as_float(template.get("power"), 0.0)))
+        multiplier = hab_natural_solar_multiplier(indexed, hab, body_templates or {}, orbit_templates or {})
+        output = int(round(multiplier * as_float(template.get("power"), 0.0)))
+        output += hab_solar_mirror_bonus(
+            indexed,
+            hab,
+            ref_id(hab.get("faction")),
+            int(as_float(template.get("tier"), 0.0)),
+        )
+        return min(output, int(MAX_SOLAR_POWER_MULTIPLIER * as_float(template.get("power"), 0.0)))
+    if indexed is not None and hab is not None and body_templates:
         if "Cost_Scales_With_Gravity" in rules:
             faction = state_value_by_id(indexed, ref_id(hab.get("faction"))) or {}
             relative_energy = space_body_relative_energy_for_mining(
@@ -1133,14 +1412,17 @@ def hab_power_summary(
     hab: dict[str, Any] | None = None,
     body_templates: dict[str, dict[str, Any]] | None = None,
     orbit_templates: dict[str, dict[str, Any]] | None = None,
+    at_date: datetime | None = None,
 ) -> dict[str, int]:
     generated = 0
     consumed = 0
     for record in records:
-        if not hab_module_active_record(record):
+        effective = get_effective_module_state(record, at_date)
+        if not effective.get("operational"):
             continue
+        template = effective.get("operationalTemplate") if isinstance(effective.get("operationalTemplate"), dict) else {}
         power = hab_module_power(
-            record.get("template", {}),
+            template,
             indexed=indexed,
             hab=hab,
             body_templates=body_templates,
@@ -1201,13 +1483,20 @@ def hab_location_summary(
         "gravity_mg": None,
         "maxTier": None,
     }
-    if not templates_dir or not orbit or not barycenter:
+    if not orbit or not barycenter:
         return summary
 
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_template = orbit_templates.get(str(orbit.get("template")), {})
-    body_template = body_templates.get(str(barycenter.get("template")), {})
+    location_catalog = load_location_catalog()
+    orbit_templates = location_catalog.orbit_templates
+    location_templates = location_catalog.location_templates
+    orbit_name = str(orbit.get("template") or "")
+    body_name = str(barycenter.get("template") or "")
+    orbit_template = orbit_templates.get(orbit_name)
+    body_template = location_templates.get(body_name)
+    if orbit_template is None:
+        raise LocationCatalogError(f"Orbit template {orbit_name!r} is missing from the packaged location catalog")
+    if body_template is None:
+        raise LocationCatalogError(f"Natural-location template {body_name!r} is missing from the packaged location catalog")
     max_hab_size = int(as_float(body_template.get("maxHabSize"), 0.0))
     if max_hab_size:
         summary["maxTier"] = max(1, min(max_hab_size, 3))
@@ -1231,11 +1520,13 @@ def calculate_hab_ui(
     if not found:
         raise SystemExit(f"Hab not found: {hab_name}")
     hab_id, hab = found
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
-    trait_templates = load_trait_templates(templates_dir)
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
+    location_catalog = load_location_catalog()
+    body_templates = location_catalog.body_templates
+    orbit_templates = location_catalog.orbit_templates
+    runtime_catalogs = calculation_catalogs(indexed, "hab-ui")
+    trait_templates = runtime_catalogs.traits
+    effect_templates = runtime_catalogs.effects
     faction_ref = resolve_ref(indexed, hab.get("faction"))
     faction = faction_ref[2] if faction_ref else {}
     faction_id = ref_id(hab.get("faction"))
@@ -1372,7 +1663,7 @@ def calculate_hab_slots(
     include_module_counts: bool = False,
 ) -> dict[str, Any]:
     faction_id, faction = find_faction_state(indexed, faction_name)
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     rows_all = [
         summarize_hab_slots(indexed, templates_dir, hab_id, hab, hab_module_templates, include_module_counts)
         for hab_id, hab in faction_hab_states(indexed, faction)
@@ -1543,7 +1834,18 @@ def hab_body_is_irradiated(
 ) -> bool:
     body = hab_barycenter_state(indexed, hab)
     template_name = str(body.get("templateName") or "")
-    body_template = (body_templates or {}).get(template_name, {})
+    body_template = (
+        required_catalog_row(
+            indexed,
+            body_templates or {},
+            "location-body",
+            template_name,
+            "hab-planner.irradiation",
+            "hab location references a body absent from the packaged location catalog",
+        )
+        if template_name
+        else {}
+    )
     return max(
         as_float(body.get("irradiatedMultiplier"), 1.0),
         as_float(body_template.get("irradiatedMultiplier"), 1.0),
@@ -1762,7 +2064,12 @@ def hab_irradiated_multiplier(
     if hab.get("habType") == "Base" or hab.get("habSite"):
         return max(as_float(space_body_template(hab_construction_surface_body(indexed, hab), body_templates).get("irradiatedMultiplier"), 1.0), 1.0)
     orbit = state_value_by_id(indexed, ref_id(hab.get("orbitState"))) or {}
-    orbit_template = orbit_templates.get(str(orbit.get("templateName") or ""), {})
+    orbit_name = str(orbit.get("templateName") or "")
+    if not orbit_name:
+        return 1.0
+    orbit_template = orbit_templates.get(orbit_name)
+    if orbit_template is None:
+        raise LocationCatalogError(f"Orbit template {orbit_name!r} is missing from the packaged location catalog")
     return max(as_float(orbit_template.get("irradiatedMultiplier"), 1.0), 1.0)
 
 
@@ -2258,11 +2565,13 @@ def hab_module_candidate_rows(
     mission_control_available: float,
     topbar: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
-    trait_templates = load_trait_templates(templates_dir)
+    hab_module_templates = load_hab_module_catalog()
+    location_catalog = load_location_catalog()
+    body_templates = location_catalog.body_templates
+    orbit_templates = location_catalog.orbit_templates
+    runtime_catalogs = calculation_catalogs(indexed, "hab-plan")
+    effect_templates = runtime_catalogs.effects
+    trait_templates = runtime_catalogs.traits
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     mining_rate = faction_mining_rate(indexed, faction)
@@ -2316,11 +2625,13 @@ def hab_module_upgrade_rows(
     mission_control_available: float,
     topbar: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
-    trait_templates = load_trait_templates(templates_dir)
+    hab_module_templates = load_hab_module_catalog()
+    location_catalog = load_location_catalog()
+    body_templates = location_catalog.body_templates
+    orbit_templates = location_catalog.orbit_templates
+    runtime_catalogs = calculation_catalogs(indexed, "hab-plan")
+    effect_templates = runtime_catalogs.effects
+    trait_templates = runtime_catalogs.traits
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     mining_rate = faction_mining_rate(indexed, faction)
@@ -2701,9 +3012,10 @@ def hab_plan_row(
     top: int,
     topbar: dict[str, Any],
 ) -> dict[str, Any]:
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
+    location_catalog = load_location_catalog()
+    body_templates = location_catalog.body_templates
+    orbit_templates = location_catalog.orbit_templates
     records = hab_module_records(indexed, hab, hab_module_templates)
     slots = hab_slot_summary(records)
     upgrade = hab_upgrade_info(records)
@@ -2717,8 +3029,7 @@ def hab_plan_row(
         body_templates=body_templates,
         orbit_templates=orbit_templates,
     )
-    topbar_mc = topbar.get("resources", {}).get("MissionControl", {}) if isinstance(topbar.get("resources"), dict) else {}
-    mc_available = as_float(topbar_mc.get("available"), 0.0)
+    mc_available = mission_control_available_for_planning(topbar)
     candidates = hab_module_candidate_rows(
         indexed,
         templates_dir,
@@ -2948,8 +3259,18 @@ def project_analysis_candidate_names(
     finished = set(faction.get("finishedProjectNames") if isinstance(faction.get("finishedProjectNames"), list) else [])
     filtered = []
     for name in names:
-        template = project_templates.get(name, {})
-        if not template or template.get("disable"):
+        template = project_templates.get(name)
+        if not isinstance(template, dict):
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="research-project",
+                    name=name,
+                    context="project-analysis.candidates",
+                    scenario=None,
+                    reason="save candidate is absent from the packaged research catalog",
+                )
+            )
+        if template.get("disable"):
             continue
         if name in finished and not template.get("repeatable"):
             continue
@@ -3003,7 +3324,17 @@ def active_slots_with_hypothetical_project_category(
     for slot in range(3):
         if weights[slot] <= 0.0 or slot >= len(tech_progress):
             continue
-        template = tech_templates.get((tech_progress[slot] or {}).get("techTemplateName"), {})
+        progress = tech_progress[slot] if isinstance(tech_progress[slot], dict) else {}
+        template_name = progress.get("techTemplateName")
+        if not template_name:
+            continue
+        template = required_catalog_row(
+            indexed,
+            tech_templates,
+            "research-tech",
+            template_name,
+            "project-analysis.hypothetical.active-tech",
+        )
         if template.get("techCategory") == category:
             count += 1
 
@@ -3011,7 +3342,21 @@ def active_slots_with_hypothetical_project_category(
     for slot in range(3, 6):
         if weights[slot] <= 0.0 or not faction_project_allowed(faction, slot):
             continue
-        slot_category = category if slot == project_slot else project_templates.get(projects.get(slot, {}).get("projectTemplateName"), {}).get("techCategory")
+        if slot == project_slot:
+            slot_category = category
+        else:
+            progress = projects.get(slot)
+            template_name = progress.get("projectTemplateName") if isinstance(progress, dict) else None
+            if not template_name:
+                continue
+            template = required_catalog_row(
+                indexed,
+                project_templates,
+                "research-project",
+                template_name,
+                "project-analysis.hypothetical.active-project",
+            )
+            slot_category = template.get("techCategory")
         if slot_category == category:
             count += 1
     return count
@@ -3072,7 +3417,13 @@ def hypothetical_project_points_to_slot(
 ) -> dict[str, Any]:
     weights = faction_research_weights(faction)
     total_weights = faction_total_research_weights(faction)
-    if slot < 0 or slot >= len(weights) or total_weights <= 0.0 or not faction_project_allowed(faction, slot):
+    if (
+        slot < 0
+        or slot >= len(weights)
+        or total_weights <= 0.0
+        or weights[slot] <= 0.0
+        or not faction_project_allowed(faction, slot)
+    ):
         return {"daily": 0.0, "weight": 0.0, "weightFraction": 0.0, "category": project_template.get("techCategory"), "modifiers": None}
 
     category = project_template.get("techCategory")
@@ -3088,7 +3439,13 @@ def hypothetical_project_points_to_slot(
         category,
         slot,
     )
-    project_facilities = project_facility_counts(indexed, faction, trait_templates, hab_module_templates)
+    project_facilities = project_facility_counts(
+        indexed,
+        faction,
+        trait_templates,
+        hab_module_templates,
+        org_templates=org_templates,
+    )
     project_bonus = multiple_facilities_multiplier(project_facilities)
     effective_daily = base_daily * (1.0 + as_float(category_modifier["distributed"], 0.0) + project_bonus)
     weight_fraction = weights[slot] / total_weights
@@ -3220,16 +3577,17 @@ def prospective_module_unlocks_for_project(
     if not unlocked_modules:
         return []
 
-    body_templates = load_named_templates(templates_dir, "TISpaceBodyTemplate.json")
-    orbit_templates = load_named_templates(templates_dir, "TIOrbitTemplate.json")
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
-    trait_templates = load_trait_templates(templates_dir)
+    location_catalog = load_location_catalog()
+    body_templates = location_catalog.body_templates
+    orbit_templates = location_catalog.orbit_templates
+    runtime_catalogs = calculation_catalogs(indexed, "project-analysis")
+    effect_templates = runtime_catalogs.effects
+    trait_templates = runtime_catalogs.traits
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     mining_rate = faction_mining_rate(indexed, faction)
     scarcity_weights = resource_scarcity_weights(topbar)
-    topbar_mc = topbar.get("resources", {}).get("MissionControl", {}) if isinstance(topbar.get("resources"), dict) else {}
-    mc_available = as_float(topbar_mc.get("available"), 0.0)
+    mc_available = mission_control_available_for_planning(topbar)
     faction_with_project = project_finished_faction_view(faction, project_name)
     habs = [(hab_id, hab) for hab_id, hab in faction_hab_states(indexed, faction) if ref_id(hab.get("faction")) == faction_id]
 
@@ -3615,7 +3973,7 @@ def calculate_project_analysis(
     include_all: bool = False,
 ) -> dict[str, Any]:
     faction_id, faction = find_faction_state(indexed, faction_name)
-    research_templates = load_research_templates(templates_dir)
+    research_templates = load_research_templates(indexed, templates_dir)
     base_daily_cache: dict[int, float] = {}
     project_templates = research_templates.projects
     tech_templates = research_templates.techs
@@ -3775,25 +4133,35 @@ def hab_research_and_mc(
     for hab_id, sectors in sectors_by_hab.items():
         hab = state_value_by_id(indexed, hab_id) or {}
         active_modules = active_modules_in_sectors(indexed, sectors)
+        active_templates: dict[str, dict[str, Any]] = {}
+        for module in active_modules:
+            template_name = str(module.get("templateName") or "")
+            active_templates[template_name] = required_catalog_row(
+                indexed,
+                hab_module_templates,
+                "hab-module",
+                template_name,
+                "research-breakdown.hab",
+            )
+        records = hab_module_records(indexed, hab, hab_module_templates)
         raw_research_month = 0.0
         admin_modifier = 1.0
         module_counts: dict[str, int] = {}
         for module in active_modules:
-            template_name = module.get("templateName")
-            template = hab_module_templates.get(template_name, {})
+            template_name = str(module.get("templateName") or "")
+            template = active_templates[template_name]
             module_counts[str(template_name)] = module_counts.get(str(template_name), 0) + 1
             raw_research_month += as_float(template.get("incomeResearch_month"), 0.0)
-            mission_control = int(as_float(template.get("missionControl"), 0.0))
-            if mission_control > 0:
-                total_mission_control += mission_control
             special_rules = template.get("specialRules") if isinstance(template.get("specialRules"), list) else []
             if "Efficiency" in special_rules:
                 admin_modifier *= 1.0 + as_float(template.get("specialRulesValue"), 0.0)
 
+        hab_mission_control = sum(max(hab_module_current_mission_control(record), 0) for record in records)
+        total_mission_control += hab_mission_control
         adviser_bonus = nation_adviser_science_bonus(hab, councilor_by_id)
         research_month = raw_research_month * (1.0 + adviser_bonus) * admin_modifier
         total_research_month += research_month
-        if research_month:
+        if research_month or hab_mission_control:
             details.append(
                 {
                     "id": hab_id,
@@ -3803,6 +4171,7 @@ def hab_research_and_mc(
                     "adviserBonus": adviser_bonus,
                     "researchMonth": research_month,
                     "researchDay": research_month * 12.0 / DAYS_PER_YEAR,
+                    "missionControl": hab_mission_control,
                     "moduleCounts": module_counts,
                 }
             )
@@ -3832,15 +4201,18 @@ class ResearchTemplates:
     projects: dict[str, dict[str, Any]]
 
 
-def load_research_templates(templates_dir: Path | None) -> ResearchTemplates:
+def load_research_templates(indexed: IndexedState, templates_dir: Path | None = None) -> ResearchTemplates:
+    runtime_catalogs = calculation_catalogs(indexed, "research")
+    research = runtime_catalogs.research
+    ships = runtime_catalogs.ships
     return ResearchTemplates(
-        traits=load_trait_templates(templates_dir),
-        effects=load_named_templates(templates_dir, "TIEffectTemplate.json"),
-        orgs=load_named_templates(templates_dir, "TIOrgTemplate.json"),
-        hab_modules=load_named_templates(templates_dir, "TIHabModuleTemplate.json"),
-        utility_modules=load_named_templates(templates_dir, "TIUtilityModuleTemplate.json"),
-        techs=load_named_templates(templates_dir, "TITechTemplate.json"),
-        projects=load_named_templates(templates_dir, "TIProjectTemplate.json"),
+        traits=runtime_catalogs.traits,
+        effects=runtime_catalogs.effects,
+        orgs=runtime_catalogs.orgs,
+        hab_modules=load_hab_module_catalog(),
+        utility_modules=ships["utilities"],
+        techs=research["techs"],
+        projects=research["projects"],
     )
 
 
@@ -3855,7 +4227,7 @@ def calculate_research_breakdown(
     include_details: bool = False,
     templates: ResearchTemplates | None = None,
 ) -> dict[str, Any]:
-    templates = templates or load_research_templates(templates_dir)
+    templates = templates or load_research_templates(indexed, templates_dir)
     trait_templates = templates.traits
     effect_templates = templates.effects
     hab_module_templates = templates.hab_modules
@@ -3865,7 +4237,11 @@ def calculate_research_breakdown(
 
     base_incomes = faction.get("baseIncomes_year") if isinstance(faction.get("baseIncomes_year"), dict) else {}
     hq_daily = as_float(base_incomes.get("Research"), 0.0) / DAYS_PER_YEAR
-    hq_mission_control = int(as_float(base_incomes.get("MissionControl"), 0.0))
+    hq_mission_control = as_float(base_incomes.get("MissionControl"), 0.0) + scenario_float(
+        indexed,
+        "missionControlBonus",
+        0.0,
+    )
 
     councilor_daily, councilor_mc, councilor_details = councilor_research_and_mc(
         indexed,
@@ -3922,7 +4298,13 @@ def calculate_research_breakdown(
     habs_daily = hab_research_year / DAYS_PER_YEAR
 
     max_buildable_mc = councilor_mc + nation_mc + hab_mc
-    max_mc = hq_mission_control + max_buildable_mc
+    pre_effect_mc = hq_mission_control + max_buildable_mc
+    max_mc = apply_effect_modifiers(
+        effect_contexts,
+        effect_templates,
+        "MissionControlDisruption_PCT",
+        pre_effect_mc,
+    )
     usage_mc = int(as_float(faction.get("missionControlUsage"), 0.0))
     available_mc = max(max_mc - usage_mc, 0)
     excess_mc_used = min(max_buildable_mc, available_mc)
@@ -3975,6 +4357,7 @@ def calculate_research_breakdown(
                 "councilorOrgs": councilor_mc,
                 "nations": nation_mc,
                 "habs": hab_mc,
+                "effects": max_mc - pre_effect_mc,
                 "buildableSources": max_buildable_mc,
             },
         },
@@ -4007,6 +4390,18 @@ def scenario_customizations(indexed: IndexedState) -> dict[str, Any]:
     global_state = first_value(indexed, "TIGlobalValuesState") or {}
     customizations = global_state.get("scenarioCustomizations")
     return customizations if isinstance(customizations, dict) else {}
+
+
+def active_scenario_rules(indexed: IndexedState) -> ScenarioRules:
+    return SCENARIO_RULE_OVERRIDES.get(scenario_template_name(indexed), DEFAULT_SCENARIO_RULES)
+
+
+def national_ip_multiplier(indexed: IndexedState) -> float:
+    customizations = scenario_customizations(indexed)
+    if not customizations.get("usingCustomizations"):
+        return 1.0
+    value = as_float(customizations.get("nationalIPMultiplier"), 1.0)
+    return value if value > 0.0 else 1.0
 
 
 def scenario_float(indexed: IndexedState, key: str, default: float = 1.0) -> float:
@@ -4149,9 +4544,17 @@ def faction_hab_category_modifier(
     hab_module_templates: dict[str, dict[str, Any]],
     category: str | None,
 ) -> float:
+    if not category:
+        return 0.0
     total = 0.0
     for module in active_modules_in_sectors(indexed, faction_sector_states(indexed, faction)):
-        template = hab_module_templates.get(module.get("templateName"), {})
+        template = required_catalog_row(
+            indexed,
+            hab_module_templates,
+            "hab-module",
+            module.get("templateName"),
+            "research.category.hab",
+        )
         total += tech_bonus_sum(template.get("techBonuses"), category)
     return diminishing_research_modifier(total)
 
@@ -4162,13 +4565,21 @@ def faction_org_category_modifier(
     org_templates: dict[str, dict[str, Any]],
     category: str | None,
 ) -> float:
+    if not category:
+        return 0.0
     total = 0.0
     for councilor in active_faction_councilors(indexed, faction):
         for org_ref in councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []:
             org = state_value_by_id(indexed, ref_id(org_ref))
             if not isinstance(org, dict) or not org.get("applyingBonuses"):
                 continue
-            template = org_templates.get(org.get("templateName"), {})
+            template = required_catalog_row(
+                indexed,
+                org_templates,
+                "org",
+                org.get("templateName"),
+                "research.category.org",
+            )
             bonuses = org.get("techBonuses")
             if not isinstance(bonuses, list) or not bonuses:
                 bonuses = template.get("techBonuses")
@@ -4182,10 +4593,19 @@ def faction_trait_category_modifier(
     trait_templates: dict[str, dict[str, Any]],
     category: str | None,
 ) -> float:
+    if not category:
+        return 0.0
     total = 0.0
     for councilor in active_faction_councilors(indexed, faction):
         for trait_name in councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []:
-            total += tech_bonus_sum(trait_templates.get(trait_name, {}).get("techBonuses"), category)
+            template = required_catalog_row(
+                indexed,
+                trait_templates,
+                "trait",
+                trait_name,
+                "research.category.trait",
+            )
+            total += tech_bonus_sum(template.get("techBonuses"), category)
     return diminishing_research_modifier(total)
 
 
@@ -4226,11 +4646,27 @@ def faction_fleet_category_modifier(
             ship = state_value_by_id(indexed, ref_id(ship_ref))
             if not isinstance(ship, dict):
                 continue
-            design = designs.get(str(ship.get("templateName")), {})
+            design = required_catalog_row(
+                indexed,
+                designs,
+            "ship-design",
+            ship.get("templateName"),
+            "research.category.fleet-design",
+            "ship references a saved design that cannot be resolved",
+            )
             for entry in design.get("moduleTemplateEntries") if isinstance(design.get("moduleTemplateEntries"), list) else []:
                 if not isinstance(entry, dict):
                     continue
-                module = utility_module_templates.get(str(entry.get("moduleName")), {})
+                module_name = str(entry.get("moduleName") or "")
+                if not module_name or module_name == "Empty":
+                    continue
+                module = required_catalog_row(
+                    indexed,
+                    utility_module_templates,
+                    "ship-utility",
+                    module_name,
+                    "research.category.fleet-utility",
+                )
                 special_rules = module.get("specialModuleRules") if isinstance(module.get("specialModuleRules"), list) else []
                 if "GenerateSpaceScienceBonus" in special_rules:
                     total += as_float(module.get("specialModuleValue"), 0.0)
@@ -4262,21 +4698,42 @@ def project_facility_counts(
     faction: dict[str, Any],
     trait_templates: dict[str, dict[str, Any]],
     hab_module_templates: dict[str, dict[str, Any]],
+    org_templates: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, float]:
     base_incomes = faction.get("baseIncomes_year") if isinstance(faction.get("baseIncomes_year"), dict) else {}
     trait_projects = 0.0
     org_projects = 0.0
     for councilor in active_faction_councilors(indexed, faction):
         for trait_name in councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []:
-            trait_projects += as_float(trait_templates.get(trait_name, {}).get("incomeProjects"), 0.0)
+            template = required_catalog_row(
+                indexed,
+                trait_templates,
+                "trait",
+                trait_name,
+                "project.facilities.trait",
+            )
+            trait_projects += as_float(template.get("incomeProjects"), 0.0)
         for org_ref in councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []:
             org = state_value_by_id(indexed, ref_id(org_ref))
             if isinstance(org, dict) and org.get("applyingBonuses"):
+                required_catalog_row(
+                    indexed,
+                    org_templates or {},
+                    "org",
+                    org.get("templateName"),
+                    "project.facilities.org",
+                )
                 org_projects += as_float(org.get("projectCapacityGranted"), 0.0)
 
     hab_projects = 0.0
     for module in active_modules_in_sectors(indexed, faction_sector_states(indexed, faction)):
-        template = hab_module_templates.get(module.get("templateName"), {})
+        template = required_catalog_row(
+            indexed,
+            hab_module_templates,
+            "hab-module",
+            module.get("templateName"),
+            "project.facilities.hab",
+        )
         hab_projects += as_float(template.get("incomeProjects"), 0.0)
 
     return {
@@ -4319,7 +4776,17 @@ def active_slots_with_category(
     for slot in range(3):
         if weights[slot] <= 0.0 or slot >= len(tech_progress):
             continue
-        template = tech_templates.get((tech_progress[slot] or {}).get("techTemplateName"), {})
+        progress = tech_progress[slot] if isinstance(tech_progress[slot], dict) else {}
+        template_name = progress.get("techTemplateName")
+        if not template_name:
+            continue
+        template = required_catalog_row(
+            indexed,
+            tech_templates,
+            "research-tech",
+            template_name,
+            "research.category.active-tech",
+        )
         if template.get("techCategory") == category:
             count += 1
 
@@ -4327,7 +4794,17 @@ def active_slots_with_category(
     for slot in range(3, 6):
         if weights[slot] <= 0.0 or not faction_project_allowed(faction, slot):
             continue
-        template = project_templates.get(projects.get(slot, {}).get("projectTemplateName"), {})
+        progress = projects.get(slot)
+        template_name = progress.get("projectTemplateName") if isinstance(progress, dict) else None
+        if not template_name:
+            continue
+        template = required_catalog_row(
+            indexed,
+            project_templates,
+            "research-project",
+            template_name,
+            "research.category.active-project",
+        )
         if template.get("techCategory") == category:
             count += 1
     return count
@@ -4379,18 +4856,55 @@ def research_points_to_slot(
 ) -> dict[str, Any]:
     weights = faction_research_weights(faction)
     total_weights = faction_total_research_weights(faction)
-    if slot < 0 or slot >= len(weights) or total_weights <= 0.0:
+    if (
+        slot < 0
+        or slot >= len(weights)
+        or total_weights <= 0.0
+        or weights[slot] <= 0.0
+        or (slot >= 3 and not faction_project_allowed(faction, slot))
+    ):
         return {"daily": 0.0, "weight": 0.0, "weightFraction": 0.0, "modifiers": None}
 
     is_project = slot >= 3
     template: dict[str, Any] = {}
     if is_project:
-        template = project_templates.get(project_progress_by_slot(faction).get(slot, {}).get("projectTemplateName"), {})
+        progress = project_progress_by_slot(faction).get(slot)
+        template_name = progress.get("projectTemplateName") if isinstance(progress, dict) else None
+        if not template_name:
+            return {
+                "daily": 0.0,
+                "weight": weights[slot],
+                "weightFraction": weights[slot] / total_weights,
+                "category": None,
+                "modifiers": None,
+            }
+        template = required_catalog_row(
+            indexed,
+            project_templates,
+            "research-project",
+            template_name,
+            "research.slot.active-project",
+        )
     else:
         global_research = first_value(indexed, "TIGlobalResearchState") or {}
         tech_progress = global_research.get("techProgress") if isinstance(global_research.get("techProgress"), list) else []
-        if slot < len(tech_progress):
-            template = tech_templates.get((tech_progress[slot] or {}).get("techTemplateName"), {})
+        progress = tech_progress[slot] if slot < len(tech_progress) and isinstance(tech_progress[slot], dict) else None
+        template_name = progress.get("techTemplateName") if isinstance(progress, dict) else None
+        if not template_name:
+            return {
+                "daily": 0.0,
+                "weight": weights[slot],
+                "weightFraction": weights[slot] / total_weights,
+                "category": None,
+                "modifiers": None,
+            }
+        template = required_catalog_row(
+            indexed,
+            tech_templates,
+            "research-tech",
+            template_name,
+            "research.slot.active-tech",
+        )
 
     category = template.get("techCategory")
     category_modifier = distributed_category_modifier(
@@ -4404,7 +4918,17 @@ def research_points_to_slot(
         project_templates,
         category,
     )
-    project_facilities = project_facility_counts(indexed, faction, trait_templates, hab_module_templates) if is_project else None
+    project_facilities = (
+        project_facility_counts(
+            indexed,
+            faction,
+            trait_templates,
+            hab_module_templates,
+            org_templates=org_templates,
+        )
+        if is_project
+        else None
+    )
     project_bonus = multiple_facilities_multiplier(project_facilities or {}) if is_project else 0.0
     effective_daily = base_daily * (1.0 + as_float(category_modifier["distributed"], 0.0) + project_bonus)
     weight_fraction = weights[slot] / total_weights
@@ -4496,7 +5020,7 @@ def calculate_research_ui(
     templates: ResearchTemplates | None = None,
     base_daily_cache: dict[int, float] | None = None,
 ) -> dict[str, Any]:
-    templates = templates or load_research_templates(templates_dir)
+    templates = templates or load_research_templates(indexed, templates_dir)
     base_daily_cache = base_daily_cache if base_daily_cache is not None else {}
     trait_templates = templates.traits
     org_templates = templates.orgs
@@ -4535,7 +5059,7 @@ def calculate_research_ui(
         if not isinstance(progress, dict):
             continue
         template_name = progress.get("techTemplateName")
-        template = tech_templates.get(template_name, {})
+        template = required_catalog_row(indexed, tech_templates, "research-tech", template_name, "research-ui.global")
         accumulated = as_float(progress.get("accumulatedResearch"), 0.0)
         cost = tech_template_cost(indexed, template)
         row = research_progress_row(indexed, template_name, template, accumulated, cost)
@@ -4600,7 +5124,7 @@ def calculate_research_ui(
             project_slots.append({"slot": slot, "empty": True})
             continue
         template_name = progress.get("projectTemplateName")
-        template = project_templates.get(template_name, {})
+        template = required_catalog_row(indexed, project_templates, "research-project", template_name, "research-ui.project")
         accumulated = as_float(progress.get("accumulatedResearch"), 0.0)
         cost = project_template_cost(indexed, template, faction)
         row = research_progress_row(indexed, template_name, template, accumulated, cost)
@@ -4633,7 +5157,7 @@ def calculate_research_ui(
         if slot in active_project_slots:
             continue
         template_name = progress.get("projectTemplateName")
-        template = project_templates.get(template_name, {})
+        template = required_catalog_row(indexed, project_templates, "research-project", template_name, "research-ui.paused-project")
         cost = project_template_cost(indexed, template, faction)
         accumulated = as_float(progress.get("accumulatedResearch"), 0.0)
         row = research_progress_row(indexed, template_name, template, accumulated, cost)
@@ -4792,8 +5316,16 @@ def available_project_research_templates(
         if name in active:
             continue
         template = project_templates.get(name)
-        if not template:
-            continue
+        if not isinstance(template, dict):
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="research-project",
+                    name=name,
+                    context="research-plan.available-projects",
+                    scenario=None,
+                    reason="save candidate is absent from the packaged research catalog",
+                )
+            )
         if as_float(template.get("researchCost"), 0.0) <= 0.0:
             continue
         rows.append((name, template))
@@ -4879,7 +5411,17 @@ def research_plan_category_context(
     category_bonus_if_added = as_float(components.get("sum"), 0.0) * (
         DEFAULT_GLOBAL_CONFIG["categoryBonusPenaltyPerExtraSlot"] ** added_penalty_power
     )
-    project_facilities = project_facility_counts(indexed, faction, trait_templates, hab_module_templates) if kind == "project" else None
+    project_facilities = (
+        project_facility_counts(
+            indexed,
+            faction,
+            trait_templates,
+            hab_module_templates,
+            org_templates=org_templates,
+        )
+        if kind == "project"
+        else None
+    )
     project_bonus = multiple_facilities_multiplier(project_facilities or {}) if kind == "project" else 0.0
     return clean_numbers(
         {
@@ -5108,7 +5650,7 @@ def calculate_research_plan(
     mode: str = "all",
     include_all_candidates: bool = False,
 ) -> dict[str, Any]:
-    research_templates = load_research_templates(templates_dir)
+    research_templates = load_research_templates(indexed, templates_dir)
     base_daily_cache: dict[int, float] = {}
     trait_templates = research_templates.traits
     org_templates = research_templates.orgs
@@ -5199,10 +5741,11 @@ def calculate_research_plan(
         "questionSupported": "다음 글로벌 연구/프로젝트 연구는 어떤 기술이 좋아?",
         "mode": mode,
         "templateAvailability": {
-            "templatesDir": str(templates_dir) if templates_dir else None,
+            "source": "packaged-runtime-catalog",
+            "templatesDir": None,
             "globalTechTemplates": len(tech_templates),
             "projectTemplates": len(project_templates),
-            "warning": None if tech_templates and project_templates else "Template files are required for candidate collection.",
+            "warning": None if tech_templates and project_templates else "The packaged research catalog is missing required candidate rows.",
         },
         "currentState": {
             "researchIncome": research_ui.get("researchIncome"),
@@ -5289,12 +5832,7 @@ def command_research_plan(save_path: Path, templates_dir: Path | None, args: arg
 
 
 def faction_is_player(indexed: IndexedState, faction: dict[str, Any]) -> bool:
-    metadata = first_value(indexed, "TIMetadataState") or {}
-    player_name = metadata.get("playerFactionName")
-    if player_name and str(player_name) == str(faction.get("displayName")):
-        return True
-    player = resolve_ref(indexed, faction.get("player"))
-    return bool(player and player[2].get("templateName") == "ResistPlayer")
+    return faction_is_human_player(indexed, faction)
 
 
 def faction_mining_rate(indexed: IndexedState, faction: dict[str, Any]) -> float:
@@ -5641,17 +6179,6 @@ def ship_plan_generic_row(template: dict[str, Any], fields: Iterable[tuple[str, 
     return clean_numbers(row)
 
 
-def ship_plan_tagged_templates(
-    templates_dir: Path | None,
-    template_files: Iterable[tuple[str, str]],
-) -> dict[str, dict[str, Any]]:
-    result: dict[str, dict[str, Any]] = {}
-    for kind, filename in template_files:
-        for name, template in load_named_templates(templates_dir, filename).items():
-            result[name] = {**template, "_shipPlanKind": kind}
-    return result
-
-
 def ship_plan_add_scaled_materials(
     destination: dict[str, float],
     materials: dict[str, Any] | None,
@@ -5809,8 +6336,15 @@ def ship_plan_shipyard_times(
         return apply_effect_modifiers(effect_contexts, effect_templates, "ShipConstructionTime", days)
 
     by_tier: dict[str, Any] = {}
-    for tier, fallback in SHIP_PLAN_SHIPYARD_TIERS.items():
-        shipyard = shipyard_templates.get(str(fallback["template"]), fallback)
+    for tier, shipyard_name in SHIP_PLAN_SHIPYARD_TIERS.items():
+        shipyard = required_catalog_row(
+            indexed,
+            shipyard_templates,
+            "hab-module",
+            shipyard_name,
+            "ship-design.construction-time.shipyard",
+            "required packaged shipyard definition is absent",
+        )
         tier_delta = tier - hull_tier
         if tier_delta > 0:
             yard_modifier = as_float(shipyard.get("constructionTimeModifier"), 1.0) ** tier_delta
@@ -5819,7 +6353,7 @@ def ship_plan_shipyard_times(
         else:
             yard_modifier = 1.0
         by_tier[str(tier)] = {
-            "shipyard": fallback["template"],
+            "shipyard": shipyard_name,
             "days": with_effects(base_days * yard_modifier * settings_modifier),
         }
     return {
@@ -5830,18 +6364,9 @@ def ship_plan_shipyard_times(
     }
 
 
-def ship_plan_simulation_catalogs(templates_dir: Path | None) -> dict[str, dict[str, dict[str, Any]]]:
-    return {
-        "hulls": load_named_templates(templates_dir, "TIShipHullTemplate.json"),
-        "drives": load_named_templates(templates_dir, "TIDriveTemplate.json"),
-        "powerPlants": load_named_templates(templates_dir, "TIPowerPlantTemplate.json"),
-        "radiators": load_named_templates(templates_dir, "TIRadiatorTemplate.json"),
-        "armors": load_named_templates(templates_dir, "TIShipArmorTemplate.json"),
-        "utilities": ship_plan_tagged_templates(templates_dir, SHIP_PLAN_UTILITY_TEMPLATE_FILES),
-        "weapons": ship_plan_tagged_templates(templates_dir, SHIP_PLAN_WEAPON_TEMPLATE_FILES),
-        "effects": load_named_templates(templates_dir, "TIEffectTemplate.json"),
-        "shipyards": load_named_templates(templates_dir, "TIHabModuleTemplate.json"),
-    }
+def ship_plan_simulation_catalogs(indexed: IndexedState) -> dict[str, dict[str, dict[str, Any]]]:
+    catalogs = calculation_catalogs(indexed, "ship-plan").ship_simulation_catalogs
+    return {**catalogs, "shipyards": load_hab_module_catalog()}
 
 
 def simulate_ship_design(
@@ -5851,66 +6376,87 @@ def simulate_ship_design(
     design: dict[str, Any],
     catalogs: dict[str, dict[str, dict[str, Any]]],
 ) -> dict[str, Any]:
-    hull = catalogs["hulls"].get(str(design.get("hullName") or ""))
-    drive = catalogs["drives"].get(str(design.get("driveName") or ""))
-    power_plant = catalogs["powerPlants"].get(str(design.get("powerPlantName") or ""))
-    radiator = catalogs["radiators"].get(str(design.get("radiatorName") or ""))
+    hull = required_catalog_row(
+        indexed,
+        catalogs["hulls"],
+        "ship-hull",
+        design.get("hullName"),
+        "ship-design.simulation.hull",
+    )
+    drive = required_catalog_row(
+        indexed,
+        catalogs["drives"],
+        "ship-drive",
+        design.get("driveName"),
+        "ship-design.simulation.drive",
+    )
+    power_plant = required_catalog_row(
+        indexed,
+        catalogs["powerPlants"],
+        "ship-power-plant",
+        design.get("powerPlantName"),
+        "ship-design.simulation.power-plant",
+    )
+    radiator = required_catalog_row(
+        indexed,
+        catalogs["radiators"],
+        "ship-radiator",
+        design.get("radiatorName"),
+        "ship-design.simulation.radiator",
+    )
     utility_entries = design.get("moduleTemplateEntries") if isinstance(design.get("moduleTemplateEntries"), list) else []
     weapon_entries = [
         *(design.get("hullWeaponTemplateEntries") if isinstance(design.get("hullWeaponTemplateEntries"), list) else []),
         *(design.get("noseWeaponTemplateEntries") if isinstance(design.get("noseWeaponTemplateEntries"), list) else []),
     ]
-    utilities = [
-        catalogs["utilities"].get(str(entry.get("moduleName") or ""))
-        for entry in utility_entries
-        if isinstance(entry, dict)
-    ]
-    weapons = [
-        catalogs["weapons"].get(str(entry.get("moduleName") or ""))
-        for entry in weapon_entries
-        if isinstance(entry, dict)
-    ]
+    utilities = []
+    for entry in utility_entries:
+        if not isinstance(entry, dict):
+            continue
+        module_name = str(entry.get("moduleName") or "")
+        if not module_name or module_name == "Empty":
+            continue
+        utilities.append(
+            required_catalog_row(
+                indexed,
+                catalogs["utilities"],
+                "ship-utility",
+                module_name,
+                "ship-design.simulation.utility",
+            )
+        )
+    weapons = []
+    for entry in weapon_entries:
+        if not isinstance(entry, dict):
+            continue
+        module_name = str(entry.get("moduleName") or "")
+        if not module_name or module_name == "Empty":
+            continue
+        weapons.append(
+            required_catalog_row(
+                indexed,
+                catalogs["weapons"],
+                "ship-weapon",
+                module_name,
+                "ship-design.simulation.weapon",
+            )
+        )
     armor_facings = {
         facing: design.get(f"{facing}Armor") if isinstance(design.get(f"{facing}Armor"), dict) else {}
         for facing in ("nose", "lateral", "tail")
     }
-    armor_templates = {
-        facing: catalogs["armors"].get(str(entry.get("materialName") or ""))
-        for facing, entry in armor_facings.items()
-    }
-    missing_templates = [
-        name
-        for name, template in (
-            (design.get("hullName"), hull),
-            (design.get("driveName"), drive),
-            (design.get("powerPlantName"), power_plant),
-            (design.get("radiatorName"), radiator),
-            *(
-                (entry.get("moduleName"), template)
-                for entry, template in zip(utility_entries, utilities)
-                if isinstance(entry, dict)
-            ),
-            *(
-                (entry.get("moduleName"), template)
-                for entry, template in zip(weapon_entries, weapons)
-                if isinstance(entry, dict)
-            ),
-            *(
-                (entry.get("materialName"), armor_templates[facing])
-                for facing, entry in armor_facings.items()
-                if as_float(entry.get("armorValue"), 0.0) > 0.0
-            ),
+    armor_templates: dict[str, dict[str, Any] | None] = {}
+    for facing, entry in armor_facings.items():
+        if as_float(entry.get("armorValue"), 0.0) <= 0.0:
+            armor_templates[facing] = None
+            continue
+        armor_templates[facing] = required_catalog_row(
+            indexed,
+            catalogs["armors"],
+            "ship-armor",
+            entry.get("materialName"),
+            f"ship-design.simulation.{facing}-armor",
         )
-        if name and template is None
-    ]
-    if not all((hull, drive, power_plant, radiator)) or missing_templates:
-        return {
-            "complete": False,
-            "missingTemplates": sorted({str(name) for name in missing_templates}),
-        }
-
-    utilities = [template for template in utilities if template]
-    weapons = [template for template in weapons if template]
     crew = int(
         as_float(hull.get("crew"), 0.0)
         + as_float(drive.get("crew"), 0.0)
@@ -6182,6 +6728,7 @@ def ship_plan_existing_designs(
         if not isinstance(design, dict):
             continue
         name = str(design.get("dataName") or "")
+        simulation = simulate_ship_design(indexed, faction_id, faction, design, catalogs)
         result.append(
             clean_numbers(
                 {
@@ -6201,7 +6748,7 @@ def ship_plan_existing_designs(
                     "utilities": design.get("moduleTemplateEntries") or [],
                     "hullWeapons": design.get("hullWeaponTemplateEntries") or [],
                     "noseWeapons": design.get("noseWeaponTemplateEntries") or [],
-                    "simulation": simulate_ship_design(indexed, faction_id, faction, design, catalogs),
+                    "simulation": simulation,
                     "activeShips": active_counts.get(name, 0),
                     "shipsBuilt": int(as_float(built_counts.get(name), 0.0)),
                 }
@@ -6242,19 +6789,20 @@ def calculate_ship_plan(
     design_name: str | None = None,
 ) -> dict[str, Any]:
     faction_id, faction = find_faction_state(indexed, faction_name)
-    simulation_catalogs = ship_plan_simulation_catalogs(templates_dir)
+    runtime_catalogs = calculation_catalogs(indexed, "ship-plan")
+    simulation_catalogs = {**runtime_catalogs.ship_simulation_catalogs, "shipyards": load_hab_module_catalog()}
+    ship_templates = runtime_catalogs.ships
     hull_templates = simulation_catalogs["hulls"]
     drive_templates = simulation_catalogs["drives"]
     plant_templates = simulation_catalogs["powerPlants"]
     radiator_templates = simulation_catalogs["radiators"]
-    battery_templates = load_named_templates(templates_dir, "TIBatteryTemplate.json")
-    heat_sink_templates = load_named_templates(templates_dir, "TIHeatSinkTemplate.json")
+    battery_templates = ship_templates["batteries"]
+    heat_sink_templates = ship_templates["heatSinks"]
     armor_templates = simulation_catalogs["armors"]
-    utility_templates = load_named_templates(templates_dir, "TIUtilityModuleTemplate.json")
+    utility_templates = ship_templates["utilities"]
     weapon_templates = [
-        (kind, template)
-        for kind, filename in SHIP_PLAN_WEAPON_TEMPLATE_FILES
-        for template in load_named_templates(templates_dir, filename).values()
+        (str(template.get("_shipPlanKind") or "weapon"), template)
+        for template in ship_templates["weapons"].values()
     ]
 
     available = lambda template: ship_plan_part_unlocked(template, faction, include_obsolete=include_obsolete)
@@ -6353,8 +6901,9 @@ def calculate_ship_plan(
         "questionSupported": "What ship design should I build, and what non-combat physical and construction values do my saved designs have?",
         "requestedRole": role,
         "templateAvailability": {
-            "templatesDir": str(templates_dir) if templates_dir else None,
-            "warning": None if hull_templates and drive_templates else "Local Terra Invicta ship templates are required.",
+            "source": "packaged-runtime-catalog",
+            "templatesDir": None,
+            "warning": None if hull_templates and drive_templates else "The packaged ship catalog is missing required component rows.",
         },
         "currentState": {
             "resources": faction.get("resources") or {},
@@ -6458,6 +7007,47 @@ def command_ship_plan(save_path: Path, templates_dir: Path | None, args: argpars
     print_json(result, compact=args.compact)
 
 
+def command_nation_claims(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    runtime_catalogs = calculation_catalogs(indexed, "nation-claims")
+    result = calculate_nation_claims(
+        indexed,
+        claimant_name=args.claimant,
+        target_name=args.target,
+        claim_catalog=runtime_catalogs.nation_claims,
+        diagnostics=args.diagnostics,
+    )
+    if args.diagnostics:
+        claim_diagnostics = result.pop("calculationDiagnostics", {})
+        result["calculationDiagnostics"] = {
+            "runtime": runtime_catalogs.calculation_diagnostics(),
+            "claims": claim_diagnostics,
+        }
+    print_json(result, compact=args.compact)
+
+
+def command_ai_fleet_diagnostics(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    result = calculate_ai_fleet_diagnostics(
+        indexed,
+        faction_name=args.faction,
+        stale_days=args.stale_days,
+        diagnostics=args.diagnostics,
+    )
+    print_json(result, compact=args.compact)
+
+
+def command_catalog_verify(args: argparse.Namespace) -> None:
+    result = verify_catalogs(
+        Path(args.templates_dir),
+        args.scenario,
+        save_path=resolve_save_path(args.save),
+    )
+    print_json(result, compact=args.compact)
+
+
 def faction_yearly_income_from_ships(
     indexed: IndexedState,
     templates_dir: Path | None,
@@ -6466,12 +7056,16 @@ def faction_yearly_income_from_ships(
 ) -> float:
     if resource != "Money":
         return 0.0
-    hull_templates = load_named_templates(templates_dir, "TIShipHullTemplate.json")
+    ships = faction_ship_states(indexed, faction)
+    if not ships:
+        return 0.0
+    hull_templates = calculation_catalogs(indexed, "topbar.ship-income").ships["hulls"]
     designs = faction_ship_designs(faction)
     monthly = 0.0
-    for ship in faction_ship_states(indexed, faction):
-        design = designs.get(str(ship.get("templateName")), {})
-        hull = hull_templates.get(str(design.get("hullName")), {})
+    for ship in ships:
+        design_name = str(ship.get("templateName") or "")
+        design = required_catalog_row(indexed, designs, "ship-design", design_name, "topbar.ship-income")
+        hull = required_catalog_row(indexed, hull_templates, "ship-hull", design.get("hullName"), "topbar.ship-income")
         monthly += as_float(hull.get("monthlyIncome_Money"), 0.0)
     return monthly * 12.0
 
@@ -6565,7 +7159,13 @@ def faction_yearly_income_from_nations(
         elif resource == "MissionControl":
             total_month += nation_mission_control_contribution(indexed, nation, faction_id)
         elif resource == "Influence":
-            total_month += nation_influence_contribution_month(indexed, nation, faction)
+            total_month += nation_influence_contribution_month(
+                indexed,
+                nation,
+                faction,
+                effect_contexts,
+                effect_templates,
+            )
     return total_month if resource == "MissionControl" else total_month * 12.0
 
 
@@ -6578,7 +7178,7 @@ def faction_yearly_income_from_habs(
     councilor_by_id: dict[int, dict[str, Any]],
     resource: str,
 ) -> float:
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     total_month = 0.0
     for _, hab in faction_hab_states(indexed, faction):
         records = hab_module_records(indexed, hab, hab_module_templates)
@@ -6609,18 +7209,18 @@ def faction_max_mission_control_components(
     councilor_by_id: dict[int, dict[str, Any]],
     effect_contexts: dict[str, list[str]],
     effect_templates: dict[str, dict[str, Any]],
+    hab_module_templates: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, float]:
     base_incomes = faction.get("baseIncomes_year") if isinstance(faction.get("baseIncomes_year"), dict) else {}
     hq = as_float(base_incomes.get("MissionControl"), 0.0) + scenario_float(indexed, "missionControlBonus", 0.0)
     councilors = faction_yearly_income_from_councilors(indexed, faction, trait_templates, councilor_by_id, "MissionControl")
     nations = faction_yearly_income_from_nations(indexed, faction_id, faction, councilor_by_id, effect_contexts, effect_templates, "MissionControl")
     habs = 0.0
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = hab_module_templates if hab_module_templates is not None else load_hab_module_catalog()
     for _, hab in faction_hab_states(indexed, faction):
         for record in hab_module_records(indexed, hab, hab_module_templates):
-            template = record.get("template") if isinstance(record.get("template"), dict) else {}
-            value = int(as_float(template.get("missionControl"), 0.0))
-            if hab_module_active_record(record) and value > 0:
+            value = hab_module_current_mission_control(record)
+            if value > 0:
                 habs += value
     pre_effect = hq + councilors + nations + habs
     total = apply_effect_modifiers(effect_contexts, effect_templates, "MissionControlDisruption_PCT", pre_effect)
@@ -6632,6 +7232,65 @@ def faction_max_mission_control_components(
         "effects": total - pre_effect,
         "total": total,
     }
+
+
+def faction_queued_mission_control_changes(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    capacity_change = 0
+    usage_change = 0
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for _, hab in faction_hab_states(indexed, faction):
+        for record in hab_module_records(indexed, hab, hab_module_templates):
+            if record.get("completed") or not hab_module_okay(record):
+                continue
+            current = hab_module_current_mission_control(record)
+            projected = hab_module_projected_mission_control(record)
+            record_capacity_change = max(projected, 0) - max(current, 0)
+            record_usage_change = max(-projected, 0) - max(-current, 0)
+            if record_capacity_change == 0 and record_usage_change == 0:
+                continue
+            template_name = str(record.get("templateName") or "")
+            prior_template_name = str(record.get("priorTemplateName") or "")
+            row = grouped.setdefault(
+                (template_name, prior_template_name),
+                {
+                    "template": template_name,
+                    "priorTemplate": prior_template_name or None,
+                    "count": 0,
+                    "capacityChange": 0,
+                    "usageChange": 0,
+                    "headroomChange": 0,
+                },
+            )
+            row["count"] += 1
+            row["capacityChange"] += record_capacity_change
+            row["usageChange"] += record_usage_change
+            row["headroomChange"] += record_capacity_change - record_usage_change
+            capacity_change += record_capacity_change
+            usage_change += record_usage_change
+    return {
+        "capacityChange": capacity_change,
+        "usageChange": usage_change,
+        "headroomChange": capacity_change - usage_change,
+        "moduleChanges": sorted(
+            grouped.values(),
+            key=lambda row: (str(row.get("template") or ""), str(row.get("priorTemplate") or "")),
+        ),
+    }
+
+
+def mission_control_available_for_planning(topbar: dict[str, Any]) -> float:
+    resources = topbar.get("resources") if isinstance(topbar.get("resources"), dict) else {}
+    mission_control = resources.get("MissionControl") if isinstance(resources.get("MissionControl"), dict) else {}
+    projected = (
+        mission_control.get("projectedAfterCurrentQueue")
+        if isinstance(mission_control.get("projectedAfterCurrentQueue"), dict)
+        else {}
+    )
+    return as_float(projected.get("available", mission_control.get("available")), 0.0)
 
 
 def faction_excess_mission_control_yearly_income(
@@ -6652,12 +7311,29 @@ def faction_excess_mission_control_yearly_income(
     return excess * DAYS_PER_YEAR * conversion
 
 
-def nation_control_point_maintenance_cost(nation: dict[str, Any]) -> float:
+def control_point_maintenance_gdp_scale(indexed: IndexedState) -> float:
+    global_state = first_value(indexed, "TIGlobalValuesState") or {}
+    fixed_scale = as_float(global_state.get("fixedPCGDPToRaiseBaseCPMaintenanceCostBy1"), 0.0)
+    if fixed_scale > 0.0:
+        return fixed_scale
+    campaign_start_gdp = as_float(global_state.get("globalGDP_CampaignStart"), 0.0)
+    if campaign_start_gdp > 0.0:
+        return campaign_start_gdp * CP_MAINTENANCE_CAMPAIGN_START_GDP_FACTOR
+    return DEFAULT_CP_MAINTENANCE_GDP_SCALE
+
+
+def nation_control_point_maintenance_cost(
+    nation: dict[str, Any],
+    scenario_multiplier: float = 1.0,
+    gdp_scale: float = DEFAULT_CP_MAINTENANCE_GDP_SCALE,
+) -> float:
     control_points = max(int(as_float(nation.get("numControlPoints"), 0.0)), 1)
-    gdp_billions = as_float(nation.get("GDP"), 0.0) / 1_000_000_000.0
-    if gdp_billions <= 0.0:
+    gdp = as_float(nation.get("GDP"), 0.0)
+    if gdp <= 0.0:
         return 0.0
-    return (gdp_billions ** DEFAULT_GLOBAL_CONFIG["controlPointCostScaling"]) / (
+    resolved_gdp_scale = gdp_scale if gdp_scale > 0.0 else DEFAULT_CP_MAINTENANCE_GDP_SCALE
+    scaled_gdp = gdp / resolved_gdp_scale
+    return scenario_multiplier * (scaled_gdp ** DEFAULT_GLOBAL_CONFIG["controlPointCostScaling"]) / (
         DEFAULT_GLOBAL_CONFIG["controlPointMaintenanceDivisor"] * control_points
     )
 
@@ -6671,6 +7347,8 @@ def faction_control_point_maintenance(
     effect_contexts: dict[str, list[str]],
     effect_templates: dict[str, dict[str, Any]],
 ) -> dict[str, float]:
+    scenario_rules = active_scenario_rules(indexed)
+    gdp_scale = control_point_maintenance_gdp_scale(indexed)
     baseline = 0.0
     for cp_ref in faction.get("controlPoints") if isinstance(faction.get("controlPoints"), list) else []:
         cp = state_value_by_id(indexed, ref_id(cp_ref))
@@ -6678,7 +7356,11 @@ def faction_control_point_maintenance(
             continue
         nation = state_value_by_id(indexed, ref_id(cp.get("nation")))
         if isinstance(nation, dict):
-            baseline += nation_control_point_maintenance_cost(nation)
+            baseline += nation_control_point_maintenance_cost(
+                nation,
+                scenario_rules.control_point_maintenance_multiplier,
+                gdp_scale,
+            )
 
     global_state = first_value(indexed, "TIGlobalValuesState") or {}
     global_freebies = as_float(global_state.get("controlPointMaintenanceFreebies"), 125.0)
@@ -6693,12 +7375,26 @@ def faction_control_point_maintenance(
         )
 
     habs = 0.0
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     for _, hab in faction_hab_states(indexed, faction):
         habs += hab_control_point_capacity(hab, hab_module_records(indexed, hab, hab_module_templates))
 
+    cp_effect_names = effect_contexts.get("ControlPointMaintenance", [])
+    missing_effects = sorted({name for name in cp_effect_names if name not in effect_templates})
+    if missing_effects:
+        raise RuntimeError(
+            "Control-point capacity effects are missing template data: " + ", ".join(missing_effects)
+        )
     effect_delta = effect_modifier_delta(effect_contexts, effect_templates, "ControlPointMaintenance", global_freebies)
     cap = global_freebies + councilors + habs - effect_delta
+    breakdown = {
+        "base": global_freebies,
+        "councilors": councilors,
+        "projectFactionEffects": -effect_delta,
+        "habModules": habs,
+        "scenarioModifiers": 0.0,
+        "difficultyModifiers": 0.0,
+    }
     overage = max(baseline - cap, 0.0)
     return {
         "usage": baseline,
@@ -6707,7 +7403,18 @@ def faction_control_point_maintenance(
         "annualInfluenceCost": overage * overage,
         "missionPenaltyRecent": (faction.get("history_CPCapOverageByDay") or [0.0])[0],
         "missionPenaltyCurrent": overage * DEFAULT_GLOBAL_CONFIG["TIMissionModifier_ControlPointOverage_Multiplier"],
+        "breakdown": breakdown,
+        "effectProvenance": [
+            {
+                "name": name,
+                "operation": effect_templates[name].get("operation"),
+                "value": as_float(effect_templates[name].get("value"), 0.0),
+            }
+            for name in cp_effect_names
+        ],
         "components": {
+            "scenarioMultiplier": scenario_rules.control_point_maintenance_multiplier,
+            "gdpScale": gdp_scale,
             "globalFreebies": global_freebies,
             "councilors": councilors,
             "habs": habs,
@@ -6745,6 +7452,231 @@ def faction_resource_components_yearly(
     return components
 
 
+def faction_hab_resource_at_date(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+    councilor_by_id: dict[int, dict[str, Any]],
+    resource: str,
+    at_date: datetime,
+) -> dict[str, float]:
+    production = 0.0
+    consumption = 0.0
+    for _, hab in faction_hab_states(indexed, faction):
+        records = hab_module_records(indexed, hab, hab_module_templates)
+        monthly = hab_monthly_resource_income(
+            hab,
+            records,
+            resource,
+            hab_administration_modifier(records, at_date),
+            science_adviser_multiplier=1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Science"),
+            administration_adviser_multiplier=1.0 + state_adviser_attribute_bonus(hab, councilor_by_id, "Administration"),
+            indexed=indexed,
+            faction=faction,
+            effect_contexts=effect_contexts,
+            effect_templates=effect_templates,
+            mining_rate=faction_mining_rate(indexed, faction),
+            at_date=at_date,
+        )
+        production += as_float(monthly.get("income"), 0.0)
+        consumption += as_float(monthly.get("support"), 0.0)
+    return {"production": production, "consumption": consumption, "net": production - consumption}
+
+
+def first_sustained_surplus_date(events: list[dict[str, Any]]) -> str | None:
+    for index, event in enumerate(events):
+        if as_float(event.get("net"), 0.0) > 0.0 and all(
+            as_float(later.get("net"), 0.0) > 0.0 for later in events[index:]
+        ):
+            return str(event.get("date"))
+    return None
+
+
+def faction_mining_calculation_samples(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+    org_bonus = faction_active_org_mining_bonus(indexed, faction)
+    mining_rate = faction_mining_rate(indexed, faction)
+    for _, hab in faction_hab_states(indexed, faction):
+        site = state_value_by_id(indexed, ref_id(hab.get("habSite")))
+        if not isinstance(site, dict):
+            continue
+        for record in hab_module_records(indexed, hab, hab_module_templates):
+            effective = get_effective_module_state(record)
+            template = effective.get("operationalTemplate")
+            if not isinstance(template, dict) or not template.get("mine"):
+                continue
+            module_multiplier = as_float(template.get("miningModifier"), 1.0)
+            for resource in BASIC_SPACE_RESOURCES:
+                site_yield = hab_site_daily_production(site, resource)
+                if site_yield <= 0.0:
+                    continue
+                faction_multiplier = faction_mining_multiplier(
+                    indexed,
+                    faction,
+                    resource,
+                    effect_contexts,
+                    effect_templates,
+                )
+                final_daily = site_yield * module_multiplier * faction_multiplier * mining_rate
+                samples.append(
+                    {
+                        "hab": hab.get("displayName") or hab.get("templateName"),
+                        "resource": resource,
+                        "siteYieldPerDay": site_yield,
+                        "module": effective.get("templateName"),
+                        "moduleMultiplier": module_multiplier,
+                        "activeOrgBonus": org_bonus,
+                        "factionEffectNames": (
+                            effect_contexts.get("SpaceMiningBonus", [])
+                            + effect_contexts.get(MINING_BONUS_CONTEXTS.get(resource, ""), [])
+                        ),
+                        "factionMultiplier": faction_multiplier,
+                        "scenarioMiningRate": mining_rate,
+                        "finalPerDay": final_daily,
+                        "monthly": final_daily * DAYS_PER_YEAR / 12.0,
+                    }
+                )
+    selected: list[dict[str, Any]] = []
+    for resource in BASIC_SPACE_RESOURCES:
+        candidates = [row for row in samples if row["resource"] == resource]
+        if candidates:
+            selected.append(max(candidates, key=lambda row: as_float(row.get("monthly"), 0.0)))
+    return clean_numbers(selected, 6)
+
+
+def forecast_faction_hab_resource(
+    indexed: IndexedState,
+    faction: dict[str, Any],
+    hab_module_templates: dict[str, dict[str, Any]],
+    effect_contexts: dict[str, list[str]],
+    effect_templates: dict[str, dict[str, Any]],
+    councilor_by_id: dict[int, dict[str, Any]],
+    resource: str,
+    *,
+    body_templates: dict[str, dict[str, Any]] | None = None,
+    orbit_templates: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    time_state = first_value(indexed, "TITimeState") or {}
+    current = ti_datetime(time_state.get("currentDateTime"))
+    if current is None:
+        raise RuntimeError("Cannot forecast module completions: TITimeState.currentDateTime is missing or invalid.")
+
+    grouped: dict[datetime, list[dict[str, Any]]] = {}
+    hab_by_id: dict[int, dict[str, Any]] = {}
+    records_by_hab: dict[int, list[dict[str, Any]]] = {}
+    for hab_id, hab in faction_hab_states(indexed, faction):
+        hab_by_id[hab_id] = hab
+        records = hab_module_records(indexed, hab, hab_module_templates)
+        records_by_hab[hab_id] = records
+        for record in records:
+            if not hab_module_okay(record) or record.get("completed"):
+                continue
+            completion = completion_datetime((record.get("state") or {}).get("completionDate"))
+            if completion is None or completion <= current:
+                continue
+            grouped.setdefault(completion, []).append({"habId": hab_id, "record": record})
+
+    rows: list[dict[str, Any]] = []
+    previous = faction_hab_resource_at_date(
+        indexed,
+        faction,
+        hab_module_templates,
+        effect_contexts,
+        effect_templates,
+        councilor_by_id,
+        resource,
+        current,
+    )
+    rows.append(
+        {
+            "date": current.isoformat(),
+            **previous,
+            "changeFromPrior": 0.0,
+            "moduleCompletions": [],
+        }
+    )
+
+    for event_date in sorted(grouped):
+        current_values = faction_hab_resource_at_date(
+            indexed,
+            faction,
+            hab_module_templates,
+            effect_contexts,
+            effect_templates,
+            councilor_by_id,
+            resource,
+            event_date,
+        )
+        completions: list[dict[str, Any]] = []
+        power_rows: list[dict[str, Any]] = []
+        impacted_habs = sorted({int(item["habId"]) for item in grouped[event_date]})
+        for item in grouped[event_date]:
+            record = item["record"]
+            hab = hab_by_id[int(item["habId"])]
+            completions.append(
+                {
+                    "hab": hab.get("displayName") or hab.get("templateName") or item["habId"],
+                    "module": record.get("display") or record.get("templateName"),
+                    "template": record.get("templateName"),
+                    "priorTemplate": record.get("priorTemplateName") or None,
+                }
+            )
+        for hab_id in impacted_habs:
+            hab = hab_by_id[hab_id]
+            power_rows.append(
+                {
+                    "hab": hab.get("displayName") or hab.get("templateName") or hab_id,
+                    **hab_power_summary(
+                        records_by_hab[hab_id],
+                        indexed=indexed,
+                        hab=hab,
+                        body_templates=body_templates,
+                        orbit_templates=orbit_templates,
+                        at_date=event_date,
+                    ),
+                }
+            )
+        power_warnings = [
+            f"Projected powered module set exceeds generation at {row['hab']} by {-int(row['net'])}."
+            for row in power_rows
+            if int(row.get("net", 0)) < 0
+        ]
+        rows.append(
+            {
+                "date": event_date.isoformat(),
+                **current_values,
+                "changeFromPrior": current_values["net"] - previous["net"],
+                "moduleCompletions": completions,
+                "powerAfterEvent": power_rows,
+                "status": "incomplete" if power_warnings else "complete",
+                "warnings": power_warnings,
+            }
+        )
+        previous = current_values
+
+    incomplete = any(row.get("status") == "incomplete" for row in rows)
+    return {
+        "resource": resource,
+        "scope": "faction hab production and consumption only",
+        "status": "incomplete" if incomplete else "complete",
+        "events": clean_numbers(rows, 6),
+        "firstSustainedSurplusDate": first_sustained_surplus_date(rows),
+        "warnings": [
+            warning
+            for row in rows
+            for warning in row.get("warnings", [])
+        ],
+    }
+
+
 def calculate_topbar(
     indexed: IndexedState,
     templates_dir: Path | None,
@@ -6753,11 +7685,27 @@ def calculate_topbar(
     *,
     research_templates: ResearchTemplates | None = None,
     base_daily_cache: dict[int, float] | None = None,
+    include_diagnostics: bool = False,
+    forecast_resource: str | None = None,
 ) -> dict[str, Any]:
-    trait_templates = research_templates.traits if research_templates else load_trait_templates(templates_dir)
-    effect_templates = research_templates.effects if research_templates else load_named_templates(templates_dir, "TIEffectTemplate.json")
+    runtime_catalogs = calculation_catalogs(indexed, "topbar") if research_templates is None else None
+    trait_templates = research_templates.traits if research_templates else runtime_catalogs.traits
+    effect_templates = research_templates.effects if research_templates else runtime_catalogs.effects
+    hab_module_templates = research_templates.hab_modules if research_templates else load_hab_module_catalog()
     faction_id, faction = find_faction_state(indexed, faction_name)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
+    missing_effects = sorted(
+        {
+            name
+            for context in TOPBAR_EFFECT_CONTEXTS
+            for name in effect_contexts.get(context, [])
+            if name not in effect_templates
+        }
+    )
+    if missing_effects:
+        raise RuntimeError(
+            "Effects required by topbar calculations are missing template data: " + ", ".join(missing_effects)
+        )
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     mc_components = faction_max_mission_control_components(
         indexed,
@@ -6768,7 +7716,9 @@ def calculate_topbar(
         councilor_by_id,
         effect_contexts,
         effect_templates,
+        hab_module_templates,
     )
+    queued_mc = faction_queued_mission_control_changes(indexed, faction, hab_module_templates)
     cp_maintenance = faction_control_point_maintenance(
         indexed,
         templates_dir,
@@ -6783,11 +7733,37 @@ def calculate_topbar(
     rows: dict[str, Any] = {}
     for resource in TOPBAR_RESOURCES:
         if resource == "MissionControl":
+            usage = as_float(faction.get("missionControlUsage"), 0.0)
+            capacity = as_float(mc_components.get("total"), 0.0)
+            hab_capacity_change = as_float(queued_mc.get("capacityChange"), 0.0)
+            pre_effect_capacity = capacity - as_float(mc_components.get("effects"), 0.0)
+            projected_capacity = apply_effect_modifiers(
+                effect_contexts,
+                effect_templates,
+                "MissionControlDisruption_PCT",
+                pre_effect_capacity + hab_capacity_change,
+            )
+            projected_usage = usage + as_float(queued_mc.get("usageChange"), 0.0)
+            effective_capacity_change = projected_capacity - capacity
+            projected = {
+                "capacity": projected_capacity,
+                "usage": projected_usage,
+                "available": max(projected_capacity - projected_usage, 0.0),
+                "capacityChange": effective_capacity_change,
+                "habCapacityChange": hab_capacity_change,
+                "effectsChange": effective_capacity_change - hab_capacity_change,
+                "usageChange": queued_mc.get("usageChange", 0),
+                "headroomChange": effective_capacity_change - as_float(queued_mc.get("usageChange"), 0.0),
+                "moduleChanges": queued_mc.get("moduleChanges", []) if include_details else None,
+            }
+            if not include_details:
+                projected.pop("moduleChanges")
             rows[resource] = clean_numbers(
                 {
-                    "usage": as_float(faction.get("missionControlUsage"), 0.0),
-                    "capacity": mc_components["total"],
-                    "available": max(mc_components["total"] - as_float(faction.get("missionControlUsage"), 0.0), 0.0),
+                    "usage": usage,
+                    "capacity": capacity,
+                    "available": max(capacity - usage, 0.0),
+                    "projectedAfterCurrentQueue": projected,
                     "components": mc_components if include_details else None,
                 },
                 6,
@@ -6850,24 +7826,90 @@ def calculate_topbar(
             "id": faction_id,
             "template": faction.get("templateName"),
             "display": faction.get("displayName"),
+            "player": faction_is_player(indexed, faction),
         },
         "showMonthlyIncomes": bool(faction.get("showMonthlyIncomesInTopBarAndIntel")),
         "resources": rows,
         "controlPointMaintenance": clean_numbers(cp_maintenance, 6),
         "resourceIncomeDeficiencies": faction.get("resourceIncomeDeficiencies") or [],
+        "valueProvenance": {
+            "saveNative": [
+                "resources.*.current",
+                "resources.MissionControl.usage",
+                "resourceIncomeDeficiencies",
+            ],
+            "calculated": [
+                "resources.*.daily/monthly/yearly",
+                "resources.MissionControl.capacity/available/projectedAfterCurrentQueue",
+                "controlPointMaintenance",
+                "forecast",
+            ],
+        },
         "sourceNotes": [
             "Top-bar stockpiles are raw TIFactionState.resources.",
             "Top-bar non-research deltas use TIFactionState.GetMonthlyIncome-equivalent yearly components divided by 12 when monthly display is enabled.",
             "Research row includes the distribution-slot bonus, matching GeneralControlsController.ResourceReportString.",
         ],
     }
+    if forecast_resource:
+        location_catalog = load_location_catalog()
+        output["forecast"] = forecast_faction_hab_resource(
+            indexed,
+            faction,
+            hab_module_templates,
+            effect_contexts,
+            effect_templates,
+            councilor_by_id,
+            forecast_resource,
+            body_templates=location_catalog.body_templates,
+            orbit_templates=location_catalog.orbit_templates,
+        )
+    if include_diagnostics:
+        output["calculationDiagnostics"] = (
+            runtime_catalogs.calculation_diagnostics()
+            if runtime_catalogs is not None
+            else {"source": "explicitly injected ResearchTemplates"}
+        )
+        output["diagnostics"] = {
+            "faction": {
+                "selection": "override" if faction_name else "save human-player metadata/TIPlayerState",
+                "id": faction_id,
+                "template": faction.get("templateName"),
+                "display": faction.get("displayName"),
+                "player": faction_is_player(indexed, faction),
+            },
+            "catalog": module_catalog_diagnostics(),
+            "locationCatalog": location_catalog_diagnostics(),
+            "unknownTemplates": [],
+            "unknownEffects": [],
+            "miningSamples": faction_mining_calculation_samples(
+                indexed,
+                faction,
+                hab_module_templates,
+                effect_contexts,
+                effect_templates,
+            ),
+            "calculationAssumptions": [
+                "Installed game TIHabState.GetNetCurrentMonthlyIncome charges target-module crew during construction but no direct support or production.",
+                "Installed game active-module paths exclude under-construction upgrades from power/production/bonuses; priorModuleCompleted is retained for current MC only.",
+                "Forecast completion events assume the completed target module becomes powered; per-event hab power balance is reported.",
+                "Daily-to-monthly space mining conversion is DAYS_PER_YEAR / 12.",
+            ],
+        }
     return output
 
 
 def command_topbar(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
     data = load_save(save_path)
     indexed = build_index(data)
-    result = calculate_topbar(indexed, templates_dir, args.faction, include_details=args.details)
+    result = calculate_topbar(
+        indexed,
+        templates_dir,
+        args.faction,
+        include_details=args.details,
+        include_diagnostics=args.diagnostics,
+        forecast_resource=args.forecast_resource,
+    )
     print_json(result, compact=args.compact)
 
 
@@ -6967,7 +8009,7 @@ def hab_is_alien(indexed: IndexedState, hab: dict[str, Any], records: list[dict[
 
 
 def world_space_population(indexed: IndexedState, templates_dir: Path | None) -> int:
-    hab_module_templates = load_named_templates(templates_dir, "TIHabModuleTemplate.json")
+    hab_module_templates = load_hab_module_catalog()
     total = 0
     for entry in type_entries(indexed, "TIHabState"):
         hab = entry.get("Value") or {}
@@ -7083,7 +8125,7 @@ def world_resource_market(
     global_state = first_value(indexed, "TIGlobalValuesState") or {}
     market_values = global_state.get("resourceMarketValues") if isinstance(global_state.get("resourceMarketValues"), dict) else {}
     faction_id, faction = find_faction_state(indexed, faction_name)
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    effect_templates = calculation_catalogs(indexed, "world-ui").effects
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     sales_modifier = effect_modifier_delta(effect_contexts, effect_templates, "ResourceMarketSales", 0.0)
     sale_multiplier = min(2.0 / 3.0, DEFAULT_GLOBAL_CONFIG["baseEarthSaleInefficiency"] * (1.0 + sales_modifier))
@@ -7251,8 +8293,9 @@ def command_world_ui(save_path: Path, templates_dir: Path | None, args: argparse
 def command_advise(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
     data = load_save(save_path)
     indexed = build_index(data)
-    trait_templates = load_trait_templates(templates_dir)
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    runtime_catalogs = calculation_catalogs(indexed, "advise")
+    trait_templates = runtime_catalogs.traits
+    effect_templates = runtime_catalogs.effects
     faction_id, faction = find_faction_state(indexed, args.faction)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     summaries, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
@@ -7448,7 +8491,176 @@ def first_control_point(indexed: IndexedState, nation: dict[str, Any]) -> dict[s
     return points[0] if points else None
 
 
-def nation_priority_rows(indexed: IndexedState, nation: dict[str, Any]) -> list[dict[str, Any]]:
+def federation_space_program(indexed: IndexedState, nation: dict[str, Any]) -> bool | None:
+    """TIFederationState.SetSpaceProgramValue: any member has spaceflight."""
+    reference = nation.get("federation")
+    if reference is None:
+        return False
+    federation = state_value_by_id(indexed, ref_id(reference))
+    if not isinstance(federation, dict) or not isinstance(federation.get("members"), list):
+        return None
+    values = []
+    for member_ref in federation["members"]:
+        member = state_value_by_id(indexed, ref_id(member_ref))
+        values.append(member.get("spaceFlightProgram") if isinstance(member, dict) else None)
+    if any(value is True for value in values):
+        return True
+    return False if all(value is False for value in values) else None
+
+
+def _nation_ui_priority_validity(
+    indexed: IndexedState,
+    nation: dict[str, Any],
+    development: dict[str, Any],
+    *,
+    population: float,
+    allowed_armies: int,
+    current_armies: int,
+    army_count: int | None = None,
+    navy_count: int | None = None,
+    per_capita_gdp: float | None = None,
+) -> dict[str, PriorityValidityResult]:
+    priorities = development.get("priorities") if isinstance(development.get("priorities"), dict) else {}
+    global_config = development.get("globalConfig") if isinstance(development.get("globalConfig"), dict) else {}
+    region_values: list[dict[str, Any]] = []
+    region_refs = nation.get("regions") if isinstance(nation.get("regions"), list) else None
+    regions_complete = region_refs is not None
+    for region_ref in region_refs or []:
+        found = resolve_ref(indexed, region_ref)
+        if found is None:
+            regions_complete = False
+            continue
+        region_values.append(found[2])
+
+    def config_number(name: str) -> float | None:
+        row = global_config.get(name)
+        value = row.get("value") if isinstance(row, dict) else None
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    mission_capacity: bool | None = None
+    required_config = {
+        name: config_number(name)
+        for name in ("coreEcoRegionGDPModifier", "coreResourceRegionGDPModifier", "colonyRegionGDPModifier")
+    }
+    required_region_fields = (
+        "populationInMillions", "coreEconomicRegion", "resourceRegion", "oilRegion", "colonyRegion", "missionControl",
+    )
+    if regions_complete and region_values and all(value is not None for value in required_config.values()) and all(
+        all(field in region for field in required_region_fields) for region in region_values
+    ):
+        weights: list[float] = []
+        for region in region_values:
+            weight = float(region["populationInMillions"])
+            if region["coreEconomicRegion"]:
+                weight *= float(required_config["coreEcoRegionGDPModifier"])
+            if region["resourceRegion"] or region["oilRegion"]:
+                weight *= float(required_config["coreResourceRegionGDPModifier"])
+            if region["colonyRegion"]:
+                weight *= float(required_config["colonyRegionGDPModifier"])
+            weights.append(weight)
+        total_weight = sum(weights)
+        education = nation.get("education")
+        gdp = nation.get("GDP")
+        if total_weight > 0 and isinstance(education, (int, float)) and isinstance(gdp, (int, float)):
+            divisor = max(200.0, 300.0 - 6.0 * float(education))
+            mission_capacity = any(
+                int(region["missionControl"]) < max(
+                    int(region["missionControl"]),
+                    1 + int(((float(gdp) * weight / total_weight) / 1_000_000_000.0) / divisor),
+                )
+                for region, weight in zip(region_values, weights)
+            )
+
+    hostile = nation.get("hostileClaims")
+    hostile_known = isinstance(hostile, list)
+    boost_known = regions_complete and bool(region_values) and all(
+        isinstance(region.get("boostPerYear_dekatons"), (int, float)) for region in region_values
+    )
+    ocean_types = [region.get("oceanType") for region in region_values]
+    coastal_regions = (
+        sum(ocean_type in {"Yes", "Seasonal"} for ocean_type in ocean_types)
+        if regions_complete and all(isinstance(ocean_type, str) and ocean_type in {"No", "None", "Yes", "Seasonal"} for ocean_type in ocean_types)
+        else None
+    )
+    build_navy = can_build_navy({
+        "military": nation.get("military") if isinstance(nation.get("military"), bool) else None,
+        "armyCount": army_count,
+        "navyCount": navy_count,
+        "coastalRegions": coastal_regions,
+        "controlPointCount": nation.get("numControlPoints"),
+        "perCapitaGDP": per_capita_gdp,
+        "minControlPointsForNavy": MIN_CONTROL_POINTS_FOR_NAVY,
+        "minControlPointsForNavyException": MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION,
+        "pcgdpForNavyException": PCGDP_FOR_NAVY_EXCEPTION,
+    })
+    view = {
+        "democracy": nation.get("democracy"),
+        "hasHostileRegion": bool(hostile) if hostile_known else None,
+        "fundingYear": nation.get("spaceFunding_year"),
+        "gdp": nation.get("GDP"),
+        "spaceFlightProgram": nation.get("spaceFlightProgram") if isinstance(nation.get("spaceFlightProgram"), bool) else None,
+        "missionControlHasCapacity": mission_capacity,
+        "federationSpaceProgram": federation_space_program(indexed, nation),
+        "allowedArmies": allowed_armies if regions_complete else None,
+        "currentArmies": current_armies,
+        "canBuildNavy": build_navy,
+        "military": nation.get("military") if isinstance(nation.get("military"), bool) else None,
+        "nuclearProgram": nation.get("nuclearProgram") if isinstance(nation.get("nuclearProgram"), bool) else None,
+        "canBuildSpaceDefenses": nation.get("canBuildSpaceDefenses") if isinstance(nation.get("canBuildSpaceDefenses"), bool) else None,
+        "canBuildSTO": nation.get("canBuildSTOSquadrons") if isinstance(nation.get("canBuildSTOSquadrons"), bool) else None,
+        "hasBoostRegion": any(float(region["boostPerYear_dekatons"]) > 0 for region in region_values) if boost_known else None,
+    }
+    raw_names = {
+        str(priority)
+        for cp in nation_control_points(indexed, nation)
+        for priority in ((cp.get("controlPointPriorities") or {}) if isinstance(cp.get("controlPointPriorities"), dict) else {})
+    }
+    return {
+        name: evaluate_priority_validity(name, view)
+        for name in sorted(set(priorities) | raw_names)
+    }
+
+
+def _nation_ui_control_point_weights(
+    control_points: list[dict[str, Any]],
+    validity: dict[str, PriorityValidityResult],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, cp in enumerate(control_points):
+        raw = cp.get("controlPointPriorities") if isinstance(cp.get("controlPointPriorities"), dict) else {}
+        raw_weights = {str(name): int(as_float(value, 0.0)) for name, value in raw.items()}
+        effective = {
+            name: value for name, value in raw_weights.items()
+            if value > 0 and validity.get(name, PriorityValidityResult(None, "missing validity result")).valid is True
+        }
+        unknown = sorted(
+            name for name, value in raw_weights.items()
+            if value > 0 and validity.get(name, PriorityValidityResult(None, "missing validity result")).valid is None
+        )
+        serialized = int(as_float(cp.get("totalWeightsForControlPoint"), 0.0))
+        recomputed = sum(effective.values())
+        rows.append({
+            "id": ref_id(cp.get("ID")),
+            "position": int(as_float(cp.get("positionInNation"), index)),
+            "rawWeights": raw_weights,
+            "effectiveWeights": effective,
+            "serializedTotalWeight": serialized,
+            "recomputedTotalWeight": recomputed,
+            "serializedNumPrioritiesWithWeight": cp.get("numPrioritiesWithWeight"),
+            "recomputedNumPrioritiesWithWeight": len(effective),
+            "consistent": None if unknown else serialized == recomputed,
+            "unknownPriorities": unknown,
+        })
+    return rows
+
+
+def nation_priority_rows(
+    indexed: IndexedState,
+    nation: dict[str, Any],
+    validity: dict[str, PriorityValidityResult] | None = None,
+) -> list[dict[str, Any]]:
+    scenario_rules = active_scenario_rules(indexed)
+    ip_multiplier = national_ip_multiplier(indexed)
     control_points = nation_control_points(indexed, nation)
     representative = control_points[0] if control_points else {}
     priorities = representative.get("controlPointPriorities") if isinstance(representative.get("controlPointPriorities"), dict) else {}
@@ -7456,6 +8668,8 @@ def nation_priority_rows(indexed: IndexedState, nation: dict[str, Any]) -> list[
     total_weight = int(as_float(representative.get("totalWeightsForControlPoint"), 0.0))
     rows: list[dict[str, Any]] = []
     for key, label, priority_key, accumulated_key, cost in NATION_PRIORITY_ROWS:
+        base_cost = scenario_rules.build_army_priority_cost if key == "BuildArmy" else cost
+        required_cost = base_cost / ip_multiplier if ip_multiplier != 1.0 else base_cost
         weight = int(as_float(priorities.get(priority_key), 0.0))
         share_percent = int_round(weight / total_weight * 100.0) if total_weight > 0 else 0
         rows.append(
@@ -7466,21 +8680,25 @@ def nation_priority_rows(indexed: IndexedState, nation: dict[str, Any]) -> list[
                 "weightPerControlPoint": weight,
                 "sharePercent": share_percent,
                 "accumulated": as_float(accumulated.get(accumulated_key), 0.0),
-                "cost": cost,
+                "cost": required_cost,
             }
         )
-    inactive_with_weights = {
+    inactive_with_weights = ({
+        key: int(as_float(value, 0.0))
+        for key, value in priorities.items()
+        if int(as_float(value, 0.0)) > 0 and validity.get(key, PriorityValidityResult(None, "missing validity result")).valid is False
+    } if validity is not None else {
         key: int(as_float(priorities.get(key), 0.0))
         for key in NATION_INACTIVE_PRIORITY_KEYS
         if int(as_float(priorities.get(key), 0.0)) > 0
-    }
+    })
     if inactive_with_weights:
         rows.append(
             {
                 "key": "_inactiveRawWeights",
                 "label": "UI 비활성 원시 weight",
                 "weights": inactive_with_weights,
-                "note": "Raw save keeps these requested weights, but UI/controlPoint totalWeights excludes them because the priority is complete, capped, or unavailable.",
+                "note": "Raw save keeps these requested weights, but live shared validity marks them unavailable.",
             }
         )
     return rows
@@ -7497,8 +8715,10 @@ def calculate_nation_ui(
         raise SystemExit(f"Nation not found: {nation_name}")
     nation_id, nation = found
     faction_id, faction = find_faction_state(indexed, faction_name)
-    trait_templates = load_trait_templates(templates_dir)
-    effect_templates = load_named_templates(templates_dir, "TIEffectTemplate.json")
+    runtime_catalogs = calculation_catalogs(indexed, "nation-ui")
+    development_catalog = runtime_catalogs.nation_development
+    trait_templates = runtime_catalogs.traits
+    effect_templates = runtime_catalogs.effects
     effect_contexts = faction_effect_contexts(indexed, faction_id)
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
 
@@ -7527,14 +8747,36 @@ def calculate_nation_ui(
     capital = ref_summary(indexed, nation.get("capital"))
     armies = nation_army_details(indexed, nation, military_tech_level)
     allowed_armies = nation_allowed_armies(indexed, nation, population)
+    control_points = nation_control_points(indexed, nation)
+    priority_validity = _nation_ui_priority_validity(
+        indexed,
+        nation,
+        development_catalog,
+        population=population,
+        allowed_armies=allowed_armies,
+        current_armies=armies["count"],
+        army_count=armies["count"],
+        navy_count=armies["navies"],
+        per_capita_gdp=pc_gdp,
+    )
+    navy_validity = priority_validity.get("Military_BuildNavy")
     can_have_navy = nation_can_have_navy(nation, pc_gdp)
     max_navies = allowed_armies if can_have_navy else 0
-    navies_can_build = max(0, armies["count"] - armies["navies"]) if can_have_navy else 0
-    control_points = nation_control_points(indexed, nation)
+    can_build = navy_validity.valid if navy_validity is not None else None
+    navies_can_build = max(0, armies["count"] - armies["navies"]) if can_build else (0 if can_build is False else None)
+    control_point_weights = _nation_ui_control_point_weights(control_points, priority_validity)
     representative_cp = first_control_point(indexed, nation) or {}
     total_weight = int(as_float(representative_cp.get("totalWeightsForControlPoint"), 0.0))
+    scenario_name = scenario_template_name(indexed)
+    scenario_rules = active_scenario_rules(indexed)
 
     output = {
+        "scenario": {
+            "template": scenario_name,
+            "ruleProfile": scenario_name if scenario_name in SCENARIO_RULE_OVERRIDES else "default",
+            "nationalIPMultiplier": national_ip_multiplier(indexed),
+            "controlPointMaintenanceMultiplier": scenario_rules.control_point_maintenance_multiplier,
+        },
         "identity": {
             "id": nation_id,
             "template": nation.get("templateName"),
@@ -7597,7 +8839,11 @@ def calculate_nation_ui(
         "priorities": {
             "totalWeightPerControlPoint": total_weight,
             "numPrioritiesWithWeight": representative_cp.get("numPrioritiesWithWeight"),
-            "rows": nation_priority_rows(indexed, nation),
+            "rows": nation_priority_rows(indexed, nation, priority_validity),
+            "validityByPriority": {
+                name: result.output() for name, result in sorted(priority_validity.items())
+            },
+            "controlPoints": control_point_weights,
         },
         "diplomacy": {
             "allies": [ref_summary(indexed, item) for item in nation.get("allies", [])],
@@ -7621,13 +8867,1134 @@ def command_nation_ui(save_path: Path, templates_dir: Path | None, args: argpars
     print_json(result, compact=args.compact)
 
 
+PRIORITY_BONUS_ORG_FIELDS = {
+    "Economy": "economyBonus", "Welfare": "welfareBonus", "Environment": "environmentBonus",
+    "Knowledge": "knowledgeBonus", "Government": "governmentBonus", "Unity": "unityBonus",
+    "Oppression": "oppressionBonus", "Funding": "spaceDevBonus", "Spoils": "spoilsBonus",
+    "Civilian_InitiateSpaceflightProgram": "spaceflightBonus", "LaunchFacilities": "spaceflightBonus",
+    "MissionControl": "MCBonus", "Military_FoundMilitary": "militaryBonus", "Military": "militaryBonus",
+    "Military_BuildArmy": "militaryBonus", "Military_BuildNavy": "militaryBonus",
+    "Military_BuildSpaceDefenses": "militaryBonus", "Military_BuildSTOSquadron": "spaceflightBonus",
+}
+PRIORITY_BONUS_EFFECT_CONTEXTS = {
+    "Economy": "EconomyPriority", "Welfare": "WelfarePriority", "Environment": "EnvironmentPriority",
+    "Knowledge": "KnowledgePriority", "Government": "GovernmentPriority", "Unity": "UnityPriority",
+    "Oppression": "OppressionPriority", "Funding": "SpaceDevPriority", "Spoils": "SpoilsPriority",
+    "Civilian_InitiateSpaceflightProgram": "SpaceflightPriority", "LaunchFacilities": "LaunchFacilitiesPriority",
+    "MissionControl": "MissionControlPriority", "Military": "MilitaryPriority",
+    "Military_BuildArmy": "BuildArmyPriority", "Military_BuildNavy": "UpgradeArmyPriority",
+    "Military_InitiateNuclearProgram": "BuildNuclearWeaponsPriority",
+    "Military_BuildNuclearWeapons": "BuildNuclearWeaponsPriority",
+    "Military_BuildSpaceDefenses": "BuildSpaceDefensesPriority", "Military_BuildSTOSquadron": "BuildSTOSquadronPriority",
+}
+
+
+def faction_priority_bonuses_for_projection(
+    indexed: IndexedState,
+    faction_id: int,
+    faction: dict[str, Any],
+    priorities: dict[str, Any],
+    trait_templates: dict[str, dict[str, Any]],
+    effect_templates: dict[str, dict[str, Any]],
+    *,
+    apply_effects: bool = True,
+) -> tuple[dict[str, float], dict[str, float]]:
+    bonuses = {name: 0.0 for name in priorities}
+    for councilor_id in faction_councilor_ids(faction):
+        councilor = state_value_by_id(indexed, councilor_id) or {}
+        for org_ref in councilor.get("orgs") if isinstance(councilor.get("orgs"), list) else []:
+            org = state_value_by_id(indexed, ref_id(org_ref)) or {}
+            if not org.get("applyingBonuses"):
+                continue
+            for priority, field in PRIORITY_BONUS_ORG_FIELDS.items():
+                if priority in bonuses:
+                    bonuses[priority] += as_float(org.get(field), 0.0)
+        for trait_name in councilor.get("traitTemplateNames") if isinstance(councilor.get("traitTemplateNames"), list) else []:
+            trait = trait_templates.get(str(trait_name), {})
+            for row in trait.get("priorityBonuses") if isinstance(trait.get("priorityBonuses"), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                priority = str(row.get("priority") or "")
+                if priority in bonuses:
+                    bonuses[priority] += as_float(row.get("bonus"), 0.0)
+    hab_module_templates = load_hab_module_catalog()
+    for _, hab in faction_hab_states(indexed, faction):
+        for priority, value in hab_leo_priority_bonuses(hab, hab_module_records(indexed, hab, hab_module_templates)).items():
+            if priority in bonuses:
+                bonuses[priority] += as_float(value, 0.0)
+    base_bonuses = dict(bonuses)
+    if apply_effects:
+        contexts = faction_effect_contexts(indexed, faction_id)
+        for priority, context_name in PRIORITY_BONUS_EFFECT_CONTEXTS.items():
+            if priority in bonuses:
+                bonuses[priority] = apply_effect_modifiers(contexts, effect_templates, context_name, bonuses[priority])
+    return bonuses, base_bonuses
+
+
+def faction_effect_expirations_for_projection(indexed: IndexedState) -> dict[int, dict[str, datetime]]:
+    result: dict[int, dict[str, datetime]] = {}
+    for entry in type_entries(indexed, "TIEffectsState"):
+        value = entry.get("Value") or {}
+        pairs = value.get("factionEffectExpirations")
+        if not isinstance(pairs, list):
+            continue
+        for pair in pairs:
+            if not isinstance(pair, dict):
+                continue
+            faction_id = ref_id(pair.get("Key"))
+            raw_expirations = pair.get("Value")
+            if faction_id is None or not isinstance(raw_expirations, dict):
+                continue
+            parsed: dict[str, datetime] = {}
+            for effect_name, raw_expiration in raw_expirations.items():
+                expiration = ti_datetime(raw_expiration)
+                if expiration is None:
+                    raise _projection_dependency_error(
+                        indexed,
+                        source="save-field",
+                        field="TIEffectsState.factionEffectExpirations",
+                        rule_id=Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,
+                        reason=f"faction effect {effect_name!r} has an invalid expiration timestamp",
+                    )
+                parsed[str(effect_name)] = expiration
+            result[faction_id] = parsed
+    return result
+
+
+def projection_advisor_profiles(
+    indexed: IndexedState,
+    faction_id: int,
+    faction: dict[str, Any],
+    councilor_by_id: dict[int, dict[str, Any]],
+) -> tuple[dict[int, nation_projection_layer.AdvisorProfile], dict[int, nation_projection_layer.AdvisorProfile]]:
+    all_profiles: dict[int, nation_projection_layer.AdvisorProfile] = {}
+    available: dict[int, nation_projection_layer.AdvisorProfile] = {}
+    roster = set(faction_councilor_ids(faction))
+    for entry in type_entries(indexed, "TICouncilorState"):
+        councilor = entry.get("Value") or {}
+        councilor_id = raw_state_id(entry)
+        if councilor_id is None:
+            continue
+        summary = councilor_by_id.get(councilor_id, {})
+        attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
+        profile = nation_projection_layer.AdvisorProfile(
+            "saved",
+            str(councilor.get("displayName") or councilor.get("templateName") or councilor_id),
+            as_float(attributes.get("Administration"), 0.0),
+            as_float(attributes.get("Science"), 0.0),
+            councilor_id,
+        )
+        active = councilor.get("status") == "Active" and councilor.get("exists", True) and not councilor.get("archived")
+        if active:
+            all_profiles[councilor_id] = profile
+        if councilor_id in roster and ref_id(councilor.get("faction")) == faction_id and active:
+            available[councilor_id] = profile
+    return all_profiles, available
+
+
+def projection_advisor_mission_schedule(
+    indexed: IndexedState,
+    development: dict[str, Any],
+) -> nation_projection_layer.AdvisorMissionSchedule:
+    config = development.get("advisorMission")
+    if not isinstance(config, dict):
+        raise _projection_dependency_error(
+            indexed,
+            source="catalog-field",
+            field="advisorMission",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="packaged Advise mission mechanics are absent",
+        )
+    cost = config.get("cost")
+    phase_config = config.get("missionPhaseEvent")
+    if (
+        config.get("automaticSuccess") is not True
+        or config.get("movementRule") != "MoveToTarget"
+        or config.get("persistentEffect") is not True
+        or not isinstance(cost, dict)
+        or cost.get("type") != "TIMissionCost_Flat"
+        or cost.get("resource") != "Influence"
+        or not isinstance(phase_config, dict)
+    ):
+        raise _projection_dependency_error(
+            indexed,
+            source="catalog-field",
+            field="advisorMission",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="packaged Advise mission mechanics do not match the audited automatic MoveToTarget contract",
+        )
+    event = next((
+        entry.get("Value") or {}
+        for entry in type_entries(indexed, "TITimeEvent")
+        if (entry.get("Value") or {}).get("eventName") == "CouncilorMissionUpdate"
+        and not (entry.get("Value") or {}).get("archived")
+    ), None)
+    if not isinstance(event, dict):
+        raise _projection_dependency_error(
+            indexed,
+            source="save-state",
+            field="TITimeEvent.CouncilorMissionUpdate",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="active mission-phase event is absent",
+        )
+    next_phase = ti_datetime(event.get("triggerTime"))
+    repeat_type = event.get("repeatType")
+    if next_phase is None or not isinstance(repeat_type, str):
+        raise _projection_dependency_error(
+            indexed,
+            source="save-field",
+            field="CouncilorMissionUpdate.triggerTime/repeatType",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="mission-phase timing is invalid",
+        )
+    raw_changes = phase_config.get("repeatChanges")
+    triggered = event.get("repeatChangeTriggered")
+    if (
+        phase_config.get("templateName") != "CouncilorMissionUpdate"
+        or not isinstance(raw_changes, list)
+        or triggered is not None and not isinstance(triggered, list)
+    ):
+        raise _projection_dependency_error(
+            indexed,
+            source="catalog-or-save-field",
+            field="advisorMission.missionPhaseEvent/CouncilorMissionUpdate.repeatChangeTriggered",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="mission-phase repeat-change inputs are invalid",
+        )
+    triggered = triggered or []
+    repeat_changes: list[tuple[float, str, bool]] = []
+    for index, row in enumerate(raw_changes):
+        if not isinstance(row, dict):
+            raise _projection_dependency_error(
+                indexed,
+                source="catalog-field",
+                field="advisorMission.missionPhaseEvent.repeatChanges",
+                rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+                reason="mission-phase repeat change row is not an object",
+            )
+        threshold = row.get("campaignYearsGreaterThan")
+        updated_type = row.get("repeatType")
+        saved_trigger = triggered[index] if index < len(triggered) else False
+        if (
+            not isinstance(threshold, (int, float)) or isinstance(threshold, bool)
+            or not math.isfinite(float(threshold)) or float(threshold) < 0
+            or not isinstance(updated_type, str) or not updated_type
+            or not isinstance(saved_trigger, bool)
+        ):
+            raise _projection_dependency_error(
+                indexed,
+                source="catalog-field",
+                field="advisorMission.missionPhaseEvent.repeatChanges",
+                rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+                reason="mission-phase repeat change is invalid",
+            )
+        repeat_changes.append((float(threshold), updated_type, saved_trigger))
+    cost_value = cost.get("value")
+    segments = config.get("resolutionSegmentsPerPhase")
+    resolution_order = config.get("resolutionOrder")
+    time_step = event.get("timeStep", 1)
+    start_month = event.get("startMonth", next_phase.month)
+    if (
+        not isinstance(cost_value, (int, float)) or isinstance(cost_value, bool)
+        or not math.isfinite(float(cost_value)) or cost_value < 0
+        or not isinstance(segments, (int, float)) or isinstance(segments, bool)
+        or not float(segments).is_integer() or int(segments) <= 0
+        or not isinstance(resolution_order, (int, float)) or isinstance(resolution_order, bool)
+        or not float(resolution_order).is_integer() or not 0 <= float(resolution_order) < int(segments)
+        or not isinstance(time_step, (int, float)) or isinstance(time_step, bool)
+        or not float(time_step).is_integer() or int(time_step) <= 0
+        or not isinstance(start_month, (int, float)) or isinstance(start_month, bool)
+        or not float(start_month).is_integer() or not 1 <= int(start_month) <= 12
+    ):
+        raise _projection_dependency_error(
+            indexed,
+            source="catalog-or-save-field",
+            field="advisorMission.cost/resolution and CouncilorMissionUpdate.timeStep/startMonth",
+            rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+            reason="mission lifecycle numeric inputs are invalid",
+        )
+    mission_phase = first_value(indexed, "TIMissionPhaseState") or {}
+    return nation_projection_layer.AdvisorMissionSchedule(
+        next_phase_at=next_phase,
+        repeat_type=repeat_type,
+        time_step=int(time_step),
+        start_month=int(start_month),
+        resolution_segments_per_phase=int(segments),
+        resolution_order=int(resolution_order),
+        automatic_success=True,
+        movement_rule="MoveToTarget",
+        influence_cost=float(cost_value),
+        repeat_changes=tuple(repeat_changes),
+        phase_active=mission_phase.get("phaseActive") is True,
+    )
+
+
+def _projection_dependency_error(
+    indexed: IndexedState,
+    *,
+    source: str,
+    field: str,
+    rule_id: str,
+    reason: str,
+) -> CalculationDependencyError:
+    """Build the structured fail-closed error used by projection extraction.
+
+    ``CalculationDependency`` predates the mechanics registry and intentionally
+    has no dedicated rule-id member.  The stable rule ID is therefore carried
+    in ``context`` while ``name`` preserves the exact source field/catalog row.
+    That keeps the existing public error contract intact and still lets callers
+    associate the missing input with the same registry entry used by the engine.
+    """
+
+    return CalculationDependencyError(
+        CalculationDependency(
+            kind=source,
+            name=field,
+            context=rule_id,
+            scenario=scenario_template_name(indexed),
+            reason=reason,
+        )
+    )
+
+
+def _required_projection_number(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> float:
+    value = source_value.get(field)
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="required finite numeric value is absent or invalid; no projection default is permitted",
+        )
+    return float(value)
+
+
+def _required_projection_bool(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> bool:
+    value = source_value.get(field)
+    if not isinstance(value, bool):
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="required boolean value is absent or invalid; no projection default is permitted",
+        )
+    return value
+
+
+def _required_projection_string(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> str:
+    value = source_value.get(field)
+    if not isinstance(value, str) or not value:
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="required non-empty string value is absent or invalid; no projection default is permitted",
+        )
+    return value
+
+
+def _required_projection_army_type(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> str:
+    """Require one of the audited ``ArmyType`` enum names for Navy selection."""
+    value = _required_projection_string(
+        indexed, source_value, field, source=source, rule_id=rule_id,
+    )
+    if value not in {"Human", "AlienMegafauna", "AlienInvader"}:
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="army type is not a supported ArmyType enum value; no projection default is permitted",
+        )
+    return value
+
+
+def _required_projection_deployment_type(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> str:
+    """Require one of the audited ``DeploymentType`` enum names."""
+    value = _required_projection_string(
+        indexed, source_value, field, source=source, rule_id=rule_id,
+    )
+    if value not in {"None", "Standard", "Naval"}:
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="deployment type is not a supported DeploymentType enum value; no projection default is permitted",
+        )
+    return value
+
+
+def _required_projection_ocean_type(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> str:
+    value = _required_projection_string(
+        indexed, source_value, field, source=source, rule_id=rule_id,
+    )
+    if value not in {"No", "None", "Yes", "Seasonal"}:
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="required ocean type is unsupported; no projection default is permitted",
+        )
+    return value
+
+
+def _required_projection_mapping(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> dict[str, Any]:
+    value = source_value.get(field)
+    if not isinstance(value, dict):
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="required object is absent or invalid; no projection default is permitted",
+        )
+    return value
+
+
+def _required_projection_list(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> list[Any]:
+    value = source_value.get(field)
+    if not isinstance(value, list):
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="required array is absent or invalid; no projection default is permitted",
+        )
+    return value
+
+
+def _required_projection_catalog_row(
+    indexed: IndexedState,
+    rows: Any,
+    name: Any,
+    *,
+    collection: str,
+    rule_id: str,
+) -> dict[str, Any]:
+    normalized = str(name or "")
+    row = rows.get(normalized) if isinstance(rows, dict) else None
+    if normalized and isinstance(row, dict):
+        return row
+    raise _projection_dependency_error(
+        indexed,
+        source="catalog-field",
+        field=f"{collection}.{normalized or '<missing reference>'}",
+        rule_id=rule_id,
+        reason="save-referenced template row is absent from the packaged scenario catalog",
+    )
+
+
+def _serialized_numeric_tracker(
+    indexed: IndexedState,
+    value: Any,
+    *,
+    field: str,
+    rule_id: str,
+) -> dict[int, float]:
+    if not isinstance(value, list):
+        raise _projection_dependency_error(
+            indexed,
+            source="save-field",
+            field=field,
+            rule_id=rule_id,
+            reason="required serialized numeric tracker is absent or invalid",
+        )
+    result: dict[int, float] = {}
+    for row in value:
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("Key"), int)
+            or not isinstance(row.get("Value"), (int, float))
+            or isinstance(row.get("Value"), bool)
+        ):
+            raise _projection_dependency_error(
+                indexed,
+                source="save-field",
+                field=field,
+                rule_id=rule_id,
+                reason="serialized numeric tracker contains an invalid Key/Value row",
+            )
+        result[int(row["Key"])] = float(row["Value"])
+    return result
+
+
+def _region_occupation_fraction(region: dict[str, Any]) -> float:
+    occupations = region.get("occupations")
+    if not isinstance(occupations, list):
+        return 0.0 if occupations == {} else math.nan
+    values = [
+        float(row["Value"])
+        for row in occupations
+        if isinstance(row, dict)
+        and isinstance(row.get("Value"), (int, float))
+        and not isinstance(row.get("Value"), bool)
+    ]
+    return min(1.0, max(values, default=0.0))
+
+
+def extract_nation_projection_state(
+    indexed: IndexedState,
+    nation_id: int,
+    nation: dict[str, Any],
+    all_advisors: dict[int, nation_projection_layer.AdvisorProfile],
+    owner_bonuses: dict[int, dict[str, float]],
+    development: dict[str, Any],
+    advisor_schedule: nation_projection_layer.AdvisorMissionSchedule | None = None,
+) -> nation_projection_layer.NationProjectionState:
+    global_config = development.get("globalConfig") if isinstance(development.get("globalConfig"), dict) else {}
+    nation_templates = development.get("nationTemplates") if isinstance(development.get("nationTemplates"), dict) else {}
+    region_templates = development.get("regionTemplates") if isinstance(development.get("regionTemplates"), dict) else {}
+    map_templates = development.get("mapRegionTemplates") if isinstance(development.get("mapRegionTemplates"), dict) else {}
+    bilateral_templates = development.get("bilateralTemplates") if isinstance(development.get("bilateralTemplates"), dict) else {}
+    time_state = first_value(indexed, "TITimeState") or {}
+    start = ti_datetime(time_state.get("currentDateTime"))
+    if start is None:
+        raise nation_projection_layer.ProjectionInputError("Save has no valid TITimeState.currentDateTime")
+    points = nation_control_points(indexed, nation)
+    control_points: dict[int, nation_projection_layer.ControlPointProjectionState] = {}
+    positions: set[int] = set()
+    for index, cp in enumerate(points):
+        cp_id = int(as_float((cp.get("ID") or {}).get("value"), -1))
+        position = cp.get("positionInNation")
+        if cp_id < 0 or not isinstance(position, int) or position in positions:
+            raise nation_projection_layer.ProjectionInputError("Target nation has invalid or duplicate control-point identity/position")
+        if ref_id(cp.get("nation")) not in {None, nation_id}:
+            raise nation_projection_layer.ProjectionInputError("Control point nation reference does not match target nation")
+        positions.add(position)
+        owner_id = ref_id(cp.get("faction"))
+        raw_pips = cp.get("controlPointPriorities") if isinstance(cp.get("controlPointPriorities"), dict) else {}
+        raw_diversity = cp.get("diversityBonus") if isinstance(cp.get("diversityBonus"), dict) else {}
+        control_points[cp_id] = nation_projection_layer.ControlPointProjectionState(
+            id=cp_id,
+            position=position,
+            owner_faction_id=owner_id,
+            benefits_disabled=bool(cp.get("benefitsDisabled")),
+            control_point_type=cp.get("controlPointType"),
+            pips={str(key): int(as_float(value, 0.0)) for key, value in raw_pips.items()},
+            priority_bonuses=dict(owner_bonuses.get(owner_id or -1, {})),
+            total_weight=int(as_float(cp.get("totalWeightsForControlPoint"), 0.0)),
+            num_priorities_with_weight=int(as_float(cp.get("numPrioritiesWithWeight"), 0.0)),
+            diversity_bonus_cache={str(key): as_float(value, 0.0) for key, value in raw_diversity.items()},
+        )
+    regions: dict[int, nation_projection_layer.RegionProjectionState] = {}
+    region_map_names: dict[int, str] = {}
+    total_population = _required_projection_number(
+        indexed,
+        {"population": nation_population_millions(indexed, nation)},
+        "population",
+        source="derived-save-field",
+        rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+    )
+    nation_gdp = _required_projection_number(indexed, nation, "GDP", source="save-field", rule_id=Rules.NATION_IP_ECONOMY_SCORE.id)
+    pcgdp = nation_gdp / (total_population * 1_000_000.0) if total_population else 0.0
+    space_defenses = 0
+    sto_fighters = 0
+    raw_region_refs = _required_projection_list(indexed, nation, "regions", source="save-field", rule_id=Rules.NATION_POPULATION_MONTHLY_GROWTH.id)
+    capital_id = ref_id(nation.get("capital"))
+    for region_order, region_ref in enumerate(raw_region_refs):
+        region_id = ref_id(region_ref)
+        region = state_value_by_id(indexed, region_id)
+        if region_id is None or not isinstance(region, dict):
+            raise _projection_dependency_error(
+                indexed,
+                source="save-reference",
+                field="nation.regions",
+                rule_id=Rules.NATION_POPULATION_MONTHLY_GROWTH.id,
+                reason="target nation contains an unresolved region reference",
+            )
+        template_name = str(region.get("templateName") or "")
+        template = _required_projection_catalog_row(
+            indexed, region_templates, template_name,
+            collection="regionTemplates", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+        )
+        map_name = str(template.get("mapRegionName") or "")
+        map_template = _required_projection_catalog_row(
+            indexed, map_templates, map_name,
+            collection="mapRegionTemplates", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+        )
+        xeno = state_value_by_id(indexed, ref_id(region.get("xenoforming")))
+        if not isinstance(xeno, dict):
+            raise _projection_dependency_error(
+                indexed,
+                source="save-reference",
+                field=f"region.{region_id}.xenoforming",
+                rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+                reason="required xenoforming state reference cannot be resolved",
+            )
+        occupation_fraction = _region_occupation_fraction(region)
+        if not math.isfinite(occupation_fraction):
+            raise _projection_dependency_error(
+                indexed,
+                source="save-field",
+                field=f"region.{region_id}.occupations",
+                rule_id=Rules.NATION_IP_BASE.id,
+                reason="occupation mapping is absent or invalid",
+            )
+        colony = _required_projection_bool(indexed, region, "colonyRegion", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id)
+        permanent_colony = _required_projection_bool(indexed, region, "permanentlyDecolonized", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION.id)
+        resource_region = _required_projection_bool(indexed, region, "resourceRegion", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM.id)
+        oil_region = _required_projection_bool(indexed, region, "oilRegion", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM.id)
+        core_region = _required_projection_bool(indexed, region, "coreEconomicRegion", source="save-field", rule_id=Rules.NATION_PRIORITY_BUILD_ARMY_PLACEMENT.id)
+        latitude_field = f"mapRegionTemplates.{map_name}.latitude"
+        longitude_field = f"mapRegionTemplates.{map_name}.longitude"
+        environment_field = f"regionTemplates.{template_name}.environment"
+        latitude = _required_projection_number(
+            indexed,
+            {latitude_field: map_template.get("latitude")},
+            latitude_field,
+            source="catalog-field",
+            rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+        )
+        longitude = _required_projection_number(
+            indexed,
+            {longitude_field: map_template.get("longitude")},
+            longitude_field,
+            source="catalog-field",
+            rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+        )
+        environment = _required_projection_string(
+            indexed,
+            {environment_field: template.get("environment")},
+            environment_field,
+            source="catalog-field",
+            rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+        )
+        region_map_names[region_id] = map_name
+        regions[region_id] = nation_projection_layer.RegionProjectionState(
+            id=region_id,
+            population_millions=_required_projection_number(indexed, region, "populationInMillions", source="save-field", rule_id=Rules.NATION_POPULATION_MONTHLY_GROWTH.id),
+            boost_per_year=_required_projection_number(indexed, region, "boostPerYear_dekatons", source="save-field", rule_id=Rules.NATION_FACTION_CONTRIBUTION.id),
+            mission_control=int(_required_projection_number(indexed, region, "missionControl", source="save-field", rule_id=Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id)),
+            ocean_type=_required_projection_ocean_type(indexed, region, "oceanType", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
+            annual_population_growth=None,
+            per_capita_gdp=pcgdp,
+            gdp=None,
+            region_order=region_order,
+            template_name=template_name,
+            latitude=latitude,
+            longitude=longitude,
+            annual_population_growth_modifier=_required_projection_number(indexed, region, "annualPopGrowthModifier", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
+            environment=environment,
+            xenoforming_level=_required_projection_number(indexed, xeno, "xenoformingLevel", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
+            nuclear_detonations=int(_required_projection_number(indexed, region, "nuclearDetonations", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id)),
+            colony=colony,
+            permanent_colony=permanent_colony,
+            resource_region=resource_region,
+            oil_region=oil_region,
+            core_economic_region=core_region,
+            mine_capable=bool(template.get("mineCapable")),
+            oil_capable=bool(template.get("oilCapable")),
+            capital=region_id == capital_id,
+            occupation_fraction=occupation_fraction,
+            fully_occupied=ref_id(region.get("leadOccupier")) is not None,
+            mission_control_cap=None,
+            welfare_colony_counter=int(_required_projection_number(indexed, region, "accumulatedDecolonizeTriggers", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id)),
+            economy_region_counters={
+                key: int(_required_projection_number(
+                    indexed,
+                    region,
+                    field,
+                    source="save-field",
+                    rule_id=Rules.NATION_PRIORITY_ECONOMY_MARKET.id,
+                ))
+                for key, field in (
+                    ("coreEconomic", "accumulatedCoreEconomyRegionTriggers"),
+                    ("mining", "accumulatedCoreMiningRegionTriggers"),
+                    ("oil", "accumulatedCoreOilRegionTriggers"),
+                )
+            },
+        )
+        defense = state_value_by_id(indexed, ref_id(region.get("spaceDefenseFacility"))) or {}
+        space_defenses += 1 if defense.get("weaponTemplateName") else 0
+        sto_fighters += int(as_float(region.get("numSTOFighters"), 0.0))
+    map_to_region = {map_name: region_id for region_id, map_name in region_map_names.items()}
+    adjacency: dict[int, set[int]] = {region_id: set() for region_id in regions}
+    for row in bilateral_templates.values():
+        if not isinstance(row, dict) or row.get("relationType") != "PhysicalAdjacency":
+            continue
+        left = map_to_region.get(str(row.get("region1") or ""))
+        right = map_to_region.get(str(row.get("region2") or ""))
+        if left is not None and right is not None:
+            adjacency[left].add(right)
+            adjacency[right].add(left)
+    for region_id, adjacent_ids in adjacency.items():
+        regions[region_id].adjacent_region_ids = tuple(sorted(adjacent_ids, key=lambda value: regions[value].region_order))
+
+    armies: list[nation_projection_layer.ArmyProjectionState] = []
+    navy_count = 0
+    for army_ref in _required_projection_list(indexed, nation, "armies", source="save-field", rule_id=Rules.NATION_ASSET_ARMY_MAINTENANCE.id):
+        army_id = ref_id(army_ref)
+        army = state_value_by_id(indexed, army_id)
+        if army_id is None or not isinstance(army, dict):
+            raise _projection_dependency_error(indexed, source="save-reference", field="nation.armies", rule_id=Rules.NATION_ASSET_ARMY_MAINTENANCE.id, reason="army reference cannot be resolved")
+        deployment = _required_projection_deployment_type(
+            indexed, army, "deploymentType", source="save-field",
+            rule_id=Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+        )
+        if deployment == "Naval" and not army.get("destroyed"):
+            navy_count += 1
+        armies.append(nation_projection_layer.ArmyProjectionState(
+            id=army_id,
+            strength=_required_projection_number(indexed, army, "strength", source="save-field", rule_id=Rules.NATION_ASSET_ARMY_MAINTENANCE.id),
+            deployment_type=deployment,
+            home_region_id=int(ref_id(army.get("homeRegion")) or -1),
+            current_region_id=int(ref_id(army.get("currentRegion")) or -1),
+            control_point_position=int(_required_projection_number(indexed, army, "controlPointIdx", source="save-field", rule_id=Rules.NATION_PRIORITY_BUILD_ARMY_PLACEMENT.id)),
+            faction_id=ref_id(army.get("faction")),
+            army_type=_required_projection_army_type(indexed, army, "armyType", source="save-field", rule_id=Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id),
+            operations=float(len(army.get("currentOperations") or [])),
+            destroyed=bool(army.get("destroyed")),
+        ))
+    current_advisors = tuple(all_advisors[councilor_id] for councilor_id in (ref_id(value) for value in nation.get("advisingCouncilors", [])) if councilor_id in all_advisors)
+    current_phase_assignments: list[nation_projection_layer.AdvisorProfile] = []
+    repeating_advisors: list[nation_projection_layer.AdvisorProfile] = []
+    prepaid_ids: set[int] = set()
+    current_ids = {profile.councilor_id for profile in current_advisors if profile.councilor_id is not None}
+    for entry in type_entries(indexed, "TICouncilorState"):
+        councilor = entry.get("Value") or {}
+        councilor_id = raw_state_id(entry)
+        if councilor_id is None or councilor_id not in all_advisors:
+            continue
+        mission = state_value_by_id(indexed, ref_id(councilor.get("activeMission")))
+        assigned_here = (
+            isinstance(mission, dict)
+            and mission.get("templateName") == "Advise"
+            and ref_id(mission.get("target")) == nation_id
+        )
+        if assigned_here:
+            current_phase_assignments.append(all_advisors[councilor_id])
+            prepaid_ids.add(councilor_id)
+        if (assigned_here or councilor_id in current_ids) and (
+            councilor.get("repeatOrder") is True or councilor.get("permanentAssignment") is True
+        ):
+            repeating_advisors.append(all_advisors[councilor_id])
+    advisor_policy = tuple(dict.fromkeys(repeating_advisors))
+    phase_assignments = tuple(dict.fromkeys(current_phase_assignments))
+    economy_score = _required_projection_number(indexed, nation, "economyScore", source="save-field", rule_id=Rules.NATION_IP_ECONOMY_SCORE.id)
+    gdp_modifiers = {
+        name: _required_projection_number(
+            indexed,
+            {
+                f"globalConfig.{name}.value": (
+                    global_config.get(name, {}).get("value")
+                    if isinstance(global_config.get(name), dict)
+                    else None
+                )
+            },
+            f"globalConfig.{name}.value",
+            source="catalog-field",
+            rule_id=Rules.NATION_IP_BASE.id,
+        )
+        for name in (
+            "coreEcoRegionGDPModifier",
+            "coreResourceRegionGDPModifier",
+            "colonyRegionGDPModifier",
+        )
+    }
+    weights: dict[int, float] = {}
+    for region in regions.values():
+        weight = region.population_millions
+        if region.core_economic_region:
+            weight *= gdp_modifiers["coreEcoRegionGDPModifier"]
+        if region.resource_region or region.oil_region:
+            weight *= gdp_modifiers["coreResourceRegionGDPModifier"]
+        if region.colony:
+            weight *= gdp_modifiers["colonyRegionGDPModifier"]
+        weights[region.id] = weight
+    total_weight = sum(weights.values())
+    occupation_penalty = sum((weights[region.id] / total_weight) * float(region.occupation_fraction or 0.0) for region in regions.values()) if total_weight else 0.0
+    occupation_factor = min(max(1.0 - occupation_penalty, 0.0), 1.0)
+    progress = _required_projection_mapping(
+        indexed,
+        nation,
+        "_accumulatedInvestmentPoints",
+        source="save-field",
+        rule_id=Rules.NATION_PRIORITY_COMPLETION_ORDER.id,
+    )
+    global_state = first_value(indexed, "TIGlobalValuesState") or {}
+    temperature = temperature_anomaly_components(global_state)
+    hostile_ids = {region_id for region_id in (ref_id(value) for value in nation.get("hostileClaims", [])) if region_id in regions}
+    if not control_points:
+        raise _projection_dependency_error(
+            indexed,
+            source="save-reference",
+            field="nation.controlPoints",
+            rule_id=Rules.NATION_PERIODIC_CONTROL_POINTS.id,
+            reason="target nation has no resolvable control point; the executive faction cannot be determined",
+        )
+    executive_cp = max(control_points.values(), key=lambda value: value.position)
+    raw_public_opinion = nation.get("publicOpinion")
+    public_opinion = {
+        str(key): float(value)
+        for key, value in raw_public_opinion.items()
+        if isinstance(raw_public_opinion, dict)
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    } if isinstance(raw_public_opinion, dict) else {}
+    raw_market = global_state.get("resourceMarketValues")
+    market_values = {
+        name: float(raw_market[name])
+        for name in ("Metals", "NobleMetals")
+        if isinstance(raw_market, dict)
+        and isinstance(raw_market.get(name), (int, float))
+        and not isinstance(raw_market.get(name), bool)
+    }
+    market_blockers = set()
+    if set(market_values) != {"Metals", "NobleMetals"}:
+        market_blockers.add(Rules.NATION_PRIORITY_ECONOMY_MARKET.id)
+    state = nation_projection_layer.NationProjectionState(
+        nation_id=nation_id, at=start, gdp=nation_gdp,
+        inequality=_required_projection_number(indexed, nation, "inequality", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id),
+        education=_required_projection_number(indexed, nation, "education", source="save-field", rule_id=Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE.id),
+        democracy=_required_projection_number(indexed, nation, "democracy", source="save-field", rule_id=Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE.id),
+        cohesion=_required_projection_number(indexed, nation, "cohesion", source="save-field", rule_id=Rules.NATION_PERIODIC_COHESION.id),
+        cohesion_rest=_required_projection_number(indexed, nation, "cohesionRestState_dailyCache", source="save-field", rule_id=Rules.NATION_PERIODIC_DERIVED_CACHE.id),
+        unrest=_required_projection_number(indexed, nation, "unrest", source="save-field", rule_id=Rules.NATION_PERIODIC_UNREST.id),
+        unrest_rest=_required_projection_number(indexed, nation, "unrestRestState_dailyCache", source="save-field", rule_id=Rules.NATION_PERIODIC_DERIVED_CACHE.id),
+        sustainability=_required_projection_number(indexed, nation, "sustainability", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
+        military_tech=_required_projection_number(indexed, nation, "militaryTechLevel", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
+        funding_year=_required_projection_number(indexed, nation, "spaceFunding_year", source="save-field", rule_id=Rules.NATION_PRIORITY_FUNDING_COMPLETE.id), economy_score=economy_score,
+        occupation_factor=occupation_factor, army_maintenance=0.0,
+        progress={str(key): as_float(value, 0.0) for key, value in progress.items()}, regions=regions,
+        control_points=control_points, advisors=current_advisors, mission_control=nation_current_mission_control(indexed, nation),
+        army_count=len([army for army in armies if not army.destroyed and army.deployment_type != "Naval"]), navy_count=navy_count, nuclear_weapons=int(as_float(nation.get("numNuclearWeapons"), 0.0)),
+        space_defenses=space_defenses, sto_fighters=sto_fighters,
+        days_in_campaign=_required_projection_number(indexed, time_state, "daysInCampaign", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
+        current_quarter=int(_required_projection_number(indexed, time_state, "currentQuarterSinceStart", source="save-field", rule_id=Rules.NATION_PERIODIC_DERIVED_CACHE.id)),
+        pcgdp_tracker=_serialized_numeric_tracker(indexed, nation.get("tracker_PCGDP_ByQuarter"), field="tracker_PCGDP_ByQuarter", rule_id=Rules.NATION_PERIODIC_DERIVED_CACHE.id),
+        military=_required_projection_bool(indexed, nation, "military", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
+        space_flight_program=_required_projection_bool(indexed, nation, "spaceFlightProgram", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
+        federation_space_program=federation_space_program(indexed, nation),
+        nuclear_program=_required_projection_bool(indexed, nation, "nuclearProgram", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
+        can_build_space_defenses=_required_projection_bool(indexed, nation, "canBuildSpaceDefenses", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
+        can_build_sto=_required_projection_bool(indexed, nation, "canBuildSTOSquadrons", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
+        num_control_points_unclamped=int(_required_projection_number(indexed, nation, "numControlPoints_unclamped", source="save-field", rule_id=Rules.NATION_PERIODIC_CONTROL_POINTS.id)),
+        legitimize_counter=as_float(nation.get("accumulatedLegitimizeClaimTriggers"), 0.0),
+        hostile_region_ids=hostile_ids,
+        executive_faction_id=executive_cp.owner_faction_id,
+        public_opinion=public_opinion,
+        armies=armies,
+        world_context={
+            "earthAtmosphericCO2_ppm": _required_projection_number(indexed, global_state, "earthAtmosphericCO2_ppm", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
+            "earthAtmosphericCH4_ppm": _required_projection_number(indexed, global_state, "earthAtmosphericCH4_ppm", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
+            "earthAtmosphericN2O_ppm": _required_projection_number(indexed, global_state, "earthAtmosphericN2O_ppm", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
+            "stratosphericAerosols_ppm": _required_projection_number(indexed, global_state, "stratosphericAerosols_ppm", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
+            "temperatureAnomaly_C": temperature["total"],
+            "pcgdpToReduceUnrestBy1": _required_projection_number(indexed, global_state, "fixedPCGDPToReduceUnrestBy1", source="save-field", rule_id=Rules.NATION_PERIODIC_DERIVED_CACHE.id),
+            "resourceMarketValues": market_values,
+            "endOfOil": global_state.get("endOfOil") if isinstance(global_state.get("endOfOil"), bool) else None,
+        },
+        federation_economy_bonus=as_float(nation.get("restofFederationECOBonus_dailyCache"), 0.0),
+        cached_num_mining_regions=int(as_float(nation.get("numMiningRegions_dailyCache"), 0.0)),
+        cached_num_oil_regions=int(as_float(nation.get("numOilRegions_dailyCache"), 0.0)),
+        cached_num_core_economic_regions=int(as_float(nation.get("numCoreEconomicRegions_dailyCache"), 0.0)),
+        cached_can_accumulate_core_economy=bool(nation.get("canAccumulateCoreEconomyTriggers")),
+        cached_can_accumulate_core_mining=bool(nation.get("canAccumulateCoreMiningTriggers")),
+        cached_can_accumulate_core_oil=bool(nation.get("canAccumulateCoreOilTriggers")),
+        policy_no_oil_development=bool(nation.get("policy_noOilDevelopment")),
+        policy_no_mineral_development=bool(nation.get("policy_noMineralDevelopment")),
+        world_market_blockers=market_blockers,
+        advisor_policy=advisor_policy,
+        advisor_mission_schedule=advisor_schedule,
+        advisor_current_phase_assignments=phase_assignments,
+        advisor_assignment_prepaid_ids=frozenset(prepaid_ids),
+    )
+    return state
+
+
+def calculate_nation_projection(
+    indexed: IndexedState,
+    nation_name: str,
+    faction_name: str | None,
+    plan_payload: Any,
+    *,
+    days: int,
+    checkpoints: list[int],
+    details: bool,
+    diagnostics: bool,
+) -> dict[str, Any]:
+    found = match_raw_state(indexed, "TINationState", nation_name)
+    if not found or found[0] is None:
+        raise SystemExit(f"Nation not found: {nation_name}")
+    nation_id, nation = found
+    faction_id, faction = find_faction_state(indexed, faction_name)
+    catalogs = calculation_catalogs(indexed, "nation-projection")
+    development = catalogs.nation_development
+    priorities = development.get("priorities") if isinstance(development.get("priorities"), dict) else {}
+    global_config = development.get("globalConfig") if isinstance(development.get("globalConfig"), dict) else {}
+    _, councilor_by_id = councilor_summary_maps(indexed, catalogs.traits)
+    all_advisors, available_advisors = projection_advisor_profiles(indexed, faction_id, faction, councilor_by_id)
+    owner_bonuses: dict[int, dict[str, float]] = {}
+    owner_bonus_bases: dict[int, dict[str, float]] = {}
+    for cp in nation_control_points(indexed, nation):
+        owner_id = ref_id(cp.get("faction"))
+        owner = state_value_by_id(indexed, owner_id)
+        if owner_id is not None and isinstance(owner, dict) and owner_id not in owner_bonuses:
+            owner_bonuses[owner_id], owner_bonus_bases[owner_id] = faction_priority_bonuses_for_projection(
+                indexed,
+                owner_id,
+                owner,
+                priorities,
+                catalogs.traits,
+                catalogs.effects,
+            )
+    advisor_schedule = projection_advisor_mission_schedule(indexed, development)
+    state = extract_nation_projection_state(
+        indexed,
+        nation_id,
+        nation,
+        all_advisors,
+        owner_bonuses,
+        development,
+        advisor_schedule,
+    )
+    plans, goals = nation_projection_layer.parse_projection_document(plan_payload, state=state, councilors=available_advisors, priorities=priorities)
+    contexts = faction_effect_contexts(indexed, faction_id)
+    research_factor = apply_effect_modifiers(contexts, catalogs.effects, "ControlPointResearch", 1.0)
+    faction_priority_modifiers: dict[int, dict[str, float]] = {}
+    welfare_base = float((global_config.get("welfarePriorityInequalityChange") or {}).get("value"))
+    for owner_id in owner_bonuses:
+        owner_contexts = faction_effect_contexts(indexed, owner_id)
+        faction_priority_modifiers[owner_id] = {
+            "WelfareInequalityReductionBonus": apply_effect_modifiers(
+                owner_contexts,
+                catalogs.effects,
+                "WelfareInequalityReductionBonus",
+                welfare_base,
+            ) - welfare_base,
+        }
+    faction_templates = development.get("factionTemplates") if isinstance(development.get("factionTemplates"), dict) else {}
+    ideology_templates = development.get("ideologyTemplates") if isinstance(development.get("ideologyTemplates"), dict) else {}
+    faction_ideologies: dict[int, str] = {}
+    active_human: list[tuple[int, int, str]] = []
+    alien_faction_id: int | None = None
+    proxy_candidates: list[tuple[int, int]] = []
+    all_faction_contexts: dict[int, dict[str, tuple[str, ...]]] = {}
+    for entry in type_entries(indexed, "TIFactionState"):
+        value = entry.get("Value") or {}
+        owner_id = raw_state_id(entry)
+        template_name = str(value.get("templateName") or "")
+        faction_template = faction_templates.get(template_name)
+        if owner_id is None or not isinstance(faction_template, dict):
+            continue
+        ideology_name = str(faction_template.get("ideologyName") or "")
+        ideology_template = ideology_templates.get(ideology_name)
+        if not isinstance(ideology_template, dict):
+            continue
+        ideology = str(ideology_template.get("ideology") or "")
+        if not ideology:
+            continue
+        faction_ideologies[owner_id] = ideology
+        all_faction_contexts[owner_id] = {
+            str(name): tuple(str(effect) for effect in effects)
+            for name, effects in faction_effect_contexts(indexed, owner_id).items()
+        }
+        if faction_template.get("isAlien") is True or ideology_template.get("alien") is True:
+            alien_faction_id = owner_id
+        else:
+            active_human.append((int(ideology_template.get("sortOrder") or 0), owner_id, ideology_name))
+            will_proxy = ideology_template.get("willProxy")
+            if isinstance(will_proxy, int) and will_proxy > 0:
+                proxy_candidates.append((will_proxy, owner_id))
+    permanent_allies = {owner_id: (owner_id,) for owner_id in faction_ideologies}
+    if alien_faction_id is not None and proxy_candidates:
+        proxy_id = min(proxy_candidates)[1]
+        permanent_allies[alien_faction_id] = tuple(dict.fromkeys((*permanent_allies[alien_faction_id], proxy_id)))
+        permanent_allies[proxy_id] = tuple(dict.fromkeys((*permanent_allies[proxy_id], alien_faction_id)))
+    state.public_opinion_context = {
+        "activeHumanIdeologyNames": [name for _sort, _owner, name in sorted(active_human)],
+        "alienFactionId": alien_faction_id,
+        "alienProxyFactionId": min(proxy_candidates)[1] if proxy_candidates else None,
+    }
+    state.faction_effect_contexts = {
+        owner_id: {name: list(effects) for name, effects in contexts.items()}
+        for owner_id, contexts in all_faction_contexts.items()
+    }
+    state.faction_effect_expirations = faction_effect_expirations_for_projection(indexed)
+    state.faction_priority_bonus_cache = {
+        owner_id: dict(bonuses) for owner_id, bonuses in owner_bonuses.items()
+    }
+    nation_template_name = str(nation.get("templateName") or "")
+    start_template_name = str((first_value(indexed, "TITimeState") or {}).get("templateName") or "")
+    nation_template = _required_projection_catalog_row(
+        indexed,
+        development.get("nationTemplates"),
+        nation_template_name,
+        collection="nationTemplates",
+        rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+    )
+    start_template = _required_projection_catalog_row(
+        indexed,
+        development.get("startTimeTemplates"),
+        start_template_name,
+        collection="startTimeTemplates",
+        rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+    )
+    context = nation_projection_layer.ProjectionContext(
+        faction_id=faction_id, priorities=priorities, global_config=global_config,
+        diversity_bonuses=development.get("diversityBonuses") or {}, national_ip_multiplier=national_ip_multiplier(indexed),
+        initial_funding_pool_year=nation_federation_pooled_year(indexed, nation, "Money"),
+        initial_own_funding_year=as_float(nation.get("spaceFunding_year"), 0.0),
+        initial_boost_pool_year=nation_federation_pooled_year(indexed, nation, "Boost"),
+        knowledge_sector_owned=income_layer.nation_has_owned_knowledge_sector(indexed, nation, faction_id),
+        financial_sector_owned=income_layer.nation_financial_sector_owned(indexed, nation, faction_id),
+        knowledge_sector_bonus=INCOME_CONFIG.knowledge_sector_research_bonus,
+        financial_sector_bonus=INCOME_CONFIG.financial_sector_funding_bonus,
+        research_effect_factor=research_factor,
+        nation_template=nation_template,
+        region_templates=development.get("regionTemplates") or {},
+        start_template=start_template,
+        faction_priority_modifiers=faction_priority_modifiers,
+        faction_ideologies=faction_ideologies,
+        ideology_templates=ideology_templates,
+        permanent_allies=permanent_allies,
+        faction_effect_contexts=all_faction_contexts,
+        effect_templates=catalogs.effects,
+        faction_priority_bonus_bases=owner_bonus_bases,
+    )
+    nation_projection_layer.calibrate_rest_state_context(
+        state,
+        context,
+        pcgdp_to_reduce_unrest_by_one=state.world_context["pcgdpToReduceUnrestBy1"],
+    )
+    topbar = calculate_topbar(indexed, None, faction_name, include_details=False)
+    observed = {
+        "researchMonthly": ((topbar.get("resources") or {}).get("Research") or {}).get("monthly"),
+        "fundingMonthly": ((topbar.get("resources") or {}).get("Money") or {}).get("monthly"),
+        "boostMonthly": ((topbar.get("resources") or {}).get("Boost") or {}).get("monthly"),
+        "missionControlCapacity": ((topbar.get("resources") or {}).get("MissionControl") or {}).get("capacity"),
+    }
+    faction_context = {
+        "id": faction_id, "template": faction.get("templateName"), "display": faction.get("displayName"),
+        "observedTotalAtStart": observed,
+        "scope": "observed whole-faction context only; excluded from conditions, comparison and future projection",
+    }
+    source_notes = [
+        "Runtime mechanics use packaged, hash-verified catalog data; raw templates and DLL are generator/audit inputs only.",
+        "factionContribution.* is only the selected faction's contribution from the target nation.",
+        "Advise uses the saved mission-phase cadence, automatic success, assignment movement, and expected order-0 resolution timing; renewal Influence is reported separately.",
+        "Existing save-to-save comparisons are observational unless produced by a controlled no-action validation run.",
+        "Climate and external resting-state inputs are held fixed at the save snapshot; population jitter uses deterministic mean input.",
+    ]
+    return nation_projection_layer.projection_output(
+        state, plans, context, days=days, checkpoints=checkpoints, goals=goals, details=details,
+        diagnostics=diagnostics, faction_context=faction_context, source_notes=source_notes,
+    )
+
+
+def command_nation_projection(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
+    data = load_save(save_path)
+    indexed = build_index(data)
+    plan_payload = None
+    if args.plan_file:
+        try:
+            plan_payload = json.loads(Path(args.plan_file).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise nation_projection_layer.ProjectionInputError(f"Unable to read plan file: {exc}") from exc
+    checkpoints = []
+    if args.checkpoints:
+        try:
+            checkpoints = sorted({int(value) for value in args.checkpoints.split(",") if value.strip()})
+        except ValueError as exc:
+            raise nation_projection_layer.ProjectionInputError("--checkpoints must be comma-separated integer days") from exc
+        if any(value < 0 or value > args.days for value in checkpoints):
+            raise nation_projection_layer.ProjectionInputError("Checkpoint days must be inside the projection horizon")
+    result = calculate_nation_projection(
+        indexed, args.name, args.faction, plan_payload, days=args.days, checkpoints=checkpoints,
+        details=args.details, diagnostics=args.diagnostics,
+    )
+    print_json(clean_numbers(result, 6), compact=args.compact)
+
+
 def command_summary(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
     player_name = snapshot.get("metadata", {}).get("playerFactionName")
-    player_faction = None
+    metadata_candidates = []
     if player_name:
-        player_faction = match_named(snapshot["factions"], player_name)
-    if player_faction is None and snapshot["factions"]:
-        player_faction = next((f for f in snapshot["factions"] if f.get("player", {}).get("template") == "ResistPlayer"), None)
+        needle = str(player_name).casefold()
+        metadata_candidates = [
+            faction
+            for faction in snapshot["factions"]
+            if needle
+            in {
+                str(faction.get("template") or "").casefold(),
+                str(faction.get("display") or "").casefold(),
+                str(faction.get("code") or "").casefold(),
+            }
+        ]
+    player_state_candidates = [
+        faction
+        for faction in snapshot["factions"]
+        if isinstance(faction.get("player"), dict) and faction["player"].get("isAI") is False
+    ]
+    if len(metadata_candidates) > 1 or len(player_state_candidates) > 1:
+        raise SystemExit("Multiple human player faction candidates found in snapshot.")
+    if metadata_candidates and player_state_candidates and metadata_candidates[0].get("id") != player_state_candidates[0].get("id"):
+        raise SystemExit("Snapshot player faction metadata conflicts with TIPlayerState.")
+    player_faction = (player_state_candidates or metadata_candidates or [None])[0]
+    if player_faction is None:
+        raise SystemExit("Human player faction could not be resolved in snapshot.")
 
     top_nations = []
     if player_faction:
@@ -7657,6 +10024,11 @@ def command_summary(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
         )
 
     output = {
+        "faction": {
+            "display": player_faction.get("display"),
+            "template": player_faction.get("template"),
+            "player": True,
+        },
         "source": snapshot.get("source"),
         "currentID": snapshot.get("currentID"),
         "time": snapshot.get("time"),

@@ -1,0 +1,1291 @@
+import copy
+import sys
+import unittest
+from dataclasses import replace
+from datetime import datetime
+from pathlib import Path
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+
+import ti_parser_nation_projection as projection
+from ti_parser_mechanics import Rules, mechanic_rule_test
+
+
+def context(*, priorities=None, diversity=None):
+    priorities = priorities or {
+        "Economy": {"enumValue": 0, "investmentCost": 1},
+        "Welfare": {"enumValue": 1, "investmentCost": 1},
+        "Knowledge": {"enumValue": 3, "investmentCost": 1},
+        "Government": {"enumValue": 4, "investmentCost": 1},
+        "Unity": {"enumValue": 5, "investmentCost": 2},
+        "Funding": {"enumValue": 7, "investmentCost": 1},
+        "MissionControl": {"enumValue": 11, "investmentCost": 1},
+        "Military_BuildArmy": {"enumValue": 14, "investmentCost": 1},
+        "Military_BuildNavy": {"enumValue": 15, "investmentCost": 1},
+    }
+    values = {
+        "nationalInvestmentArmyFactorHome": {"value": 0.5},
+        "nationalInvestmentArmyFactorAway": {"value": 1.0},
+        "nationalInvestmentNavyFactor": {"value": 0.5},
+        "populationBasedIPEffectScaling": {"value": -0.35},
+        "controlPointIPScaling": {"value": 0.35},
+        "controlPointIPFactor": {"value": 1.0},
+        "controlPointCountScaling": {"value": 0.0},
+        "controlPointScalingDivisor": {"value": 1.0},
+        "coreEcoRegionGDPModifier": {"value": 1.25},
+        "coreResourceRegionGDPModifier": {"value": 1.25},
+        "colonyRegionGDPModifier": {"value": 0.5},
+        "coreMineralBuildMilitaryModifier": {"value": 0.05},
+        "federationGDPEconomyBonus": {"value": 0.01},
+        "minPopulationForFirstArmy_millions": {"value": 5.0},
+        "minPopulationForAdditionalArmiesPer_millions": {"value": 25.0},
+        "welfarePriorityInequalityChange": {"value": -0.005},
+        "numPrioritiesForLegitimize": {"value": 1},
+        "maxCombinedImpactFromHostileClaims": {"value": 16.0},
+        "inequalityCohesionMultiplier": {"value": 2.25},
+        "severeInequality": {"value": 4.75},
+        "populationCohesionImpactPower": {"value": 0.2},
+        "knowledgePriorityEducationIncrease": {"value": 0.005},
+        "governmentPriorityDemocracyIncrease": {"value": 0.01},
+        "economyPriorityPerCapitaIncomeChange_base": {"value": 3.0},
+        "economyPriorityPerCapitaIncomeChange_perCoreEcoRegion": {"value": 1.5},
+        "economyPriorityPerCapitaIncomeChange_perResourceRegion": {"value": 1.5},
+        "economyPriorityInequalityIncrease": {"value": 0.00015},
+        "economyPriorityInequalityIncrease_perResourceRegion": {"value": 0.0001},
+        "numEcosForCoreEcoRegion": {"value": 1200},
+        "numEcosForCoreMiningRegion": {"value": 750},
+        "numEcosForCoreOilRegion": {"value": 500},
+        "unityPriorityEducationChange": {"value": -0.001},
+        "unityBaseCohesionChange": {"value": 0.1},
+        "unityMinCohesionChange": {"value": 0.025},
+        "unityPublicOpinionBaseStrength": {"value": 5.0},
+        "religionUnityPublicOpinionBonusStrength": {"value": 3},
+        "publicEliteIdeologicalDistanceCohesionMultiplier": {"value": 2.0},
+        "publicOpinionDispersionCohesionMultiplier": {"value": 6.0},
+        "fundingPriorityBaseIncomeIncrease": {"value": 10.0},
+        "maxMonthlyCohesionIncrease_normal": {"value": 0.1},
+        "maxMonthlyCohesionDecrease_normal": {"value": 0.1},
+        "maxMonthlyCohesionDecrease_cap": {"value": 0.25},
+        "maxMonthlyUnrestMovement_normal": {"value": 0.25},
+        "maxMonthlyUnrestMovement_rapidIncrease": {"value": 1.0},
+    }
+    return projection.ProjectionContext(
+        faction_id=7,
+        priorities=priorities,
+        global_config=values,
+        diversity_bonuses=diversity or {"Knowledge": 0.2, "Unity": 0.2},
+        initial_funding_pool_year=120,
+        initial_own_funding_year=100,
+        financial_sector_bonus=1.25,
+        financial_sector_owned=True,
+        nation_template={"popGrowthModifier": 0.0},
+        start_template={"populationRegressionPeriod_years": 20.0},
+    )
+
+
+def state(*, pips=None, cp_count=1, progress=None, advisors=(), at=None, annual_growth=0.0):
+    pips = pips or {"Knowledge": 3}
+    control_points = {}
+    for position in range(cp_count):
+        control_points[position + 1] = projection.ControlPointProjectionState(
+            position + 1, position, 7, False, None, dict(pips), {}
+        )
+    priorities = context().priorities
+    initial_progress = {name: 0.0 for name in priorities}
+    initial_progress.update(progress or {})
+    return projection.NationProjectionState(
+        nation_id=10,
+        at=at or datetime(2030, 1, 2),
+        gdp=1_000_000_000_000.0,
+        inequality=4.0,
+        education=8.0,
+        democracy=5.0,
+        cohesion=4.0,
+        cohesion_rest=5.0,
+        unrest=3.0,
+        unrest_rest=2.0,
+        sustainability=1.0,
+        military_tech=4.0,
+        funding_year=100.0,
+        economy_score=30.0,
+        occupation_factor=1.0,
+        army_maintenance=0.0,
+        progress=initial_progress,
+        regions={1: projection.RegionProjectionState(
+            id=1, population_millions=50.0, boost_per_year=12.0, mission_control=4,
+            ocean_type="Yes",
+            annual_population_growth=annual_growth, per_capita_gdp=20_000, gdp=1_000_000_000_000.0,
+            region_order=0, template_name="Region_1", latitude=10.0, longitude=20.0,
+            annual_population_growth_modifier=0.0, environment="Standard", xenoforming_level=0.0,
+            nuclear_detonations=0, colony=False, permanent_colony=False, resource_region=False,
+            oil_region=False, core_economic_region=False, mine_capable=False, oil_capable=False,
+            capital=True, occupation_fraction=0.0, fully_occupied=False, welfare_colony_counter=0,
+        )},
+        control_points=control_points,
+        advisors=tuple(advisors),
+        mission_control=4,
+        days_in_campaign=365.0,
+        current_quarter=4,
+        pcgdp_tracker={4: 20_000.0},
+        military=True,
+        space_flight_program=True,
+        num_control_points_unclamped=cp_count,
+        rest_state_context={"cohesionFixedImpact": 12.0, "unrestFixedImpact": 10.5, "pcgdpToReduceUnrestBy1": 3_000.0},
+        world_context={
+            "temperatureAnomaly_C": 1.0,
+            "endOfOil": False,
+            "resourceMarketValues": {"Metals": 10.0, "NobleMetals": 20.0},
+        },
+    )
+
+
+def unity_context():
+    return replace(
+        context(),
+        faction_ideologies={7: "Resist", 8: "Cooperate"},
+        ideology_templates={
+            "resist": {
+                "ideology": "Resist", "sortOrder": 1,
+                "ideologyCoordinates": {"x": 0.0, "y": 0.0, "z": 0.0},
+            },
+            "cooperate": {
+                "ideology": "Cooperate", "sortOrder": 2,
+                "ideologyCoordinates": {"x": 2.0, "y": 0.0, "z": 0.0},
+            },
+            "undecided": {
+                "ideology": "Undecided", "sortOrder": 3, "undecided": True,
+                "ideologyCoordinates": {"x": 1.0, "y": 0.0, "z": 0.0},
+            },
+        },
+        permanent_allies={7: (7,), 8: (8,)},
+    )
+
+
+def unity_state(*, at=None):
+    value = state(
+        pips={"Unity": 3},
+        cp_count=2,
+        progress={"Unity": 1.99},
+        at=at,
+    )
+    value.control_points[1].owner_faction_id = 7
+    value.control_points[1].control_point_type = "Religion"
+    value.control_points[2].owner_faction_id = 8
+    value.public_opinion = {"Resist": 0.4, "Cooperate": 0.3, "Undecided": 0.3}
+    value.public_opinion_context = {"activeHumanIdeologyNames": ["resist", "cooperate"]}
+    projection.calibrate_rest_state_context(
+        value,
+        unity_context(),
+        pcgdp_to_reduce_unrest_by_one=3_000.0,
+    )
+    return value
+
+
+def advisor_schedule(next_phase_at, *, phase_active=False, repeat_changes=(), start_month=1):
+    return projection.AdvisorMissionSchedule(
+        next_phase_at=next_phase_at,
+        repeat_type="Semimonthly",
+        time_step=1,
+        start_month=start_month,
+        resolution_segments_per_phase=5,
+        resolution_order=0,
+        automatic_success=True,
+        movement_rule="MoveToTarget",
+        influence_cost=10.0,
+        repeat_changes=repeat_changes,
+        phase_active=phase_active,
+    )
+
+
+class NationProjectionPlanTests(unittest.TestCase):
+    @mechanic_rule_test(Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id, evidence="coverageBranch")
+    def test_unity_stochastic_policy_is_explicit_and_plan_scoped(self):
+        initial = state(pips={"Knowledge": 3})
+        payload = {"plans": [{
+            "name": "p",
+            "stochasticPolicy": {"unityPublicOpinion": "meanPath"},
+            "segments": [
+                {"until": {"day": 5}},
+                {"controlPoints": [{"position": 0, "pips": {"Unity": 3}}]},
+            ],
+        }]}
+        plans, _ = projection.parse_projection_document(
+            payload, state=initial, councilors={}, priorities=context().priorities
+        )
+        self.assertEqual(plans[0].unity_public_opinion_policy, "meanPath")
+        result = projection.run_projection(initial, plans[0], context(), days=1)
+        self.assertEqual(result["preflight"]["stochasticPolicyBlockers"], [])
+        bad = copy.deepcopy(payload)
+        bad["plans"][0]["stochasticPolicy"]["unityPublicOpinion"] = "replay"
+        with self.assertRaisesRegex(projection.ProjectionInputError, "failClosed or meanPath"):
+            projection.parse_projection_document(
+                bad, state=initial, councilors={}, priorities=context().priorities
+            )
+        no_opt_in = copy.deepcopy(payload)
+        no_opt_in["plans"][0].pop("stochasticPolicy")
+        plans, _ = projection.parse_projection_document(
+            no_opt_in, state=initial, councilors={}, priorities=context().priorities
+        )
+        result = projection.run_projection(initial, plans[0], context(), days=1)
+        self.assertEqual(result["preflight"]["stochasticPolicyBlockers"][0]["priority"], "Unity")
+
+    @mechanic_rule_test(Rules.NATION_ADVISOR_ATTRIBUTE_SOURCE.id, evidence="stateTransition")
+    def test_saved_and_virtual_advisor_validation(self):
+        initial = state()
+        saved = {3: projection.AdvisorProfile("saved", "Hanna", 12, 24, 3)}
+        payload = {"plans": [{"name": "p", "segments": [{"advisors": [
+            {"councilor": {"name": "Hanna"}},
+            {"virtual": {"name": "virtual", "administration": 25, "science": 8}},
+        ]}]}]}
+        plans, _ = projection.parse_projection_document(payload, state=initial, councilors=saved, priorities=context().priorities)
+        self.assertEqual([item.name for item in plans[0].segments[0].advisors], ["Hanna", "virtual"])
+        bad = {"plans": [{"name": "p", "segments": [{"advisors": [{"virtual": {"name": "x", "administration": 26, "science": 0}}]}]}]}
+        with self.assertRaises(projection.ProjectionInputError):
+            projection.parse_projection_document(bad, state=initial, councilors=saved, priorities=context().priorities)
+
+    def test_omitted_and_empty_advisors_and_full_cp_replacement(self):
+        initial = state(pips={"Knowledge": 2, "Unity": 1})
+        payload = {"plans": [{"name": "p", "segments": [
+            {"until": {"day": 1}},
+            {"controlPoints": [{"position": 0, "pips": {"Knowledge": 3}}], "advisors": []},
+        ]}]}
+        plans, _ = projection.parse_projection_document(payload, state=initial, councilors={}, priorities=context().priorities)
+        self.assertIsNone(plans[0].segments[0].advisors)
+        self.assertEqual(plans[0].segments[1].advisors, ())
+        self.assertEqual(plans[0].segments[1].control_points[0].pips, {"Knowledge": 3})
+
+
+class NationProjectionTransactionTests(unittest.TestCase):
+    def test_world_market_scope_can_be_incomplete_without_blocking_nation(self):
+        initial = state()
+        initial.world_market_blockers.add(Rules.NATION_PRIORITY_ECONOMY_MARKET.id)
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+        )
+        self.assertEqual(result["status"], "complete")
+        self.assertIsNotNone(result["authoritativeFinalState"])
+        self.assertEqual(result["scopeStatus"]["nation"]["status"], "complete")
+        self.assertEqual(result["scopeStatus"]["worldMarket"]["status"], "incomplete")
+        self.assertEqual(result["metricCoverage"]["world.market.metals"]["coverage"], "unsupported")
+
+    @mechanic_rule_test(Rules.NATION_IP_CONTROL_POINT_ALLOCATION.id, evidence="expectedValue")
+    def test_one_tick_control_point_allocation(self):
+        initial = state()
+        initial.unrest = 0
+        tx = projection._run_investment_transaction(initial, context(), 1, 0)
+        self.assertAlmostEqual(tx["allocation"]["Knowledge"], (1000.0 ** 0.35) * 12.0 / 365.2422)
+
+    @mechanic_rule_test(Rules.NATION_IP_PRIORITY_BONUS.id, evidence="expectedValue")
+    def test_diversity_and_owner_priority_bonus(self):
+        initial = state(pips={"Knowledge": 1, "Unity": 1})
+        initial.unrest = 0
+        initial.control_points[1].priority_bonuses = {"Knowledge": 0.2}
+        tx = projection._run_investment_transaction(initial, context(), 1, 0)
+        base_share = (1000.0 ** 0.35) * 0.5 * 12.0 / 365.2422
+        self.assertAlmostEqual(tx["allocation"]["Knowledge"], base_share * 1.3)
+
+    @mechanic_rule_test(Rules.NATION_IP_BASE.id, Rules.NATION_ADVISOR_STACKING.id, evidence="expectedValue")
+    def test_advisor_base_ip_and_rank_decay(self):
+        advisors = (
+            projection.AdvisorProfile("virtual", "a", 20, 10),
+            projection.AdvisorProfile("virtual", "b", 10, 20),
+        )
+        initial = state(advisors=advisors)
+        initial.gdp = 1_000_000_000.0
+        initial.economy_score = 1.0
+        initial.unrest = 0
+        self.assertAlmostEqual(projection._base_ip(initial, context()), 1.25)
+
+    @mechanic_rule_test(Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id, evidence="expectedValue")
+    def test_repeated_advise_uses_phase_clear_and_expected_resolution(self):
+        initial = state(at=datetime(2030, 1, 2))
+        initial.advisor_mission_schedule = advisor_schedule(datetime(2030, 1, 16, 12))
+        advisor = projection.AdvisorProfile("virtual", "admin", 20, 0)
+        plan = projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, (advisor,)),))
+
+        result = projection.run_projection(initial, plan, context(), days=32, details=True)
+
+        renewals = result["advisorMissionProjection"]["renewals"]
+        self.assertEqual(len(renewals), 2)
+        self.assertEqual(result["advisorMissionProjection"]["totalInfluenceCost"], 20.0)
+        self.assertEqual(renewals[0]["successChance"], 1.0)
+        self.assertEqual(renewals[0]["movementRule"], "MoveToTarget")
+        self.assertEqual(renewals[0]["travelTimeDays"], 0.0)
+        self.assertEqual(renewals[0]["phaseAt"], "2030-01-16T12:00:00")
+        self.assertEqual(renewals[0]["resolvedAt"], "2030-01-17T21:51:00")
+
+        investments = {row["at"]: row for row in result["transactions"] if row["kind"] == "investment"}
+        base_ip = (1000.0 ** 0.35) * 0.9
+        self.assertAlmostEqual(investments["2030-01-17T10:30:00"]["baseInvestmentPointsMonth"], base_ip)
+        self.assertAlmostEqual(investments["2030-01-18T10:30:00"]["baseInvestmentPointsMonth"], base_ip * 1.2)
+        reasons = [row["reason"] for row in result["advisorTransitions"]]
+        self.assertIn("missionPhaseClear", reasons)
+        self.assertIn("adviseResolved", reasons)
+        self.assertIn("expectedMissionTiming", result["metricCoverage"]["nation.baseInvestmentPointsMonth"]["provenance"])
+
+    def test_mission_phase_recurrence_matches_audited_calendar(self):
+        self.assertEqual(
+            projection._next_mission_phase(datetime(2030, 1, 1), "Semimonthly", 1, 1),
+            datetime(2030, 1, 16, 12),
+        )
+        self.assertEqual(
+            projection._next_mission_phase(datetime(2030, 1, 22, 18), "WeekToMonth", 1, 1),
+            datetime(2030, 2, 1),
+        )
+        self.assertEqual(
+            projection._next_mission_phase(datetime(2030, 1, 22), "EveryThreeWeeksToMonth", 1, 1),
+            datetime(2030, 2, 16),
+        )
+
+    def test_repeat_change_resets_start_month_for_three_week_cadence(self):
+        schedule = advisor_schedule(
+            datetime(2045, 1, 16, 12),
+            start_month=3,
+            repeat_changes=((15.0, "EveryThreeWeeksToMonth", False),),
+        )
+
+        events = projection._event_schedule(
+            datetime(2045, 1, 2),
+            50,
+            (),
+            schedule,
+            days_in_campaign=15.0 * 365.2421875 + 1,
+        )
+        phases = [moment for moment, _order, kind, _day in events if kind == "advisorPhase"]
+
+        self.assertEqual(
+            phases[:3],
+            [datetime(2045, 1, 16, 12), datetime(2045, 1, 22), datetime(2045, 2, 16)],
+        )
+
+    def test_open_mission_phase_resolves_prepaid_assignment_before_next_phase(self):
+        advisor = projection.AdvisorProfile("saved", "advisor", 20, 0, 42)
+        initial = state(at=datetime(2030, 1, 1))
+        initial.advisors = ()
+        initial.advisor_policy = (advisor,)
+        initial.advisor_current_phase_assignments = (advisor,)
+        initial.advisor_assignment_prepaid_ids = frozenset({42})
+        initial.advisor_mission_schedule = advisor_schedule(datetime(2030, 1, 16, 12), phase_active=True)
+        plan = projection.PriorityPlan("current", (projection.PlanSegment(None, None, None, None),))
+
+        result = projection.run_projection(initial, plan, context(), days=3, details=True)
+
+        renewal = result["advisorMissionProjection"]["renewals"][0]
+        self.assertEqual(renewal["phaseAt"], "2030-01-01T00:00:00")
+        self.assertEqual(renewal["resolvedAt"], "2030-01-02T09:51:00")
+        self.assertEqual(renewal["day"], 1)
+        self.assertEqual(renewal["influenceCost"], 0.0)
+        investments = {row["at"]: row for row in result["transactions"] if row["kind"] == "investment"}
+        base_ip = (1000.0 ** 0.35) * 0.9
+        self.assertAlmostEqual(investments["2030-01-01T10:30:00"]["baseInvestmentPointsMonth"], base_ip)
+        self.assertAlmostEqual(investments["2030-01-02T10:30:00"]["baseInvestmentPointsMonth"], base_ip * 1.2)
+
+    @mechanic_rule_test(Rules.NATION_IP_ECONOMY_SCORE.id, evidence="expectedValue")
+    def test_economy_score_recomputes_from_literal_gdp(self):
+        initial = state()
+        initial.gdp = 8_000_000_000.0
+        projection._refresh_economy_score(initial, context())
+        self.assertAlmostEqual(initial.economy_score, 8.0 ** 0.35)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE.id, evidence="expectedValue")
+    def test_knowledge_completion(self):
+        initial = state(progress={"Knowledge": 0.99})
+        before = initial.education
+        tx = projection._run_investment_transaction(initial, context(), 1, 0)
+        self.assertEqual(tx["completions"][0]["priority"], "Knowledge")
+        self.assertAlmostEqual(initial.education, before + 0.005 * 8.5 / 8.0)
+        self.assertAlmostEqual(initial.cohesion, 4.01)
+
+    def test_unity_fails_closed_without_explicit_public_opinion_policy(self):
+        initial = unity_state()
+        result = projection.run_projection(initial, projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)), unity_context(), days=1)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["preflight"]["stochasticPolicyBlockers"][0]["policy"], "unityPublicOpinion")
+
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_UNITY_COMPLETE.id,
+        Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id,
+        Rules.NATION_PRIORITY_UNITY_COHESION.id,
+        Rules.NATION_PRIORITY_UNITY_EDUCATION.id,
+        evidence="expectedValue",
+    )
+    def test_unity_sequential_expected_transition_and_direct_effects(self):
+        initial = unity_state()
+        before_cohesion = initial.cohesion
+        before_education = initial.education
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan(
+                "p",
+                (projection.PlanSegment(None, None, None, None),),
+                unity_public_opinion_policy="meanPath",
+            ),
+            unity_context(),
+            days=1,
+            details=True,
+        )
+        self.assertEqual(result["status"], "complete")
+        self.assertAlmostEqual(result["nationProjection"]["cohesion"], before_cohesion + 0.035)
+        self.assertAlmostEqual(result["nationProjection"]["education"], before_education - 0.001)
+        propaganda = [
+            row for row in result["ruleExecutions"]
+            if row["ruleId"] == Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id
+        ]
+        self.assertEqual([row["sourceFactionId"] for row in propaganda], [7, 8])
+        self.assertEqual(propaganda[0]["religionBonusControlPoints"], 3)
+        self.assertEqual(propaganda[1]["before"], propaganda[0]["after"])
+        self.assertEqual(propaganda[0]["stochasticTreatment"], "deterministicExpectedTransition")
+        coverage = result["metricCoverage"]
+        self.assertEqual(coverage["nation.publicOpinion.Resist"]["coverage"], "expected")
+        self.assertEqual(
+            coverage["nation.publicOpinion.Resist"]["stochasticTreatment"],
+            "deterministicExpectedTransition",
+        )
+        self.assertFalse(coverage["nation.publicOpinion.Resist"]["expectationGuarantee"])
+        self.assertEqual(coverage["nation.cohesion"]["coverage"], "exact")
+        self.assertEqual(coverage["nation.education"]["coverage"], "exact")
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id, evidence="expectedValue")
+    def test_unity_conditional_expected_transition_uses_integer_sample_counts(self):
+        initial = unity_state()
+        result, sample_count, disallow = projection._propaganda_expected_transition(
+            initial,
+            unity_context(),
+            (0.0, 0.0, 0.0),
+            5.0,
+        )
+        self.assertEqual(sample_count, 707)
+        self.assertIsNone(disallow)
+        self.assertAlmostEqual(result["Resist"], 292.6 / 707.0)
+        self.assertAlmostEqual(result["Cooperate"], 201.4 / 707.0)
+        self.assertAlmostEqual(result["Undecided"], 213.0 / 707.0)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id, evidence="coverageBranch")
+    def test_unity_religion_bonus_survives_disabled_cp_and_permanent_allies_count(self):
+        initial = unity_state()
+        initial.control_points[1].benefits_disabled = True
+        ctx = replace(unity_context(), permanent_allies={7: (7, 8), 8: (8,)})
+        tx = projection._run_investment_transaction(
+            initial,
+            ctx,
+            1,
+            0,
+            unity_public_opinion_policy="meanPath",
+        )
+        propaganda = [
+            row for row in tx["ruleExecutions"]
+            if row["ruleId"] == Rules.NATION_PRIORITY_UNITY_PUBLIC_OPINION.id
+        ]
+        self.assertEqual(propaganda[0]["ownedControlPointCount"], 1)
+        self.assertEqual(propaganda[0]["religionBonusControlPoints"], 3)
+        self.assertAlmostEqual(propaganda[0]["effectiveStrength"], 20.0)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id, evidence="stateTransition")
+    def test_unity_legitimize_removes_deterministic_claim(self):
+        initial = unity_state()
+        initial.hostile_region_ids = {1}
+        tx = projection._run_investment_transaction(
+            initial,
+            unity_context(),
+            1,
+            0,
+            unity_public_opinion_policy="meanPath",
+        )
+        self.assertEqual(initial.hostile_region_ids, set())
+        self.assertEqual(tx["completions"][0]["removedHostileClaimRegionId"], 1)
+        legitimize = next(
+            row for row in tx["ruleExecutions"]
+            if row["ruleId"] == Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id
+        )
+        self.assertEqual(legitimize["removedHostileClaimRegionId"], 1)
+
+    @mechanic_rule_test(Rules.NATION_COHESION_PUBLIC_OPINION.id, evidence="stateTransition")
+    def test_unity_public_opinion_propagates_to_noon_rest_cache_only(self):
+        initial = unity_state()
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan(
+                "p",
+                (projection.PlanSegment(None, None, None, None),),
+                unity_public_opinion_policy="meanPath",
+            ),
+            unity_context(),
+            days=1,
+        )
+        coverage = result["metricCoverage"]
+        self.assertEqual(coverage["nation.cohesionRest"]["coverage"], "expected")
+        self.assertEqual(
+            coverage["nation.cohesionRest"]["stochasticTreatment"],
+            "deterministicExpectedTransition",
+        )
+        self.assertEqual(coverage["nation.cohesion"]["coverage"], "exact")
+
+    @mechanic_rule_test(Rules.NATION_COHESION_PUBLIC_OPINION.id, evidence="expectedValue")
+    def test_public_opinion_and_elite_vectors_have_literal_cohesion_impact(self):
+        initial = unity_state()
+        # Public mean x=0.9, variance=0.69; max human distance=2 so the
+        # worst-case standard deviation is 1. Elite mean is x=1.
+        expected = -0.5 + (0.69 ** 0.5 - 0.5) * -6.0 - 0.1 * 2.0
+        self.assertAlmostEqual(
+            projection._public_opinion_cohesion_impact(initial, unity_context()),
+            expected,
+        )
+
+    def test_population_mean_input_and_unity_expected_transition_remain_distinct(self):
+        initial = unity_state(at=datetime(2030, 1, 31, 11, 0))
+        initial.control_points.pop(2)
+        initial.num_control_points_unclamped = 1
+        projection.calibrate_rest_state_context(
+            initial,
+            unity_context(),
+            pcgdp_to_reduce_unrest_by_one=3_000.0,
+        )
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan(
+                "p",
+                (projection.PlanSegment(None, None, None, None),),
+                unity_public_opinion_policy="meanPath",
+            ),
+            unity_context(),
+            days=2,
+        )
+        coverage = result["metricCoverage"]
+        self.assertEqual(
+            coverage["nation.population"]["stochasticTreatment"],
+            "deterministicMeanInput",
+        )
+        self.assertEqual(
+            coverage["nation.education"]["stochasticTreatment"],
+            "deterministicMeanInput",
+        )
+        self.assertEqual(coverage["nation.publicOpinion.Resist"]["stochasticTreatment"], "mixed")
+        self.assertEqual(
+            set(coverage["nation.publicOpinion.Resist"]["stochasticTreatments"]),
+            {"deterministicMeanInput", "deterministicExpectedTransition"},
+        )
+        self.assertFalse(coverage["nation.publicOpinion.Resist"]["expectationGuarantee"])
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE.id, evidence="expectedValue")
+    def test_government_completion_below_cap(self):
+        initial = state(pips={"Government": 3}, progress={"Government": 0.99})
+        projection._run_investment_transaction(initial, context(), 1, 0)
+        expected = 5.0 + (50_000_000.0 / 50_000_000.0) ** -0.35 * 0.01 * 8.0 / 10.0
+        self.assertAlmostEqual(initial.democracy, expected)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_FUNDING_COMPLETE.id, Rules.NATION_FACTION_CONTRIBUTION.id, evidence="stateTransition")
+    def test_funding_completion_and_contribution(self):
+        initial = state(pips={"Funding": 3}, progress={"Funding": 0.99})
+        before = projection._contribution(initial, context())["funding"]
+        projection._run_investment_transaction(initial, context(), 1, 0)
+        self.assertEqual(initial.funding_year, 111)
+        self.assertGreater(projection._contribution(initial, context())["funding"], before)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_COMPLETION_ORDER.id, evidence="ordering")
+    def test_condition_waits_for_multi_completion_transaction(self):
+        initial = state(pips={"Knowledge": 3, "Funding": 3}, progress={"Knowledge": 0.99, "Funding": 0.99})
+        condition = projection.MetricCondition("nation.funding", ">=", 111.0)
+        plan = projection.PriorityPlan("p", (
+            projection.PlanSegment(None, condition, None, None),
+            projection.PlanSegment(None, None, None, ()),
+        ))
+        result = projection.run_projection(initial, plan, context(), days=1, details=True)
+        investment = result["transactions"][0]
+        self.assertEqual([event["priority"] for event in investment["completions"]], ["Knowledge", "Funding"])
+        self.assertEqual(result["segmentTransitions"][-1]["effectiveDay"], 2)
+
+    def test_conditional_pips_and_advisor_apply_together_next_tick(self):
+        initial = state(pips={"Knowledge": 3})
+        advisor = projection.AdvisorProfile("virtual", "admin", 20, 0)
+        plan = projection.PriorityPlan("p", (
+            projection.PlanSegment(1, None, None, None),
+            projection.PlanSegment(None, None, (projection.ControlPointPolicy(1, {"Funding": 3}),), (advisor,)),
+        ))
+        result = projection.run_projection(initial, plan, context(), days=2, details=True)
+        investments = [row for row in result["transactions"] if row["kind"] == "investment"]
+        self.assertIn("Knowledge", investments[0]["allocation"])
+        self.assertIn("Funding", investments[1]["allocation"])
+        self.assertGreater(investments[1]["baseInvestmentPointsMonth"], investments[0]["baseInvestmentPointsMonth"])
+        self.assertEqual(result["advisorTransitions"][-1]["day"], 2)
+
+    def test_start_satisfied_segment_skips_before_first_tick(self):
+        initial = state(pips={"Knowledge": 3})
+        plan = projection.PriorityPlan("p", (
+            projection.PlanSegment(None, projection.MetricCondition("nation.cohesion", ">=", 4.0), None, None),
+            projection.PlanSegment(None, None, (projection.ControlPointPolicy(1, {"Government": 3}),), None),
+        ))
+        result = projection.run_projection(initial, plan, context(), days=1, details=True)
+        investment = next(row for row in result["transactions"] if row["kind"] == "investment")
+        self.assertEqual(investment["segmentIndex"], 1)
+        self.assertIn("Government", investment["allocation"])
+
+    @mechanic_rule_test(Rules.NATION_PERIODIC_COHESION.id, Rules.NATION_PERIODIC_UNREST.id, evidence="expectedValue")
+    def test_monthly_cohesion_and_unrest(self):
+        initial = state(at=datetime(2030, 1, 31, 12), annual_growth=0.0)
+        result = projection.run_projection(initial, projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)), context(), days=1, details=True)
+        self.assertEqual(result["status"], "complete")
+        self.assertAlmostEqual(result["nationProjection"]["cohesion"], 4.1)
+        self.assertAlmostEqual(result["nationProjection"]["unrest"], 2.75)
+
+    @mechanic_rule_test(Rules.NATION_PERIODIC_POPULATION.id, Rules.NATION_POPULATION_MONTHLY_GROWTH.id, evidence="expectedValue")
+    def test_monthly_population_expected(self):
+        initial = state(at=datetime(2030, 1, 31, 12), annual_growth=0.12)
+        expected_population = 50.0 * (1.12 ** 0.0833333358168602)
+        expected_gdp = 1_000_000_000_000.0 + 20_000.0 * (expected_population - 50.0) * 1_000_000.0
+        result = projection.run_projection(initial, projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)), context(), days=1)
+        self.assertAlmostEqual(result["nationProjection"]["populationMillions"], expected_population)
+        self.assertAlmostEqual(result["nationProjection"]["gdp"], expected_gdp)
+        self.assertEqual(result["metricCoverage"]["nation.population"]["coverage"], "expected")
+        self.assertIn("meanPath", result["metricCoverage"]["nation.population"]["provenance"])
+        self.assertFalse(result["metricCoverage"]["nation.population"]["expectationGuarantee"])
+
+    def test_mean_path_propagates_through_executed_dependencies_only(self):
+        initial = state(
+            pips={"Knowledge": 1, "Government": 1, "Welfare": 1},
+            at=datetime(2030, 1, 2),
+            annual_growth=0.12,
+        )
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=40,
+        )
+        expected_metrics = {
+            "nation.population", "nation.gdp", "nation.perCapitaGdp", "nation.education",
+            "nation.democracy", "nation.inequality", "nation.cohesion", "nation.cohesionRest",
+            "nation.unrestRest", "nation.baseInvestmentPointsMonth", "nation.research",
+            "nation.priorityProgress.Knowledge", "factionContribution.research",
+        }
+        for metric in expected_metrics:
+            with self.subTest(metric=metric):
+                evidence = result["metricCoverage"][metric]
+                self.assertEqual(evidence["coverage"], "expected")
+                self.assertIn("meanPath", evidence["provenance"])
+                self.assertFalse(evidence["expectationGuarantee"])
+        self.assertEqual(result["metricCoverage"]["nation.funding"]["coverage"], "exact")
+        self.assertEqual(result["metricCoverage"]["nation.sustainability"]["coverage"], "exact")
+
+    @mechanic_rule_test(
+        Rules.NATION_POPULATION_MONTHLY_GROWTH.id,
+        Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE.id,
+        evidence="expectedValue",
+    )
+    def test_population_update_changes_next_completion_scaling_by_literal(self):
+        initial = state(annual_growth=0.12, progress={"Knowledge": 0.99})
+        projection._run_monthly_transaction(initial, context(), 0)
+        population = 50.0 * (1.12 ** 0.0833333358168602)
+        scale = (population * 1_000_000.0 / 50_000_000.0) ** -0.35
+        expected_delta = scale * 0.005 * 8.5 / 8.0
+        projection._run_investment_transaction(initial, context(), 1, 0)
+        self.assertAlmostEqual(initial.population_millions, population)
+        self.assertAlmostEqual(initial.education, 8.0 + expected_delta)
+
+    def test_rule_executions_expose_actual_inputs_outputs_and_welfare_children(self):
+        initial = state(pips={"Welfare": 3}, progress={"Welfare": 0.99})
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+        )
+        welfare = [row for row in result["ruleExecutions"] if row["ruleId"].startswith("nation.priority.welfare")]
+        self.assertEqual(
+            [row["ruleId"] for row in welfare],
+            [Rules.NATION_PRIORITY_WELFARE_COMPLETE.id, Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id],
+        )
+        self.assertIn("nation.priorityProgress.Welfare", welfare[0]["inputs"])
+        self.assertEqual(welfare[0]["outputs"], ["nation.inequality"])
+        self.assertNotIn(Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION.id, result["mechanicRuleIds"])
+
+    def test_mc_rule_can_be_aggregate_only_while_nation_total_is_exact(self):
+        initial = state(pips={"MissionControl": 3}, progress={"MissionControl": 0.99})
+        second = copy.deepcopy(initial.regions[1])
+        second.id = 2
+        second.region_order = 1
+        initial.regions[1].mission_control = 0
+        second.mission_control = 0
+        initial.regions[2] = second
+        initial.mission_control = 0
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+        )
+        execution = next(
+            row for row in result["ruleExecutions"]
+            if row["ruleId"] == Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id
+        )
+        self.assertEqual(execution["effectiveCoverage"], "aggregateOnly")
+        self.assertEqual(result["metricCoverage"]["nation.missionControl"]["coverage"], "exact")
+
+    @mechanic_rule_test(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id, evidence="stateTransition")
+    def test_invalid_only_control_point_persistently_falls_back_to_raw_economy(self):
+        initial = state(pips={"Government": 3})
+        initial.democracy = 10.0
+        trace = []
+        effective = projection._record_and_fix_control_point(initial, initial.control_points[1], context(), trace=trace)
+        self.assertEqual(effective, {"Economy": 1})
+        self.assertEqual(initial.control_points[1].pips["Economy"], 1)
+        self.assertEqual(initial.control_points[1].total_weight, 1)
+        self.assertEqual(trace[0]["operation"], "defaultEconomy")
+
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE.id,
+        Rules.NATION_PRIORITY_GOVERNMENT_LEGITIMIZE.id,
+        Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE.id,
+        evidence="stateTransition",
+    )
+    def test_government_at_cap_applies_knowledge_and_legitimizes_claim(self):
+        initial = state()
+        initial.democracy = 10.0
+        initial.hostile_region_ids = {1}
+        used = set()
+        event = projection._apply_completion(initial, "Government", context(), used)
+        self.assertAlmostEqual(initial.education, 8.0 + 0.005 * 8.5 / 8.0)
+        self.assertAlmostEqual(initial.cohesion, 4.01)
+        self.assertEqual(initial.hostile_region_ids, set())
+        self.assertEqual(event["removedHostileClaimRegionId"], 1)
+
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_WELFARE_COMPLETE.id,
+        Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id,
+        Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id,
+        Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION.id,
+        Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM.id,
+        evidence="stateTransition",
+    )
+    def test_welfare_children_activate_only_on_the_executed_path(self):
+        ordinary = state()
+        used = set()
+        event = projection._apply_completion(ordinary, "Welfare", context(), used)
+        self.assertAlmostEqual(ordinary.inequality, 3.995)
+        self.assertEqual(event["dependencies"], [Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id])
+
+        colony = state()
+        colony.regions[1].colony = True
+        colony.regions[1].welfare_colony_counter = 999
+        used = set()
+        event = projection._apply_completion(colony, "Welfare", context(), used)
+        self.assertFalse(colony.regions[1].colony)
+        self.assertTrue(colony.regions[1].permanent_colony)
+        self.assertEqual(colony.regions[1].welfare_colony_counter, 0)
+        self.assertEqual(event["decolonizedRegionId"], 1)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_MISSION_CONTROL_COMPLETE.id, Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id, evidence="ordering")
+    def test_mission_control_no_candidate_preserves_dll_mutation_order(self):
+        initial = state(pips={"MissionControl": 3}, progress={"MissionControl": 0.99})
+        initial.regions[1].mission_control = 0
+        initial.regions[1].fully_occupied = True
+        initial.mission_control = 0
+        tx = projection._run_investment_transaction(initial, context(), 1, 0)
+        operations = [row["operation"] for row in tx["mutationTrace"]]
+        self.assertLess(operations.index("completionGuard"), operations.index("setPriority"))
+        self.assertLess(operations.index("setPriority"), operations.index("defaultEconomy"))
+        self.assertLess(operations.index("defaultEconomy"), operations.index("consumeProgress"))
+        self.assertEqual(initial.regions[1].mission_control, 0)
+        self.assertEqual(initial.control_points[1].pips["MissionControl"], 0)
+        self.assertEqual(initial.control_points[1].pips["Economy"], 1)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id, evidence="coverageBranch")
+    def test_mission_control_single_candidate_is_exact(self):
+        initial = state(pips={"MissionControl": 3}, progress={"MissionControl": 0.99})
+        initial.regions[1].mission_control = 0
+        initial.mission_control = 0
+        tx = projection._run_investment_transaction(initial, context(), 1, 0)
+        event = tx["completions"][0]
+        self.assertEqual(event["effectiveCoverage"], "exact")
+        self.assertEqual(event["regionId"], 1)
+        self.assertEqual(initial.mission_control, 1)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id, evidence="coverageBranch")
+    def test_mission_control_non_equivalent_candidates_stop_before_mutation(self):
+        initial = state(pips={"MissionControl": 3}, progress={"MissionControl": 0.99})
+        second = copy.deepcopy(initial.regions[1])
+        second.id = 2
+        second.region_order = 1
+        second.colony = True
+        initial.regions[1].mission_control = 0
+        second.mission_control = 0
+        initial.regions[2] = second
+        initial.mission_control = sum(region.mission_control for region in initial.regions.values())
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+        )
+        self.assertEqual(result["status"], "incomplete")
+        self.assertIn(Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id, result["missingMechanicRules"])
+        self.assertEqual(result["lastAuthoritativeState"]["nation"]["missionControl"], 0)
+        self.assertEqual(initial.progress["MissionControl"], 0.99)
+
+    def test_interrupted_transaction_keeps_completed_authoritative_prefix(self):
+        initial = state(
+            pips={"Knowledge": 1, "MissionControl": 1},
+            progress={"Knowledge": 0.99, "MissionControl": 0.99},
+        )
+        second = copy.deepcopy(initial.regions[1])
+        second.id = 2
+        second.region_order = 1
+        second.colony = True
+        initial.regions[1].mission_control = 0
+        second.mission_control = 0
+        initial.regions[2] = second
+        initial.mission_control = 0
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+            details=True,
+        )
+        self.assertEqual(result["status"], "incomplete")
+        self.assertGreater(result["lastAuthoritativeState"]["nation"]["education"], 8.0)
+        event = result["completionEvents"][0]
+        self.assertEqual(event["priority"], "Knowledge")
+        self.assertEqual(event["transactionStatus"], "authoritativePrefix")
+        self.assertEqual(result["transactions"], [])
+        attempted = result["runtimeStop"]["attemptedTransaction"]
+        self.assertEqual(attempted["phase"], "priorityCompletion")
+        self.assertEqual(attempted["completions"][0]["priority"], "Knowledge")
+        self.assertEqual(result["runtimeStop"]["lastAuthoritativeTransaction"]["transactionStatus"], "authoritativePrefix")
+        self.assertEqual(result["runtimeStop"]["trigger"]["priority"], "MissionControl")
+
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id,
+        Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id,
+        Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION.id,
+        Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM.id,
+        evidence="coverageBranch",
+    )
+    def test_welfare_missing_decolonization_dependency_rolls_back_completion(self):
+        initial = state(pips={"Welfare": 3}, progress={"Welfare": 0.99})
+        initial.regions[1].colony = True
+        initial.regions[1].permanent_colony = None
+        initial.regions[1].welfare_colony_counter = 999
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+        )
+        self.assertEqual(result["status"], "incomplete")
+        self.assertIn(Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM.id, result["missingMechanicRules"])
+        self.assertEqual(result["lastAuthoritativeState"]["nation"]["inequality"], 4.0)
+        self.assertEqual(initial.regions[1].welfare_colony_counter, 999)
+
+    @mechanic_rule_test(Rules.NATION_PERIODIC_CONTROL_POINTS.id, evidence="coverageBranch")
+    def test_monthly_control_point_count_change_rolls_back_before_population(self):
+        initial = state(at=datetime(2030, 1, 31, 12), annual_growth=0.12)
+        ctx = context()
+        ctx.global_config["controlPointCountScaling"]["value"] = 0.35
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            ctx,
+            days=1,
+        )
+        self.assertEqual(result["status"], "incomplete")
+        self.assertIn(Rules.NATION_PERIODIC_CONTROL_POINTS.id, result["missingMechanicRules"])
+        self.assertEqual(result["lastAuthoritativeState"]["nation"]["populationMillions"], 50.0)
+        self.assertEqual(result["runtimeStop"]["at"], "2030-02-01T00:00:00")
+        self.assertEqual(result["runtimeStop"]["phase"], "beforeControlPointCountMutation")
+        self.assertEqual(result["runtimeStop"]["stateContext"]["currentControlPointCount"], 1)
+        self.assertGreater(result["runtimeStop"]["stateContext"]["requiredControlPointCount"], 1)
+        self.assertEqual(result["runtimeStop"]["transactionKind"], "monthly")
+
+    def test_government_cap_effect_cost_and_economy_fallback_are_authoritative(self):
+        initial = state(pips={"Government": 3}, progress={"Government": 0.99})
+        initial.democracy = 9.999
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=5,
+            details=True,
+        )
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["lastAuthoritativeState"]["nation"]["democracy"], 10.0)
+        self.assertLess(result["lastAuthoritativeState"]["nation"]["priorityProgress"]["Government"], 1.0)
+        control_point = result["lastAuthoritativeState"]["controlPoints"][0]
+        self.assertEqual(control_point["rawPips"]["Government"], 3)
+        self.assertEqual(control_point["rawPips"]["Economy"], 1)
+        self.assertEqual(control_point["effectivePips"], {"Economy": 1})
+        government_event = next(event for event in result["completionEvents"] if event["priority"] == "Government")
+        self.assertEqual(government_event["remainingProgress"], result["lastAuthoritativeState"]["nation"]["priorityProgress"]["Government"])
+        self.assertIsNone(result["runtimeStop"])
+        self.assertTrue(any(
+            row["ruleId"] == Rules.NATION_PRIORITY_ECONOMY_COMPLETE.id
+            for row in result["ruleExecutions"]
+        ))
+        self.assertTrue(any(event["priority"] == "Economy" for event in result["completionEvents"]))
+
+    def test_runtime_economy_fallback_continues_on_the_next_tick(self):
+        initial = state(pips={"MissionControl": 3}, progress={"MissionControl": 0.99})
+        initial.regions[1].mission_control = 0
+        initial.regions[1].fully_occupied = True
+        initial.mission_control = 0
+        plan = projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),))
+        result = projection.run_projection(initial, plan, context(), days=5, details=True)
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["lastAuthoritativeState"]["nation"]["missionControl"], 0)
+        control_point = result["lastAuthoritativeState"]["controlPoints"][0]
+        self.assertEqual(control_point["rawPips"]["MissionControl"], 0)
+        self.assertEqual(control_point["rawPips"]["Economy"], 1)
+        self.assertEqual(control_point["effectivePips"], {"Economy": 1})
+        self.assertIsNone(result["runtimeStop"])
+        self.assertTrue(any(event["priority"] == "MissionControl" for event in result["completionEvents"]))
+        self.assertTrue(any(
+            row["ruleId"] == Rules.NATION_PRIORITY_ECONOMY_COMPLETE.id
+            for row in result["ruleExecutions"]
+        ))
+        self.assertEqual(initial.control_points[1].pips["MissionControl"], 3)
+
+    @mechanic_rule_test(
+        Rules.NATION_PERIODIC_POPULATION.id,
+        Rules.NATION_PRIORITY_COMPLETION_ORDER.id,
+        Rules.NATION_PERIODIC_DERIVED_CACHE.id,
+        evidence="ordering",
+    )
+    def test_scheduler_runs_full_same_timestamp_phase_order(self):
+        initial = state(at=datetime(2029, 12, 31, 12), annual_growth=0.0)
+        plan = projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),))
+        result = projection.run_projection(initial, plan, context(), days=1, checkpoints=(1,), details=True)
+        self.assertEqual([row["kind"] for row in result["transactions"]], ["factionCache", "monthly", "investment", "derivedCache"])
+        self.assertEqual([row["at"][-8:] for row in result["transactions"]], ["00:00:00", "00:00:00", "10:30:00", "12:00:00"])
+        self.assertEqual([row["phase"] for row in result["phaseTrace"]], [
+            "faction.cachePriorityBonuses",
+            "effects.expire",
+            "condition.afterFactionCache",
+            "monthly.controlPointsAndMovement",
+            "monthly.population",
+            "monthly.quarterlyTracker",
+            "condition.afterMonthly",
+            "investment.segmentAndAllocation",
+            "condition.afterInvestment",
+            "rest.cache",
+            "condition.afterRest",
+            "checkpoint.capture",
+        ])
+        monthly_population = result["phaseTrace"][4]
+        investment = result["phaseTrace"][7]
+        rest_cache = result["phaseTrace"][9]
+        checkpoint = result["phaseTrace"][11]
+        self.assertEqual(monthly_population["populationMillions"], checkpoint["populationMillions"])
+        self.assertEqual(investment["baseInvestmentPointsMonth"], checkpoint["baseInvestmentPointsMonth"])
+        self.assertEqual(rest_cache["cohesionRest"], checkpoint["cohesionRest"])
+        self.assertEqual(rest_cache["unrestRest"], checkpoint["unrestRest"])
+
+    @mechanic_rule_test(Rules.NATION_PERIODIC_DERIVED_CACHE.id, evidence="expectedValue")
+    def test_daily_rest_cache_matches_literal_formula(self):
+        initial = state()
+        initial.rest_state_context["cohesionFixedImpact"] = 20.0
+        initial.rest_state_context["unrestFixedImpact"] = 15.0
+        projection._refresh_rest_caches(initial, context(), 1)
+        expected_cohesion = 20.0 + 0.9 * (-4.0 * 2.25) - 50.0 ** 0.3 - 3.0
+        expected_unrest = 15.0 - 4.0 - 20_000.0 / 3_000.0
+        self.assertAlmostEqual(initial.cohesion_rest, expected_cohesion)
+        self.assertAlmostEqual(initial.unrest_rest, expected_unrest)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_BUILD_ARMY_COMPLETE.id, Rules.NATION_PRIORITY_BUILD_ARMY_PLACEMENT.id, Rules.NATION_ASSET_ARMY_MAINTENANCE.id, evidence="expectedValue")
+    def test_build_army_deterministic_selection_and_next_tick_maintenance(self):
+        initial = state(pips={"Military_BuildArmy": 3}, cp_count=2, progress={"Military_BuildArmy": 0.99})
+        initial.regions[2] = projection.RegionProjectionState(
+            id=2, population_millions=40.0, mission_control=0, region_order=1,
+            latitude=5.0, longitude=5.0, annual_population_growth=0.0,
+            annual_population_growth_modifier=0.0, environment="Standard", xenoforming_level=0.0,
+            nuclear_detonations=0, colony=False, permanent_colony=False, resource_region=False,
+            oil_region=False, core_economic_region=True, mine_capable=False, oil_capable=False,
+            capital=False, occupation_fraction=0.0,
+            fully_occupied=False, welfare_colony_counter=0,
+        )
+        projection._refresh_economy_score(initial, context())
+        expected_before = 1000.0 ** 0.35 * 0.9
+        tx = projection._run_investment_transaction(initial, context(), 1, 0)
+        event = next(row for row in tx["completions"] if row["priority"] == "Military_BuildArmy")
+        self.assertEqual(event["homeRegionId"], 2)
+        self.assertEqual(event["controlPointPosition"], 1)
+        self.assertAlmostEqual(projection._base_ip(initial, context()), expected_before - 0.5)
+
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+        Rules.NATION_PRIORITY_BUILD_NAVY_MARKET.id,
+        Rules.NATION_ASSET_ARMY_MAINTENANCE.id,
+        evidence="stateTransition",
+    )
+    def test_build_navy_selects_human_standard_army_and_next_tick_maintenance(self):
+        initial = state(pips={"Military_BuildNavy": 3}, cp_count=4, progress={"Military_BuildNavy": 1.99})
+        # Army list order is intentional: only Human armies count, the highest
+        # CP with an unconverted Human army wins, then its first Standard army.
+        initial.armies = [
+            projection.ArmyProjectionState(10, 1.0, "Standard", 1, 1, 3, 7, "AlienInvader"),
+            projection.ArmyProjectionState(11, 1.0, "Naval", 1, 1, 3, 7, "Human"),
+            projection.ArmyProjectionState(12, 1.0, "Standard", 1, 1, 2, 7, "Human"),
+            projection.ArmyProjectionState(13, 1.0, "Standard", 1, 1, 3, 7, "Human"),
+            projection.ArmyProjectionState(14, 1.0, "Standard", 1, 1, 3, 7, "Human"),
+            projection.ArmyProjectionState(15, 1.0, "Standard", 1, 1, 4, 7, "Human", destroyed=True),
+        ]
+        initial.army_count = 4  # Existing public convention: all non-naval armies.
+        initial.navy_count = 1
+        before_unrest_effect = projection._own_army_unrest_impact(initial, context())
+        build_army_valid_before = projection._priority_valid(initial, "Military_BuildArmy", context())
+        transaction = projection._run_investment_transaction(initial, context(), 1, 0)
+        events = [row for row in transaction["completions"] if row["priority"] == "Military_BuildNavy"]
+        self.assertEqual([event["armyId"] for event in events], [13, 14])
+        self.assertEqual([army.id for army in initial.armies], [10, 11, 12, 13, 14, 15])
+        self.assertEqual([army.deployment_type for army in initial.armies], ["Standard", "Naval", "Standard", "Naval", "Naval", "Standard"])
+        self.assertEqual((initial.army_count, initial.navy_count), (2, 3))
+        self.assertEqual(len(initial.standard_armies), 5)
+        self.assertFalse(build_army_valid_before)  # The one-region nation is already at army capacity.
+        self.assertEqual(projection._priority_valid(initial, "Military_BuildArmy", context()), build_army_valid_before)
+        self.assertAlmostEqual(projection._own_army_unrest_impact(initial, context()), before_unrest_effect)
+        self.assertAlmostEqual(projection._army_maintenance(initial, context()), 4.0)
+        for cp in initial.control_points.values():
+            cp.pips = {"Knowledge": 3}
+        next_transaction = projection._run_investment_transaction(initial, context(), 2, 0)
+        self.assertAlmostEqual(
+            next_transaction["baseInvestmentPointsMonth"],
+            transaction["baseInvestmentPointsMonth"] - 1.0,
+        )
+        market = [row for row in transaction["ruleExecutions"] if row["ruleId"] == Rules.NATION_PRIORITY_BUILD_NAVY_MARKET.id]
+        self.assertEqual([row["effectiveCoverage"] for row in market], ["expected", "expected"])
+        self.assertEqual(initial.metric_tracker.evidence["nation.armies"].coverage, "exact")
+        self.assertEqual(initial.metric_tracker.evidence["nation.navies"].coverage, "exact")
+
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+        Rules.NATION_PRIORITY_BUILD_NAVY_MARKET.id,
+        evidence="stateTransition",
+    )
+    def test_build_navy_stops_after_final_convertible_army_and_revalidates(self):
+        initial = state(pips={"Military_BuildNavy": 3}, cp_count=4, progress={"Military_BuildNavy": 1.99})
+        initial.armies = [
+            projection.ArmyProjectionState(10, 1.0, "Standard", 1, 1, 4, 7, "Human"),
+            projection.ArmyProjectionState(11, 1.0, "Standard", 1, 1, 2, 7, "Human"),
+        ]
+        initial.army_count = 2
+        transaction = projection._run_investment_transaction(initial, context(), 1, 0)
+
+        events = [row for row in transaction["completions"] if row["priority"] == "Military_BuildNavy"]
+        self.assertEqual([event["armyId"] for event in events], [10, 11])
+        self.assertEqual((initial.army_count, initial.navy_count), (0, 2))
+        self.assertFalse(projection._priority_valid(initial, "Military_BuildNavy", context()))
+        trigger = next(row for row in transaction["ruleExecutions"] if row["ruleId"] == Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id)
+        self.assertIn("Military_BuildNavyBecameInvalid", trigger["triggerReasons"])
+
+    @mechanic_rule_test(Rules.NATION_POPULATION_ANNUAL_GROWTH.id, evidence="expectedValue")
+    def test_population_formula_uses_deterministic_mean_input_not_trajectory_expectation(self):
+        initial = state(annual_growth=None)
+        region = initial.regions[1]
+        expected_percent = (
+            4.49788037409348
+            + max(-4.49788037409348, -0.418190741 * 8.0)
+            - 0.0624798523403752 * 4.0
+            + 9.80843732089162e-06 * 20_000.0
+            - 0.115739931206548 * (10.0 ** 0.5)
+        )
+        self.assertAlmostEqual(projection._annual_population_growth(initial, region, context()), expected_percent * 0.01)
+
+    @mechanic_rule_test(Rules.NATION_POPULATION_MONTHLY_GROWTH.id, evidence="expectedValue")
+    def test_population_monthly_floor_is_literal(self):
+        initial = state(annual_growth=-1.0)
+        projection._run_monthly_transaction(initial, context(), 1)
+        self.assertEqual(initial.regions[1].population_millions, 0.001)
+
+    def test_unsupported_priority_fails_closed(self):
+        priorities = dict(context().priorities)
+        priorities["Environment"] = {"enumValue": 2, "investmentCost": 1}
+        initial = state(pips={"Environment": 3})
+        result = projection.run_projection(initial, projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)), context(priorities=priorities), days=1)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertIsNone(result["authoritativeFinalState"])
+        self.assertIn("nation.priority.environment.complete", result["missingMechanicRules"])
+
+
+class NationProjectionEconomyTests(unittest.TestCase):
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_ECONOMY_COMPLETE.id,
+        Rules.NATION_PRIORITY_ECONOMY_GDP.id,
+        Rules.NATION_PRIORITY_ECONOMY_INEQUALITY.id,
+        evidence="expectedValue",
+    )
+    def test_economy_gdp_inequality_and_executive_effect_source(self):
+        initial = state(pips={"Economy": 3}, progress={"Economy": 0.99})
+        initial.executive_faction_id = 8
+        initial.faction_effect_contexts = {
+            7: {"Economy_BasePCGDPIncrease": ["WrongOwnerBonus"]},
+            8: {
+                "Economy_BasePCGDPIncrease": ["ExecutiveBaseBonus"],
+                "Economy_InequalityMultiplier": ["ExecutiveInequalityMultiplier"],
+            },
+        }
+        projection_context = replace(context(), effect_templates={
+            "WrongOwnerBonus": {"operation": "Additive", "value": 100.0},
+            "ExecutiveBaseBonus": {"operation": "Additive", "value": 2.0},
+            "ExecutiveInequalityMultiplier": {"operation": "Multiplicative", "value": 2.0},
+        })
+        before_gdp = initial.gdp
+        transaction = projection._run_investment_transaction(initial, projection_context, 1, 0)
+        expected_pcgdp_delta = 3.0 + 2.0 + 5.0 * 0.5 + 8.0
+        self.assertAlmostEqual(initial.gdp, before_gdp + expected_pcgdp_delta * 50_000_000.0)
+        self.assertAlmostEqual(initial.inequality, 4.0 + 0.00015 * 2.0)
+        economy = next(row for row in transaction["ruleExecutions"] if row["ruleId"] == Rules.NATION_PRIORITY_ECONOMY_GDP.id)
+        self.assertEqual(economy["executiveFactionId"], 8)
+        self.assertAlmostEqual(initial.world_context["resourceMarketValues"]["Metals"], 10.0 * 1.000015)
+        self.assertAlmostEqual(initial.world_context["resourceMarketValues"]["NobleMetals"], 20.0 * 1.0000075)
+
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_ECONOMY_REGION_TRIGGER.id,
+        Rules.NATION_PRIORITY_ECONOMY_REGION_TRANSITION.id,
+        Rules.NATION_PRIORITY_ECONOMY_DOWNSTREAM_CACHE.id,
+        evidence="stateTransition",
+    )
+    def test_economy_region_branch_precedence_and_transition(self):
+        initial = state(pips={"Economy": 3}, progress={"Economy": 1.99})
+        region = initial.regions[1]
+        region.oil_capable = True
+        region.mine_capable = True
+        region.economy_region_counters = {"oil": 499, "mining": 749, "coreEconomic": 1199}
+        transaction = projection._run_investment_transaction(initial, context(), 1, 0)
+        self.assertEqual(len([row for row in transaction["completions"] if row["priority"] == "Economy"]), 2)
+        self.assertTrue(region.oil_region)
+        self.assertFalse(region.resource_region)
+        self.assertEqual(region.economy_region_counters["oil"], 0)
+        self.assertEqual(region.economy_region_counters["mining"], 749)
+        self.assertEqual(initial.cached_num_oil_regions, 0)
+        branch_rows = [
+            row for row in transaction["ruleExecutions"]
+            if row["ruleId"] == Rules.NATION_PRIORITY_ECONOMY_REGION_TRIGGER.id
+        ]
+        self.assertEqual([row["branch"] for row in branch_rows], ["Oil", "Oil"])
+        self.assertIsNone(branch_rows[1]["regionId"])
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_ECONOMY_MARKET.id, evidence="coverageBranch")
+    def test_market_only_missing_is_nonblocking(self):
+        initial = state(pips={"Economy": 3}, progress={"Economy": 0.99})
+        initial.world_context.pop("resourceMarketValues")
+        result = projection.run_projection(
+            initial,
+            projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)),
+            context(),
+            days=1,
+        )
+        self.assertEqual(result["status"], "complete")
+        self.assertIsNotNone(result["authoritativeFinalState"])
+        self.assertEqual(result["scopeStatus"]["nation"]["status"], "complete")
+        self.assertEqual(result["scopeStatus"]["worldMarket"]["status"], "incomplete")
+        self.assertEqual(result["metricCoverage"]["world.market.metals"]["coverage"], "unsupported")
+        self.assertEqual(result["metricCoverage"]["nation.gdp"]["coverage"], "exact")
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_BUILD_ARMY_MARKET.id, evidence="coverageBranch")
+    def test_build_army_market_branch_does_not_lower_army_coverage(self):
+        initial = state(pips={"Military_BuildArmy": 3}, progress={"Military_BuildArmy": 0.99})
+        transaction = projection._run_investment_transaction(initial, context(), 1, 0)
+        army = next(row for row in transaction["ruleExecutions"] if row["ruleId"] == Rules.NATION_PRIORITY_BUILD_ARMY_PLACEMENT.id)
+        market = next(row for row in transaction["ruleExecutions"] if row["ruleId"] == Rules.NATION_PRIORITY_BUILD_ARMY_MARKET.id)
+        self.assertEqual(army["effectiveCoverage"], "exact")
+        self.assertEqual(market["effectiveCoverage"], "expected")
+        self.assertEqual(initial.metric_tracker.evidence["nation.armies"].coverage, "exact")
+        self.assertEqual(initial.metric_tracker.evidence["world.market.metals"].coverage, "expected")
+        missing = state(pips={"Military_BuildArmy": 3}, progress={"Military_BuildArmy": 0.99})
+        missing.world_context.pop("resourceMarketValues")
+        transaction = projection._run_investment_transaction(missing, context(), 1, 0)
+        market = next(row for row in transaction["ruleExecutions"] if row["ruleId"] == Rules.NATION_PRIORITY_BUILD_ARMY_MARKET.id)
+        self.assertEqual(missing.army_count, 1)
+        self.assertEqual(market["effectiveCoverage"], "unsupported")
+        self.assertIn(Rules.NATION_PRIORITY_BUILD_ARMY_MARKET.id, missing.world_market_blockers)
+
+
+class NationProjectionNavyValidityTests(unittest.TestCase):
+    @mechanic_rule_test(Rules.NATION_PRIORITY_VALIDITY.id, evidence="expectedValue")
+    def test_build_navy_uses_coastal_regions_and_control_point_exception(self):
+        normal = state(pips={"Military_BuildNavy": 1}, cp_count=4)
+        normal.army_count = 1
+        self.assertTrue(projection._priority_valid(normal, "Military_BuildNavy", context()))
+
+        no_coast = state(pips={"Military_BuildNavy": 1}, cp_count=4)
+        no_coast.army_count = 1
+        no_coast.regions[1].ocean_type = "No"
+        self.assertFalse(projection._priority_valid(no_coast, "Military_BuildNavy", context()))
+
+        exception = state(pips={"Military_BuildNavy": 1}, cp_count=3)
+        exception.gdp = 2_000_000_000_000.0  # 40,000 PCGDP at 50M population.
+        exception.army_count = 1
+        self.assertTrue(projection._priority_valid(exception, "Military_BuildNavy", context()))
+        exception.army_count = 2
+        exception.navy_count = 1
+        self.assertFalse(projection._priority_valid(exception, "Military_BuildNavy", context()))
+
+    def test_build_navy_missing_ocean_state_stops_projection(self):
+        incomplete = state(pips={"Military_BuildNavy": 1}, cp_count=4)
+        incomplete.army_count = 1
+        incomplete.regions[1].ocean_type = None
+        with self.assertRaises(projection.ProjectionRuntimeStop) as caught:
+            projection._priority_valid(incomplete, "Military_BuildNavy", context())
+        self.assertEqual(caught.exception.dependencies[0]["field"], "canBuildNavy")
+
+
+class NationProjectionSchedulerTests(unittest.TestCase):
+    @mechanic_rule_test(Rules.NATION_PERIODIC_REGION_CACHE.id, evidence="stateTransition")
+    def test_daily_region_cache_refreshes_before_allocation(self):
+        initial = state()
+        initial.regions[1].resource_region = True
+        initial.cached_num_mining_regions = 0
+        transaction = projection._run_investment_transaction(initial, context(), 1, 0)
+        self.assertEqual(initial.cached_num_mining_regions, 1)
+        self.assertEqual(transaction["phaseTrace"][0]["regionCache"]["miningRegions"], 1)
+        self.assertEqual(transaction["ruleExecutions"][0]["ruleId"], Rules.NATION_PERIODIC_REGION_CACHE.id)
+
+    @mechanic_rule_test(
+        Rules.NATION_IP_PRIORITY_BONUS.id,
+        Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,
+        evidence="ordering",
+    )
+    def test_daily_priority_bonus_cache_precedes_effect_expiry(self):
+        initial = state(at=datetime(2029, 12, 31, 12), annual_growth=0.0)
+        initial.faction_effect_contexts = {7: {"KnowledgePriority": ["TemporaryKnowledge"]}}
+        initial.faction_effect_expirations = {
+            7: {"TemporaryKnowledge": datetime(2030, 1, 1, 0, 0)}
+        }
+        projection_context = replace(
+            context(),
+            faction_priority_bonus_bases={7: {"Knowledge": 0.1}},
+            effect_templates={
+                "TemporaryKnowledge": {"operation": "Additive", "value": 0.2}
+            },
+        )
+        plan = projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),))
+        result = projection.run_projection(initial, plan, projection_context, days=1, details=True)
+        cache = result["transactions"][0]
+        investment = next(row for row in result["transactions"] if row["kind"] == "investment")
+        self.assertAlmostEqual(cache["cachedPriorityBonuses"]["7"]["Knowledge"], 0.3)
+        self.assertEqual(cache["expiredEffects"][0]["effect"], "TemporaryKnowledge")
+        expected = investment["baseInvestmentPointsMonth"] * 12.0 / 365.2422 * 1.3
+        self.assertAlmostEqual(investment["allocation"]["Knowledge"], expected)
+
+    @mechanic_rule_test(Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id, evidence="stateTransition")
+    def test_nontriggering_education_change_preserves_cached_weights(self):
+        initial = state(pips={"Knowledge": 3}, progress={"Knowledge": 0.99})
+        initial.regions[1].mission_control = 0
+        initial.mission_control = 0
+        point = initial.control_points[1]
+        point.total_weight = 7
+        point.num_priorities_with_weight = 1
+        point.diversity_bonus_cache = {"Knowledge": 0.125}
+        transaction = projection._run_investment_transaction(initial, context(), 1, 0)
+        self.assertEqual(point.total_weight, 7)
+        self.assertEqual(point.diversity_bonus_cache, {"Knowledge": 0.125})
+        self.assertFalse(any(
+            row.get("operation") == "priorityValidationTrigger"
+            for row in transaction["mutationTrace"]
+        ))
+
+
+if __name__ == "__main__":
+    unittest.main()
