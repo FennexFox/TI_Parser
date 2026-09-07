@@ -1,15 +1,20 @@
 {
-  "bundleFingerprint": "43239f441b8969a1088f261f84b34aa770056b444f4e12f63b7ac4437b258c9d",
+  "bundleFingerprint": "c0f3c5c04b3f471c0a77f4eb53d0da1f0ad2ffd7144b1b216793eb705f9b9683",
   "catalogs": {
     "effect_catalog.json": {
-      "payloadFingerprint": "3f396b7570b8574d49f5ac8c753402c9d72e526f5f1fb781dec53718c4c7a71f",
+      "payloadFingerprint": "b913b2d945d30d2b63e12844cc3a02bfb1ceabd5ca992a4662d3cf4f44380ebe",
       "schemaVersion": 1,
-      "sha256": "cd28ece0f369da59271091feabbaed6834254e6c3bed1fbaa55f26b9187e2810"
+      "sha256": "d9201859308e2d5d77d0dcadebca8685ccc1f041e385caa74da03d982c698f5e"
     },
     "nation_claim_catalog.json": {
       "payloadFingerprint": "7ef5efe1e90e9be7469ca29a16921fdd502282281ca75a19d65b5b2d3fc8c510",
       "schemaVersion": 1,
-      "sha256": "7d43ff7d1eba4ffb2ba40633787cdd3afc7addf7c7545ace6fd484c35fb0f257"
+      "sha256": "d2e170b387fa0718a3b499e1d5fe7e79013cd5e982308f40723199747f261a7c"
+    },
+    "nation_development_catalog.json": {
+      "payloadFingerprint": "be71db7b44575f895afb63e8a0219dccc718bf3ce4a1363f7235178c4821d40a",
+      "schemaVersion": 1,
+      "sha256": "b2877fd6948e18c66d41bb4ebf02d9cc368d58bfc65f78c9c1c4891c9ea911c0"
     },
     "org_catalog.json": {
       "payloadFingerprint": "62c90f9eeb27c558ad99ee7997eb1f36ec49d2c85ab9e19da43537d612135cca",

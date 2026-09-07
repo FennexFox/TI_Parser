@@ -17,6 +17,7 @@ RAW_COMMANDS = {
     "topbar": "command_topbar",
     "advise": "command_advise",
     "nation-ui": "command_nation_ui",
+    "nation-projection": "command_nation_projection",
     "world-ui": "command_world_ui",
     "hab-ui": "command_hab_ui",
     "hab-slots": "command_hab_slots",
@@ -128,6 +129,19 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     nation_ui.add_argument("--faction", help="Faction template/display/code for faction-share fields. Defaults to player.")
     add_compact_flag(nation_ui)
 
+    nation_projection = subparsers.add_parser(
+        "nation-projection",
+        help="Project audited nation priority effects under conditional CP and Advisor policies.",
+    )
+    nation_projection.add_argument("name", help="Nation template/display/code.")
+    nation_projection.add_argument("--days", type=int, required=True, help="Positive projection horizon in days.")
+    nation_projection.add_argument("--plan-file", help="JSON plan document; current CP pips/advisors are retained when omitted.")
+    nation_projection.add_argument("--checkpoints", help="Comma-separated projection day checkpoints.")
+    nation_projection.add_argument("--faction", help="Faction used for Advisor resolution and target-nation contribution view.")
+    nation_projection.add_argument("--details", action="store_true", help="Include investment and periodic transaction diagnostics.")
+    nation_projection.add_argument("--diagnostics", action="store_true", help="Expand mechanic rule IDs with audit provenance.")
+    add_compact_flag(nation_projection)
+
     world_ui = subparsers.add_parser("world-ui", help="Calculate the Intel world data panel from raw save values.")
     world_ui.add_argument("--faction", help="Faction template/display/code for sell-value modifiers. Defaults to player.")
     add_compact_flag(world_ui)
@@ -216,6 +230,8 @@ def main(api: ModuleType, argv: list[str] | None = None) -> int:
     parser = build_parser(api)
     args = parser.parse_args(argv)
     command = args.command or "summary"
+    if command == "nation-projection" and args.days <= 0:
+        parser.error("nation-projection --days must be positive")
 
     try:
         if command == "catalog-verify":

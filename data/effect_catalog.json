@@ -6442,7 +6442,7 @@
     "name": "build_runtime_catalogs",
     "version": "1"
   },
-  "payloadFingerprint": "3f396b7570b8574d49f5ac8c753402c9d72e526f5f1fb781dec53718c4c7a71f",
+  "payloadFingerprint": "b913b2d945d30d2b63e12844cc3a02bfb1ceabd5ca992a4662d3cf4f44380ebe",
   "scenarioOverrides": {
     "2003Scenario": {
       "effects": {
@@ -7297,7 +7297,7 @@
           "effectTarget": "AllHumanFactions",
           "operation": "IncreaseToValue",
           "stackable": false,
-          "value": 2.5
+          "value": 2.6
         },
         "Effect_BS_SemiMajorAxisExplorationIII": {
           "contexts": [
@@ -8274,7 +8274,7 @@
           "effectTarget": "SourceFaction",
           "operation": "IncreaseToValue",
           "stackable": false,
-          "value": 2.5
+          "value": 2.6
         },
         "Effect_BS_SemiMajorAxisExplorationIII": {
           "contexts": [
@@ -8412,7 +8412,7 @@
   "sourceFiles": [
     {
       "name": "2003Scenario/TIEffectTemplate.json",
-      "sha256": "acbd1d575a1871bbdac3fea7f1269707f4dd49f9a7a35198024675418af19194"
+      "sha256": "e95d597ab8f7cc8586138dcf714ac4764112a2bf419f1000bd90a2c1d8901324"
     },
     {
       "name": "2003Scenario/TIMetaTemplate.json",
@@ -8420,7 +8420,7 @@
     },
     {
       "name": "BrokenEarthScenario/TIEffectTemplate.json",
-      "sha256": "b55ea87ad1ab40cffd9ea795ed1c74c328132d98bc03140569fa3f0c0e403f86"
+      "sha256": "bc38637df50939adbb36ca580a9e4f99aad1e48922faa09f08c49e7a7548dd71"
     },
     {
       "name": "BrokenEarthScenario/TIMetaTemplate.json",

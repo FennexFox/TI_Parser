@@ -1,0 +1,117 @@
+# Nation priority and conditional Advisor projection
+
+## Issue Target And Scope Summary
+
+- Issue target: user-plan
+- Title: Nation priority and conditional Advisor projection
+- Source plan: None
+- Scope: add package-only nation development data, a shared mechanics rule registry, deterministic/fail-closed nation projection, conditional CP/advisor segments, faction-contribution views, diagnostics, and CLI/tests; then harden the feature against the local Broken Earth CAL save with verified Population, Government legitimize, Welfare, Mission Control, BuildArmy, event scheduling, and runtime dependency propagation.
+
+## Strategy
+
+- Keep game mechanics auditable and fail closed: only DLL/template-verified rules may produce authoritative projected state.
+- Put formulas in Python and template/config values plus hashes in the generated catalog.
+- Clone save state into projection dataclasses; never mutate `IndexedState`.
+- Apply plan changes immediately before a verified investment transaction and evaluate segment/goal conditions only after a complete transaction.
+- Keep `nation.*` state separate from target-nation `factionContribution.*`; whole-faction future totals remain out of scope.
+- Treat advisor placement as a desired repeat-order policy; the Advise lifecycle extension supersedes the former continuous-renewal assumption with saved phase cadence, clear/resolve gaps, automatic success, assignment movement, and renewal-cost reporting.
+- Replace the approximate date loop with verified DLL event boundaries and execute mutations on cloned state. Preserve verified authoritative prefixes while rolling back only the incomplete handler or phase that reaches an unsupported dependency.
+- Derive metric coverage and provenance from the dependencies actually read and written. Conditional rule coverage remains distinct from the coverage of each affected output metric.
+- Treat Population as a deterministic mean-input trajectory: replace each stochastic input with its mean, propagate `meanPath`, and never claim that the nonlinear trajectory equals the mathematical expectation of all stochastic paths.
+- Support Economy through independently covered GDP, inequality, regional, and world-market branches. An unsupported market-only branch does not invalidate nation or faction state until an audited dependency reads it.
+- Support Unity only when the plan opts into its sequential conditional-expected public-opinion trajectory. Keep this distinct from Population's mean-input trajectory in diagnostics.
+
+## Phase Order
+
+1. [Mechanics audit registry and data catalog](01-audit-registry.md)
+2. [Projection model and transactional engine](02-projection-core.md)
+3. [CLI faction contribution and diagnostics integration](03-cli-integration.md)
+4. [Regression verification and documentation](04-verification.md)
+5. [Real-save mechanics registry and catalog extension](05-real-save-mechanics.md)
+6. [DLL-boundary runtime engine and priority mechanics](06-runtime-engine.md)
+7. [Runtime diagnostics and CLI contract hardening](07-cli-diagnostics.md)
+8. [Independent fixtures, real-save validation, and Graphify refresh](08-real-save-verification.md)
+9. [Execution-based metric dependency graph](09-metric-dependency-graph.md)
+10. [Authoritative-prefix fail-closed diagnostics](10-authoritative-prefix-diagnostics.md)
+11. [Shared priority validity and independent verification](11-validity-and-verification.md)
+12. [Real-save matrix, documentation, and Graphify refresh](12-real-save-graphify.md)
+13. [Cross-runner mechanics test-ID resolution](13-test-id-import-compatibility.md)
+14. [Economy and Unity audit, catalog, and state](14-economy-unity-foundations.md)
+15. [Scheduler, cache, and validation triggers](15-scheduler-cache-validity.md)
+16. [Economy and BuildArmy market branches](16-economy-market.md)
+17. [Unity public opinion and direct effects](17-unity-public-opinion.md)
+18. [Real-save verification, documentation, and Graphify](18-economy-unity-verification.md)
+19. [Exact BuildNavy coastal validity](19-build-navy-validity.md)
+20. [BuildNavy completion simulation](20-build-navy-completion.md)
+
+## Phase Dependencies
+
+- Phase 1 has no phase dependency beyond resolved issue context.
+- Phase 2 depends on completion and validation of phase 1.
+- Phase 3 depends on completion and validation of phase 2.
+- Phase 4 depends on completion and validation of phase 3.
+- Phase 5 extends the completed phase-1 registry/catalog work and depends on phases 1 through 4 remaining green.
+- Phase 6 depends on the verified rule metadata and packaged data produced in phase 5.
+- Phase 7 depends on phase 6 exposing rule executions, runtime stops, and authoritative state boundaries.
+- Phase 8 depends on phases 5 through 7 and completes full-suite, opt-in local-save, package-only, and Graphify verification.
+- Phase 9 supersedes the static metric coverage/provenance assembly retained after phase 8.
+- Phase 10 depends on phase 9 so runtime-stop descendants and affected metrics come from the same dependency tracker.
+- Phase 11 depends on phases 9 and 10 and makes validity and registry evidence shared contracts.
+- Phase 12 depends on phases 9 through 11 and is the final observational real-save, documentation, and graph verification phase.
+- Phase 13 depends on phase 11's registry evidence contract and preserves its
+  canonical dotted test IDs across both unittest discovery and pytest import
+  modes.
+- Phase 14 extends the audited registry/catalog/state contracts without enabling either completion.
+- Phase 15 depends on phase 14 and makes the scheduler, cached faction bonuses, effect expiry, and validation triggers faithful enough for Economy and Unity.
+- Phase 16 depends on phases 14 and 15 and enables Economy plus BuildArmy's independently covered market branch.
+- Phase 17 depends on phases 14 and 15 and enables Unity only under the explicit stochastic policy.
+- Phase 18 depends on phases 16 and 17 and completes full-suite, observational real-save, documentation, and Graphify verification.
+- Phase 19 depends on phase 11's shared validity contract and phase 18's verified extraction state. It closes BuildNavy validity using the audited DLL predicate and serialized region ocean state.
+
+## Source Of Truth Decisions
+
+- Phase 20 depends on phase 19 and extends its validity-only scope to audited navy conversion, maintenance, and market consequences.
+
+- `00-master-plan.md` is the phased implementation plan source of truth.
+- Phase files in this directory define phase-local scope and validation.
+- Earlier monolithic plans are input material only unless explicitly retained.
+- Installed `Assembly-CSharp.dll` and templates are audit/generator inputs; packaged catalogs and audited Python rules are the runtime source.
+- Stable mechanics IDs are shared constants referenced by code, tests, audit records, and diagnostics.
+- Phases 1 through 4 remain the completed initial implementation record. Phases 5 through 8 are the source of truth for the real-save compatibility extension and supersede conflicting mechanics assumptions in earlier outcomes.
+- The primary opt-in smoke input is the uncommitted local `ExitSave.gz` Broken Earth CAL save selected through `TI_PARSER_REAL_SAVE`; its path, object IDs, and current values are never encoded into production code or committed fixtures.
+- `coverage: "expected"` is the compatibility coverage label for Population-derived results, while `provenance: "meanPath"`, `stochasticTreatment: "deterministicMeanInput"`, and `expectationGuarantee: false` state the stricter semantics.
+- Welfare decolonization is a conditional dependency reached only by the completion that crosses its threshold. Mission Control and BuildArmy coverage is resolved per execution instance, not fixed to the lowest possible mechanic-wide coverage.
+- Phases 9 through 12 supersede phase 8 where it describes whole-transaction rollback, static metric coverage, generic registry contract evidence, or a fixed real-save placement. A verified priority completion, its cost consumption, and required CP fallback/cache repair form an authoritative prefix; a newly activated unsupported priority is gated before its next allocation.
+- Real-save placement assertions are computed from the audited deterministic selection order and current extracted state. Tijuana, a particular CP position, object count, or save value is not a regression constant.
+- Registry `test_ids` remain canonical `tests.<module>.<class>.<method>` paths;
+  the repository test tree is an explicit package so test runners do not change
+  their meaning.
+- Economy market values are an independent output scope. Missing market-only data leaves nation/faction output and ranking available, records `worldMarket` incomplete, and becomes blocking only if a simulated nation/faction rule reads that value.
+- Population and Unity both use `coverage: expected` and `provenance: meanPath`, but Population uses `deterministicMeanInput` while Unity uses `deterministicExpectedTransition`; neither claims full-path mathematical expectation.
+- Unity opt-in is checked against every materialized segment after pip inheritance, including the implicit current-pip segment when no plan file is supplied.
+- BuildNavy validity derives coastal presence from serialized `TIRegionState.oceanType`; `Yes` and `Seasonal` are coastal exactly as the audited DLL defines. Missing or invalid ocean state remains unknown rather than being inferred.
+
+## Global Validation Expectations
+
+- Pre-extension baseline: 198 tests passed, 1 skipped, and 10 subtests passed.
+- py -3 -m unittest discover -s tests -p 'test_*.py'
+- pytest -q
+- py -3 -m unittest tests.test_mechanics_registry tests.test_catalog_generators tests.test_runtime_catalogs
+- py -3 -m unittest tests.test_nation_projection tests.test_nation_projection_cli tests.test_package_only_runtime
+- $env:TI_PARSER_REAL_SAVE = '<local ExitSave.gz>'; py -3 -m unittest tests.test_nation_projection_real_save; Remove-Item Env:TI_PARSER_REAL_SAVE
+- graphify update .; graphify diagnose multigraph --graph graphify-out/graph.json --json; graphify query "nation projection runtime dependency population government welfare mission control build army"
+- graphify query "nation projection economy unity market public opinion stochastic policy validation trigger"
+
+## Known Risks And Assumptions
+
+- The installed game build may change; source hashes make such drift visible.
+- Exogenous events, player actions, target invalidation, detention, competing councilor orders, future faction affordability, and stochastic nation events are not replayed. Actionable Advise itself is automatic and moves at assignment.
+- A plan using any unsupported nonzero priority is incomplete and has no authoritative final state or ranking.
+- Periodic rules are implemented only when cadence and formulas are verified; otherwise limitations remain explicit.
+- Installed DLL/template inputs can drift independently of the repository. Catalog regeneration and provenance parity must fail visibly, while runtime remains package-only.
+- Population feedback is nonlinear. The deterministic mean-input trajectory is generally not guaranteed to equal the expected value over complete stochastic trajectories.
+- Monthly `UpdateControlPoints` mutation is outside this extension; a required CP-count change must stop before mutation under `nation.periodic.control-points`.
+- Economy market mutation is modeled only as a deterministic mean-input branch; coupled climate/environment feedback remains held fixed.
+- Unity public opinion is a sequential conditional-expected approximation, not exact RNG replay or the expectation of the complete nonlinear trajectory.
+- Monte Carlo, optimizer, actual CP-count mutation, and market/public-opinion goal metrics remain out of scope.
+- Phase 19 changes only shared BuildNavy validity; phase 20 extends that work to completion simulation.

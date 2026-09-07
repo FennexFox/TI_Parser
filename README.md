@@ -13,6 +13,10 @@ Implementation layout:
 - `tools/ti_parser_org.py` owns org-plan parsing, conditional evaluation, and committee assignment search.
 - `tools/ti_parser_cli.py` owns argument parsing and command dispatch.
 - `tools/ti_parser_catalogs.py` validates the packaged runtime bundle, manifest, exact scenario overlays, and fingerprints.
+- `tools/ti_parser_mechanics.py` owns stable mechanics rule IDs and DLL/catalog/test provenance.
+- `tools/ti_parser_nation_validity.py` owns the shared value-only, tri-state priority-validity evaluator.
+- `tools/ti_parser_nation_projection.py` owns cloned projection state, plan parsing, transactional updates, and fail-closed coverage.
+- `tools/ti_parser_projection_coverage.py` owns execution-derived metric evidence and dependency propagation.
 - `tools/ti_save_parser.py` keeps the public script entrypoint and thin compatibility wrappers.
 - `tools/catalog_utils.py` contains shared catalog-generator helpers.
 
@@ -40,6 +44,9 @@ python .\tools\ti_save_parser.py research-ui
 python .\tools\ti_save_parser.py research-plan --top 5
 python .\tools\ti_save_parser.py topbar --details
 python .\tools\ti_save_parser.py nation-claims KOR --target PRK --diagnostics
+python .\tools\ti_save_parser.py nation-projection KOR --days 365
+python .\tools\ti_save_parser.py nation-projection KOR --days 365 --plan-file plans.json --checkpoints 30,90,180,365
+python .\tools\ti_save_parser.py nation-projection KOR --days 365 --plan-file plans.json --details --diagnostics
 python .\tools\ti_save_parser.py ai-fleet-diagnostics --stale-days 365
 python .\tools\build_research_catalog.py
 python .\tools\build_runtime_catalogs.py --templates-dir "C:\...\StreamingAssets\Templates"
@@ -175,6 +182,59 @@ The `nation-ui` command reconstructs the nation panel values used for UI
 validation, including federation-pooled funding/boost income, faction research
 share, control-point priority weights, accumulated investment points, public
 opinion, army/navy limits, nukes, and diplomacy lists.
+
+The `nation-projection` command simulates conditional control-point priority and
+Advisor policies without mutating the loaded save. Segment conditions are
+observed only after a complete investment or verified periodic transaction; a
+satisfied segment takes effect immediately before the next investment tick.
+`nation.*` metrics describe the nation, while `factionContribution.*` describes
+only the selected faction's share from that target nation. Advisor placement is
+a desired repeat-order policy. The projection reads the save's mission-phase
+cadence, clears active advisors at each phase, and reapplies them at the audited
+expected order-0 resolution time. Actionable Advise has automatic 100% success
+and `MoveToTarget` moves on assignment, so its travel duration is zero rather
+than distance-based. `advisorMissionProjection` reports every renewal, the
+inactive gap, and required Influence; future resource availability, target
+invalidation, detention, and competing orders remain held fixed.
+
+Projection mechanics are fail closed. Economy, Knowledge, Government, Welfare,
+Unity, Funding, Mission Control, BuildArmy, and BuildNavy have supported paths; MC and
+BuildArmy coverage is resolved from the actual execution path. Economy keeps
+GDP, inequality, and region effects authoritative even when only its independent
+world-market branch is unavailable. Unity requires a plan-level
+`stochasticPolicy.unityPublicOpinion: "meanPath"` opt-in. Its direct cohesion,
+education, and legitimize branches remain exact when their own inputs are exact,
+while CP-owner propaganda is a sequential conditional expected transition.
+BuildNavy converts the DLL-selected Human Standard army to Naval without creating
+a new army. It preserves identity and location, updates live maintenance and
+eligibility, and keeps its mean-input market effect independently covered.
+
+Population and Unity both use `coverage: expected`, `provenance: meanPath`, and
+`expectationGuarantee: false`, but they are not the same approximation.
+Population reports `stochasticTreatment: deterministicMeanInput` because each
+random scalar input is replaced by its mean. Unity reports
+`deterministicExpectedTransition` because each integer-sample transition kernel
+is replaced by its conditional expected flow and then fed sequentially to the
+next CP owner. Neither is claimed to equal the mathematical expectation across
+the complete nonlinear stochastic trajectory. `metricCoverage` is built from
+the inputs and outputs actually executed, so each treatment reaches only its
+real descendants. Rule-level placement/branch coverage remains separate from
+placement-independent aggregate metric coverage.
+
+Unsupported priorities or newly activated blocking dependencies return an `incomplete`
+plan and are excluded from comparison/ranking. A completed handler, its cost,
+and CP fallback/cache repair remain in the authoritative prefix; an unsupported
+next allocation/effect is never executed. A missing independent Economy or
+BuildArmy/BuildNavy market value instead leaves nation/faction scopes complete and marks
+only `scopeStatus.worldMarket` incomplete. `runtimeStop` identifies the exact
+timestamp/day/transaction/phase, trigger, authoritative mutations, unsupported
+next step, state context, affected metrics, and attempted transaction.
+`lastAuthoritativeState` and successful `authoritativeFinalState` include CP raw
+and effective pips plus weight caches. `nation-ui` uses the same tri-state live
+priority-validity evaluator and reports every CP's serialized/recomputed weight
+consistency; missing inputs remain `valid: null`, not silently false. See
+`docs/nation_projection_mechanics_audit.md` for the current rule index, coverage
+resolvers, and validation boundary.
 
 The `hab-ui` command reconstructs a hab panel from raw sector/module state and
 module templates, including crew, location-adjusted solar power with active

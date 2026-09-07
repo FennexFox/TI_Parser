@@ -1,5 +1,6 @@
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -116,6 +117,130 @@ class ScenarioRuleTests(unittest.TestCase):
             national_ip_multiplier=2.0,
         )
         self.assertEqual(self._army_cost(indexed), 20)
+
+    def test_nation_ui_inactive_weights_use_live_shared_validity(self):
+        indexed = self._build_indexed("BrokenEarthScenario")
+        nation = core.state_value_by_id(indexed, 21)
+        control_point = core.state_value_by_id(indexed, 31)
+        region = core.state_value_by_id(indexed, 41)
+        assert nation is not None and control_point is not None and region is not None
+        nation.update({
+            "democracy": 5.0,
+            "hostileClaims": [],
+            "spaceFunding_year": 10.0,
+            "education": 8.0,
+            "spaceFlightProgram": True,
+            "military": True,
+            "nuclearProgram": False,
+            "canBuildSpaceDefenses": False,
+            "canBuildSTOSquadrons": False,
+            "armies": [],
+        })
+        region.update({
+            "coreEconomicRegion": False,
+            "resourceRegion": False,
+            "oilRegion": False,
+            "colonyRegion": False,
+            "missionControl": 0,
+            "boostPerYear_dekatons": 1.0,
+        })
+        control_point.update({
+            "positionInNation": 0,
+            "controlPointPriorities": {
+                "MissionControl": 3,
+                "Civilian_InitiateSpaceflightProgram": 2,
+                "Military_BuildSpaceDefenses": 2,
+            },
+            "totalWeightsForControlPoint": 3,
+            "numPrioritiesWithWeight": 1,
+        })
+        development = ti.calculation_catalogs(indexed, "nation-ui").nation_development
+        validity = ti._nation_ui_priority_validity(
+            indexed,
+            nation,
+            development,
+            population=100.0,
+            allowed_armies=1,
+            current_armies=0,
+        )
+        diagnostics = ti._nation_ui_control_point_weights([control_point], validity)[0]
+        inactive = next(
+            row for row in ti.nation_priority_rows(indexed, nation, validity)
+            if row["key"] == "_inactiveRawWeights"
+        )
+        self.assertTrue(validity["MissionControl"].valid)
+        self.assertNotIn("MissionControl", inactive["weights"])
+        self.assertEqual(inactive["weights"], {
+            "Civilian_InitiateSpaceflightProgram": 2,
+            "Military_BuildSpaceDefenses": 2,
+        })
+        self.assertEqual(diagnostics["effectiveWeights"], {"MissionControl": 3})
+        self.assertTrue(diagnostics["consistent"])
+
+        del region["missionControl"]
+        unknown_validity = ti._nation_ui_priority_validity(
+            indexed,
+            nation,
+            development,
+            population=100.0,
+            allowed_armies=1,
+            current_armies=0,
+        )
+        unknown_diagnostics = ti._nation_ui_control_point_weights([control_point], unknown_validity)[0]
+        self.assertIsNone(unknown_validity["MissionControl"].valid)
+        self.assertIsNone(unknown_diagnostics["consistent"])
+        self.assertIn("MissionControl", unknown_diagnostics["unknownPriorities"])
+
+    def test_navy_capacity_survives_no_convertible_armies(self):
+        indexed = self._build_indexed("BrokenEarthScenario")
+        nation = core.state_value_by_id(indexed, 21)
+        nation.update({"military": True, "numControlPoints": 4})
+        core.state_value_by_id(indexed, 41)["oceanType"] = "Yes"
+        with (
+            patch.object(ti, "find_faction_state", return_value=(10, core.state_value_by_id(indexed, 10))),
+            patch.object(ti, "nation_army_details", return_value={
+                "count": 2, "navies": 2, "standardArmies": 0, "navalScore": 0, "armies": [],
+            }),
+            patch.object(ti, "nation_allowed_armies", return_value=2),
+        ):
+            result = ti.calculate_nation_ui(indexed, None, nation["templateName"])
+        self.assertEqual(result["military"]["maxNavies"], 2)
+        self.assertEqual(result["military"]["naviesCanBuild"], 0)
+        self.assertFalse(result["priorities"]["validityByPriority"]["Military_BuildNavy"]["valid"])
+
+    def test_nation_ui_build_navy_uses_serialized_ocean_type(self):
+        indexed = self._build_indexed("BrokenEarthScenario")
+        nation = core.state_value_by_id(indexed, 21)
+        control_point = core.state_value_by_id(indexed, 31)
+        region = core.state_value_by_id(indexed, 41)
+        assert nation is not None and control_point is not None and region is not None
+        nation.update({
+            "military": True,
+            "numControlPoints": 4,
+        })
+        region["oceanType"] = "Seasonal"
+        control_point["controlPointPriorities"] = {"Military_BuildNavy": 1}
+        development = ti.calculation_catalogs(indexed, "nation-ui").nation_development
+        validity = ti._nation_ui_priority_validity(
+            indexed, nation, development,
+            population=100.0, allowed_armies=1, current_armies=1,
+            army_count=1, navy_count=0, per_capita_gdp=10_000.0,
+        )
+        self.assertTrue(validity["Military_BuildNavy"].valid)
+
+        region["oceanType"] = "No"
+        self.assertFalse(ti._nation_ui_priority_validity(
+            indexed, nation, development,
+            population=100.0, allowed_armies=1, current_armies=1,
+            army_count=1, navy_count=0, per_capita_gdp=10_000.0,
+        )["Military_BuildNavy"].valid)
+
+        region.pop("oceanType")
+        self.assertIsNone(ti._nation_ui_priority_validity(
+            indexed, nation, development,
+            population=100.0, allowed_armies=1, current_armies=1,
+            army_count=1, navy_count=0, per_capita_gdp=10_000.0,
+        )["Military_BuildNavy"].valid)
 
     def test_inactive_or_invalid_national_ip_multiplier_is_ignored(self):
         inactive = self._build_indexed(

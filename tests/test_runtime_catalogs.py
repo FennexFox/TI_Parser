@@ -100,6 +100,101 @@ class RuntimeCatalogTests(unittest.TestCase):
             ],
         )
         write_json(self.templates / "TIGlobalConfig.json", {"dataName": "globalConfig"})
+        write_json(
+            self.templates / "TIMissionTemplate.json",
+            [
+                {
+                    "dataName": "Advise",
+                    "persistentEffect": True,
+                    "resolutionOrder": 0,
+                    "resolutionMethod": {"$type": "TIMissionResolution_Automatic"},
+                    "movementRule": "MoveToTarget",
+                    "cost": {"$type": "TIMissionCost_Flat", "resourceType": "Influence", "value": 10},
+                },
+                {"dataName": "LateMission", "resolutionOrder": 4},
+            ],
+        )
+        write_json(
+            self.templates / "TITimeEventTemplate.json",
+            [{
+                "dataName": "CouncilorMissionUpdate",
+                "eventType": "WeekToMonth",
+                "repeatChanges": [
+                    {
+                        "triggerCondition": {"$type": "TIGlobalCondition_fCampaignDuration_years", "strValue": "0.325"},
+                        "updateEventType": "Semimonthly",
+                    },
+                ],
+            }],
+        )
+        write_json(
+            self.templates / "TINationTemplate.json",
+            [
+                {"dataName": "ModernNation"},
+                {"dataName": "SharedNation", "popGrowthModifier": 0.1},
+            ],
+        )
+        write_json(
+            self.templates / "TIRegionTemplate.json",
+            [
+                {
+                    "dataName": "ModernRegion",
+                    "mapRegionName": "map_ModernRegion",
+                    "annualPopGrowthModifier": 1.25,
+                    "environment": "Vulnerable",
+                    "mineCapable": True,
+                },
+                {"dataName": "DefaultedRegion", "mapRegionName": "map_DefaultedRegion"},
+            ],
+        )
+        write_json(
+            self.templates / "TIMapRegionTemplate.json",
+            [
+                {"dataName": "map_ModernRegion", "latitude": 37.21, "longitude": -119.04},
+                {"dataName": "map_DefaultedRegion", "latitude": 0, "longitude": 12.5},
+                {"dataName": "map_2003Region", "latitude": 5, "longitude": 10},
+                {"dataName": "map_BrokenRegion", "latitude": 27.5, "longitude": -108},
+            ],
+        )
+        write_json(
+            self.templates / "TIStartTimeTemplate.json",
+            [{"dataName": "ModernStart"}],
+        )
+        write_json(
+            self.templates / "TIBilateralTemplate.json",
+            [
+                {
+                    "dataName": "PhysicalAdjacencyModernDefaulted",
+                    "relationType": "PhysicalAdjacency",
+                    "region1": "map_ModernRegion",
+                    "region2": "map_DefaultedRegion",
+                }
+            ],
+        )
+        write_json(
+            self.templates / "TIFactionTemplate.json",
+            [
+                {"dataName": "ResistCouncil", "ideologyName": "resist", "isAlien": False},
+                {"dataName": "AlienCouncil", "ideologyName": "alien", "isAlien": True},
+            ],
+        )
+        write_json(
+            self.templates / "TIFactionIdeologyTemplate.json",
+            [
+                {
+                    "dataName": "resist", "ideology": "Resist", "sortOrder": 7,
+                    "ideologyCoordinates": {"x": 1, "y": 0, "z": 0},
+                },
+                {
+                    "dataName": "undecided", "ideology": "Undecided", "sortOrder": 9,
+                    "undecided": True, "ideologyCoordinates": {"x": 0, "y": 0, "z": 0},
+                },
+                {
+                    "dataName": "alien", "ideology": "Alien", "sortOrder": 0,
+                    "alien": True, "ideologyCoordinates": {"x": -2, "y": 0, "z": 0},
+                },
+            ],
+        )
         assembly = self.game / "TerraInvicta_Data" / "Managed" / "Assembly-CSharp.dll"
         assembly.parent.mkdir(parents=True, exist_ok=True)
         assembly.write_bytes(b"fixture assembly with TIGlobalConfig default 1.5f")
@@ -150,6 +245,23 @@ class RuntimeCatalogTests(unittest.TestCase):
             scenario_2003 / "TIOrgTemplate.json",
             [{"dataName": "Org_Test", "tier": 2}],
         )
+        write_json(
+            scenario_2003 / "TINationTemplate.json",
+            [
+                {"dataName": "SharedNation", "popGrowthModifier": 0.25},
+                {"dataName": "2003Nation", "popGrowthModifier": -0.15},
+            ],
+        )
+        write_json(
+            scenario_2003 / "TIRegionTemplate.json",
+            [
+                {"dataName": "2003Region", "mapRegionName": "map_2003Region", "environment": "Beneficiary"},
+            ],
+        )
+        write_json(
+            scenario_2003 / "TIStartTimeTemplate.json",
+            [{"dataName": "2003Start", "populationRegressionPeriod_years": 35}],
+        )
         broken = self.dlc / builder.SCENARIO_DIRECTORIES["BrokenEarthScenario"]
         write_json(
             broken / "TIEffectTemplate.json",
@@ -160,16 +272,41 @@ class RuntimeCatalogTests(unittest.TestCase):
             [{"dataName": "Org_Broken", "friendlyName": "Broken Org", "tier": 1}],
         )
         write_json(
-            broken / "TIDriveTemplate.json",
+            broken / "TIGlobalConfig.json",
+            {
+                "scenarioTags": ["PostApoc"],
+                "controlPointIPFactor": 0.62,
+                "nationalInvestmentArmyFactorHome": 0.2,
+                "numPrioritiesForLegitimize": 100,
+            },
+        )
+        write_json(
+            broken / "TINationTemplate.json",
+            [{"dataName": "BrokenNation", "popGrowthModifier": 0.4}],
+        )
+        write_json(
+            broken / "TIRegionTemplate.json",
             [
                 {
-                    "dataName": "drives_Test",
-                    "thrust_N": 250,
-                    "weightedBuildMaterials": {"metals": 1, "nobleMetals": 2},
+                    "dataName": "BrokenRegion",
+                    "mapRegionName": "map_BrokenRegion",
+                    "annualPopGrowthModifier": 1.21,
+                    "mineCapable": True,
                 }
             ],
         )
-        write_json(broken / "TIGlobalConfig.json", {"scenarioTags": ["PostApoc"]})
+        write_json(
+            broken / "TIStartTimeTemplate.json",
+            [{"dataName": "BrokenStart", "populationRegressionPeriod_years": 60}],
+        )
+        write_json(
+            broken / "TIDriveTemplate.json",
+            [{
+                "dataName": "drives_Test",
+                "thrust_N": 250,
+                "weightedBuildMaterials": {"nobleMetals": 2},
+            }],
+        )
 
     def test_loader_selects_exact_scenario_overlay_and_exposes_claim_config(self):
         modern = RuntimeCatalogs.load("ModernScenario", self.output)
@@ -195,6 +332,88 @@ class RuntimeCatalogTests(unittest.TestCase):
             1.5,
         )
         self.assertIs(CalculationDependencyError, CoreCalculationDependencyError)
+
+    def test_nation_development_packages_resolved_template_data_for_all_scenarios(self):
+        modern = RuntimeCatalogs.load("ModernScenario", self.output).nation_development
+        millennium = RuntimeCatalogs.load("2003Scenario", self.output).nation_development
+        broken = RuntimeCatalogs.load("BrokenEarthScenario", self.output).nation_development
+
+        self.assertEqual(modern["nationTemplates"]["ModernNation"]["popGrowthModifier"], 0.0)
+        self.assertEqual(modern["nationTemplates"]["SharedNation"]["popGrowthModifier"], 0.1)
+        self.assertEqual(millennium["nationTemplates"]["SharedNation"]["popGrowthModifier"], 0.25)
+        self.assertEqual(millennium["nationTemplates"]["2003Nation"]["popGrowthModifier"], -0.15)
+        self.assertNotIn("2003Nation", modern["nationTemplates"])
+        self.assertEqual(broken["nationTemplates"]["BrokenNation"]["popGrowthModifier"], 0.4)
+
+        defaulted = modern["regionTemplates"]["DefaultedRegion"]
+        self.assertEqual(
+            defaulted,
+            {
+                "dataName": "DefaultedRegion",
+                "mapRegionName": "map_DefaultedRegion",
+                "annualPopGrowthModifier": 0.0,
+                "environment": "Standard",
+                "mineCapable": False,
+                "oilCapable": False,
+            },
+        )
+        self.assertEqual(millennium["regionTemplates"]["2003Region"]["environment"], "Beneficiary")
+        self.assertEqual(broken["regionTemplates"]["BrokenRegion"]["annualPopGrowthModifier"], 1.21)
+        self.assertEqual(
+            broken["mapRegionTemplates"]["map_BrokenRegion"],
+            {"dataName": "map_BrokenRegion", "latitude": 27.5, "longitude": -108},
+        )
+        self.assertEqual(modern["startTimeTemplates"]["ModernStart"]["populationRegressionPeriod_years"], 20.0)
+        self.assertEqual(millennium["startTimeTemplates"]["2003Start"]["populationRegressionPeriod_years"], 35)
+        self.assertEqual(broken["startTimeTemplates"]["BrokenStart"]["populationRegressionPeriod_years"], 60)
+
+        self.assertEqual(modern["globalConfig"]["controlPointIPScaling"]["value"], 0.35)
+        self.assertEqual(broken["globalConfig"]["controlPointIPFactor"]["value"], 0.62)
+        self.assertEqual(broken["globalConfig"]["nationalInvestmentArmyFactorHome"]["value"], 0.2)
+        self.assertEqual(broken["globalConfig"]["numPrioritiesForLegitimize"]["value"], 100)
+        self.assertEqual(modern["globalConfig"]["economyPriorityPerCapitaIncomeChange_base"]["value"], 3.0)
+        self.assertEqual(modern["globalConfig"]["unityPublicOpinionBaseStrength"]["value"], 5.0)
+        self.assertEqual(modern["factionTemplates"]["ResistCouncil"]["ideologyName"], "resist")
+        self.assertEqual(modern["ideologyTemplates"]["resist"]["ideologyCoordinates"]["x"], 1)
+        self.assertEqual(
+            modern["advisorMission"],
+            {
+                "templateName": "Advise",
+                "automaticSuccess": True,
+                "movementRule": "MoveToTarget",
+                "persistentEffect": True,
+                "resolutionOrder": 0,
+                "resolutionSegmentsPerPhase": 2,
+                "cost": {"type": "TIMissionCost_Flat", "resource": "Influence", "value": 10.0},
+                "missionPhaseEvent": {
+                    "templateName": "CouncilorMissionUpdate",
+                    "initialRepeatType": "WeekToMonth",
+                    "repeatChanges": [{"campaignYearsGreaterThan": 0.325, "repeatType": "Semimonthly"}],
+                },
+            },
+        )
+
+        envelope = json.loads((self.output / "nation_development_catalog.json").read_text(encoding="utf-8"))
+        source_names = {source["name"] for source in envelope["sourceFiles"]}
+        self.assertTrue(
+            {
+                "base/TINationTemplate.json",
+                "base/TIRegionTemplate.json",
+                "base/TIMapRegionTemplate.json",
+                "base/TIStartTimeTemplate.json",
+                "base/TIFactionTemplate.json",
+                "base/TIFactionIdeologyTemplate.json",
+                "base/TIMissionTemplate.json",
+                "base/TITimeEventTemplate.json",
+                "2003Scenario/TINationTemplate.json",
+                "2003Scenario/TIRegionTemplate.json",
+                "2003Scenario/TIStartTimeTemplate.json",
+                "BrokenEarthScenario/TINationTemplate.json",
+                "BrokenEarthScenario/TIRegionTemplate.json",
+                "BrokenEarthScenario/TIStartTimeTemplate.json",
+                "TerraInvicta_Data/Managed/Assembly-CSharp.dll",
+            }.issubset(source_names)
+        )
 
     def test_unsupported_scenario_does_not_fall_back(self):
         with self.assertRaisesRegex(UnsupportedCatalogScenarioError, "Unsupported scenario"):

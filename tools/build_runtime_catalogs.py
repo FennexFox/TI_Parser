@@ -23,6 +23,152 @@ SCENARIO_DIRECTORIES = {
     "BrokenEarthScenario": Path("DarkSkies/Broken_Earth_Scenario/Templates"),
 }
 COMPILED_DEMOCRACY_DECREASE_TO_HOSTILE_CLAIM = 1.5
+PRIORITY_CONFIG_FIELDS = (
+    ("Economy", 0, "priority_ECO", 1.0),
+    ("Welfare", 1, "priority_WEL", 1.0),
+    ("Environment", 2, "priority_ENV", 1.0),
+    ("Knowledge", 3, "priority_KNO", 1.0),
+    ("Government", 4, "priority_DEM", 1.0),
+    ("Unity", 5, "priority_UNI", 2.0),
+    ("Oppression", 6, "priority_OPP", 1.0),
+    ("Funding", 7, "priority_DEV", 1.0),
+    ("Spoils", 8, "priority_SPO", 1.0),
+    ("Civilian_InitiateSpaceflightProgram", 9, "priority_FLI", 50.0),
+    ("LaunchFacilities", 10, "priority_BOO", 2.0),
+    ("MissionControl", 11, "priority_MC", 25.0),
+    ("Military_FoundMilitary", 12, "priority_FMI", 40.0),
+    ("Military", 13, "priority_MIL", 1.0),
+    ("Military_BuildArmy", 14, "priority_ARM", 60.0),
+    ("Military_BuildNavy", 15, "priority_NAV", 100.0),
+    ("Military_InitiateNuclearProgram", 16, "priority_NUC", 80.0),
+    ("Military_BuildNuclearWeapons", 17, "priority_NUK", 25.0),
+    ("Military_BuildSpaceDefenses", 18, "priority_DEF", 50.0),
+    ("Military_BuildSTOSquadron", 19, "priority_STO", 10.0),
+)
+COMPILED_NATION_GLOBALS: dict[str, int | float] = {
+    "numEcosForCoreEcoRegion": 1200,
+    "numEcosForCoreMiningRegion": 750,
+    "numEcosForCoreOilRegion": 500,
+    "numPrioritiesForLegitimize": 200,
+    "nationalInvestmentArmyFactorHome": 0.5,
+    "nationalInvestmentArmyFactorAway": 1.0,
+    "nationalInvestmentNavyFactor": 0.5,
+    "maxCombinedImpactFromHostileClaims": 16.0,
+    "badInequality": 4.0,
+    "severeInequality": 4.75,
+    "cohesionImpactPerKMtoPopCenter": 0.0025,
+    "maxDistanceImpactOnCohesion": -7.5,
+    "cohesionImpactMultiplierIfSeparatistMovement": 1.0,
+    "inequalityCohesionMultiplier": 2.25,
+    "populationCohesionImpactPower": 0.2,
+    "publicEliteIdeologicalDistanceCohesionMultiplier": 2.0,
+    "publicOpinionDispersionCohesionMultiplier": 6.0,
+    "controlPointIPScaling": 0.35,
+    "controlPointIPFactor": 1.0,
+    "controlPointCountScaling": 0.18,
+    "controlPointScalingDivisor": 1.09,
+    "coreEcoRegionGDPModifier": 1.25,
+    "coreResourceRegionGDPModifier": 1.25,
+    "colonyRegionGDPModifier": 0.5,
+    "coreMineralBuildMilitaryModifier": 0.05,
+    "federationGDPEconomyBonus": 0.01,
+    "populationBasedIPEffectScaling": -0.35,
+    "minPopulationForFirstArmy_millions": 5.0,
+    "minPopulationForAdditionalArmiesPer_millions": 25.0,
+    "welfarePriorityInequalityChange": -0.005,
+    "knowledgePriorityEducationIncrease": 0.005,
+    "governmentPriorityDemocracyIncrease": 0.01,
+    "economyPriorityPerCapitaIncomeChange_base": 3.0,
+    "economyPriorityPerCapitaIncomeChange_perCoreEcoRegion": 1.5,
+    "economyPriorityPerCapitaIncomeChange_perResourceRegion": 1.5,
+    "economyPriorityInequalityIncrease": 0.00015,
+    "economyPriorityInequalityIncrease_perResourceRegion": 0.0001,
+    "unityPriorityEducationChange": -0.001,
+    "unityBaseCohesionChange": 0.1,
+    "unityMinCohesionChange": 0.025,
+    "unityPublicOpinionBaseStrength": 5.0,
+    "religionUnityPublicOpinionBonusStrength": 3,
+    "fundingPriorityBaseIncomeIncrease": 10.0,
+    "maxMonthlyCohesionIncrease_normal": 0.1,
+    "maxMonthlyCohesionDecrease_normal": 0.1,
+    "maxMonthlyCohesionDecrease_cap": 0.25,
+    "maxMonthlyUnrestMovement_normal": 0.25,
+    "maxMonthlyUnrestMovement_rapidIncrease": 1.0,
+}
+NATION_DEVELOPMENT_TEMPLATE_FIELDS: dict[str, tuple[str, tuple[str, ...], dict[str, Any]]] = {
+    "nationTemplates": (
+        "TINationTemplate.json",
+        ("dataName", "popGrowthModifier"),
+        {"popGrowthModifier": 0.0},
+    ),
+    "regionTemplates": (
+        "TIRegionTemplate.json",
+        (
+            "dataName",
+            "mapRegionName",
+            "annualPopGrowthModifier",
+            "environment",
+            "mineCapable",
+            "oilCapable",
+        ),
+        {
+            "annualPopGrowthModifier": 0.0,
+            "environment": "Standard",
+            "mineCapable": False,
+            "oilCapable": False,
+        },
+    ),
+    "mapRegionTemplates": (
+        "TIMapRegionTemplate.json",
+        ("dataName", "latitude", "longitude"),
+        {},
+    ),
+    "startTimeTemplates": (
+        "TIStartTimeTemplate.json",
+        ("dataName", "populationRegressionPeriod_years"),
+        {"populationRegressionPeriod_years": 20.0},
+    ),
+    "bilateralTemplates": (
+        "TIBilateralTemplate.json",
+        ("dataName", "relationType", "region1", "region2", "projectUnlockName", "friendlyOnly"),
+        {},
+    ),
+    "factionTemplates": (
+        "TIFactionTemplate.json",
+        ("dataName", "ideologyName", "isAlien"),
+        {"isAlien": False},
+    ),
+    "ideologyTemplates": (
+        "TIFactionIdeologyTemplate.json",
+        (
+            "dataName", "alien", "undecided", "sortOrder", "willProxy", "willAppease",
+            "ideology", "ideologyCoordinates",
+        ),
+        {"alien": False, "undecided": False, "willProxy": -1, "willAppease": -1},
+    ),
+}
+NATION_DEVELOPMENT_TEMPLATE_DEFAULT_ORIGINS = {
+    "nationTemplates.popGrowthModifier": "TINationTemplate compiled field default",
+    "regionTemplates.annualPopGrowthModifier": "TIRegionTemplate compiled field default",
+    "regionTemplates.environment": "TIRegionTemplate compiled field initializer",
+    "regionTemplates.mineCapable": "TIRegionTemplate compiled field default",
+    "regionTemplates.oilCapable": "TIRegionTemplate compiled field default",
+    "startTimeTemplates.populationRegressionPeriod_years": "TIStartTimeTemplate compiled field initializer",
+    "factionTemplates.isAlien": "TIFactionTemplate compiled field default",
+    "ideologyTemplates.alien": "TIFactionIdeologyTemplate compiled field default",
+    "ideologyTemplates.undecided": "TIFactionIdeologyTemplate compiled field default",
+    "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field initializer",
+    "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field initializer",
+}
+PRIORITY_DIVERSITY_BONUSES = {
+    "Economy": 0.5,
+    "Welfare": 0.2,
+    "Environment": 0.2,
+    "Knowledge": 0.2,
+    "Government": 0.2,
+    "Unity": 0.2,
+    "Military": 0.2,
+}
 
 EFFECT_FIELDS = (
     "dataName",
@@ -458,6 +604,21 @@ def normalized_collection(
     return result
 
 
+def normalized_development_collection(
+    rows: dict[str, dict[str, Any]],
+    fields: Iterable[str],
+    compiled_defaults: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Resolve serialized template rows against audited CLR field defaults."""
+
+    result: dict[str, dict[str, Any]] = {}
+    for name in sorted(rows):
+        row = deepcopy(compiled_defaults)
+        row.update(normalize_fields(rows[name], fields))
+        result[name] = row
+    return result
+
+
 def resolved_override(
     base_rows: dict[str, dict[str, Any]],
     overlay_path: Path | None,
@@ -730,6 +891,151 @@ def build_nation_claim_catalog(
     )
 
 
+def _nation_development_payload(config: dict[str, Any]) -> dict[str, Any]:
+    priorities: dict[str, dict[str, Any]] = {}
+    for priority, enum_value, field, compiled_default in PRIORITY_CONFIG_FIELDS:
+        configured = config.get(field)
+        configured_is_number = isinstance(configured, (int, float)) and not isinstance(configured, bool)
+        value = configured if configured_is_number else compiled_default
+        priorities[priority] = {
+            "enumValue": enum_value,
+            "configField": field,
+            "investmentCost": float(value),
+            "valueOrigin": "TIGlobalConfig.json" if configured_is_number else "TIGlobalConfig compiled field initializer",
+        }
+    global_config: dict[str, dict[str, Any]] = {}
+    for field, compiled_default in COMPILED_NATION_GLOBALS.items():
+        configured = config.get(field)
+        configured_is_number = isinstance(configured, (int, float)) and not isinstance(configured, bool)
+        value = configured if configured_is_number else compiled_default
+        if isinstance(compiled_default, int):
+            value = int(value)
+        else:
+            value = float(value)
+        global_config[field] = {
+            "value": value,
+            "valueOrigin": "TIGlobalConfig.json" if configured_is_number else "TIGlobalConfig compiled field initializer",
+        }
+    return {
+        "priorities": priorities,
+        "globalConfig": global_config,
+        "controlPointPips": {"minimum": 0, "maximum": 3},
+        "diversityBonuses": dict(PRIORITY_DIVERSITY_BONUSES),
+        "templateDefaultOrigins": dict(NATION_DEVELOPMENT_TEMPLATE_DEFAULT_ORIGINS),
+    }
+
+
+def _advisor_mission_payload(templates_dir: Path) -> dict[str, Any]:
+    mission_path = templates_dir / "TIMissionTemplate.json"
+    event_path = templates_dir / "TITimeEventTemplate.json"
+    mission_rows = index_raw_rows(mission_path)
+    event_rows = index_raw_rows(event_path)
+    advise = mission_rows.get("Advise")
+    mission_event = event_rows.get("CouncilorMissionUpdate")
+    if not isinstance(advise, dict) or not isinstance(mission_event, dict):
+        raise CatalogError("Advise or CouncilorMissionUpdate template is missing")
+    resolution = advise.get("resolutionMethod")
+    cost = advise.get("cost")
+    if not isinstance(resolution, dict) or not isinstance(cost, dict):
+        raise CatalogError("Advise resolution or cost template is invalid")
+    orders = {
+        float(row.get("resolutionOrder", 0))
+        for row in mission_rows.values()
+        if isinstance(row.get("resolutionOrder", 0), (int, float))
+        and not isinstance(row.get("resolutionOrder", 0), bool)
+    }
+    repeat_changes = []
+    for change in mission_event.get("repeatChanges") or []:
+        condition = change.get("triggerCondition") if isinstance(change, dict) else None
+        if not isinstance(condition, dict):
+            continue
+        try:
+            threshold = float(condition.get("strValue"))
+        except (TypeError, ValueError):
+            raise CatalogError("CouncilorMissionUpdate repeat threshold is invalid") from None
+        repeat_changes.append({
+            "campaignYearsGreaterThan": threshold,
+            "repeatType": str(change.get("updateEventType") or ""),
+        })
+    return {
+        "templateName": "Advise",
+        "automaticSuccess": resolution.get("$type") == "TIMissionResolution_Automatic",
+        "movementRule": advise.get("movementRule"),
+        "persistentEffect": bool(advise.get("persistentEffect")),
+        "resolutionOrder": int(advise.get("resolutionOrder", 0)),
+        "resolutionSegmentsPerPhase": len(orders),
+        "cost": {
+            "type": cost.get("$type"),
+            "resource": cost.get("resourceType"),
+            "value": float(cost.get("value", 0.0)),
+        },
+        "missionPhaseEvent": {
+            "templateName": "CouncilorMissionUpdate",
+            "initialRepeatType": mission_event.get("eventType"),
+            "repeatChanges": repeat_changes,
+        },
+    }
+
+
+def build_nation_development_catalog(
+    templates_dir: Path,
+    scenario_dirs: dict[str, Path],
+    supported_scenarios: list[str],
+    assembly_path: Path,
+) -> dict[str, Any]:
+    config_path = templates_dir / "TIGlobalConfig.json"
+    base = _nation_development_payload(_global_config(config_path))
+    base["advisorMission"] = _advisor_mission_payload(templates_dir)
+    base_template_rows: dict[str, dict[str, dict[str, Any]]] = {}
+    for collection, (filename, fields, compiled_defaults) in NATION_DEVELOPMENT_TEMPLATE_FIELDS.items():
+        rows = index_raw_rows(templates_dir / filename)
+        base_template_rows[collection] = rows
+        base[collection] = normalized_development_collection(rows, fields, compiled_defaults)
+    sources = [
+        source_entry(config_path, "base/TIGlobalConfig.json"),
+        source_entry(templates_dir / "TIMissionTemplate.json", "base/TIMissionTemplate.json"),
+        source_entry(templates_dir / "TITimeEventTemplate.json", "base/TITimeEventTemplate.json"),
+        *scenario_metadata_sources(templates_dir, scenario_dirs),
+    ]
+    for filename, _fields, _compiled_defaults in NATION_DEVELOPMENT_TEMPLATE_FIELDS.values():
+        sources.append(source_entry(templates_dir / filename, f"base/{filename}"))
+    if assembly_path.is_file():
+        sources.append(source_entry(assembly_path, "TerraInvicta_Data/Managed/Assembly-CSharp.dll"))
+    overrides: dict[str, dict[str, Any]] = {}
+    for scenario, directory in scenario_dirs.items():
+        overlay_path = directory / "TIGlobalConfig.json"
+        merged_config = deepcopy(_global_config(config_path))
+        if overlay_path.is_file():
+            sources.append(source_entry(overlay_path, f"{scenario}/TIGlobalConfig.json"))
+            merged_config.update(_global_config(overlay_path))
+        selected = _nation_development_payload(merged_config)
+        changed: dict[str, Any] = {}
+        for collection in ("priorities", "globalConfig"):
+            rows = {name: row for name, row in selected[collection].items() if base[collection].get(name) != row}
+            if rows:
+                changed[collection] = rows
+        for collection, (filename, fields, compiled_defaults) in NATION_DEVELOPMENT_TEMPLATE_FIELDS.items():
+            template_overlay_path = directory / filename
+            if template_overlay_path.is_file():
+                sources.append(source_entry(template_overlay_path, f"{scenario}/{filename}"))
+            resolved = normalized_development_collection(
+                merge_raw_rows(base_template_rows[collection], template_overlay_path),
+                fields,
+                compiled_defaults,
+            )
+            rows = {name: row for name, row in resolved.items() if base[collection].get(name) != row}
+            if rows:
+                changed[collection] = rows
+        if changed:
+            overrides[scenario] = changed
+    return make_envelope(
+        base=base,
+        scenario_overrides=overrides,
+        source_files=sources,
+        supported_scenarios=supported_scenarios,
+    )
+
+
 def deterministic_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
 
@@ -786,6 +1092,12 @@ def build_all(
         ),
         "ship_catalog.json": build_ship_catalog(templates, resolved_scenario_dirs, supported_scenarios),
         "nation_claim_catalog.json": build_nation_claim_catalog(
+            templates,
+            resolved_scenario_dirs,
+            supported_scenarios,
+            resolved_assembly,
+        ),
+        "nation_development_catalog.json": build_nation_development_catalog(
             templates,
             resolved_scenario_dirs,
             supported_scenarios,

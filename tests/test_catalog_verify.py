@@ -67,6 +67,72 @@ class CatalogVerifyTests(unittest.TestCase):
             self.templates / "TIGlobalConfig.json",
             {"dataName": "globalConfig", "democracyDecreaseToMakeHostileClaim": 1.5},
         )
+        write_json(
+            self.templates / "TIMissionTemplate.json",
+            [{
+                "dataName": "Advise",
+                "persistentEffect": True,
+                "resolutionOrder": 0,
+                "resolutionMethod": {"$type": "TIMissionResolution_Automatic"},
+                "movementRule": "MoveToTarget",
+                "cost": {"$type": "TIMissionCost_Flat", "resourceType": "Influence", "value": 10},
+            }],
+        )
+        write_json(
+            self.templates / "TITimeEventTemplate.json",
+            [{"dataName": "CouncilorMissionUpdate", "eventType": "Semimonthly", "repeatChanges": []}],
+        )
+        write_json(
+            self.templates / "TINationTemplate.json",
+            [{"dataName": "Nation_Test", "popGrowthModifier": 0.0}],
+        )
+        write_json(
+            self.templates / "TIRegionTemplate.json",
+            [
+                {
+                    "dataName": "Region_Test",
+                    "mapRegionName": "map_Region_Test",
+                    "annualPopGrowthModifier": 0.5,
+                    "environment": "Standard",
+                    "mineCapable": False,
+                    "oilCapable": False,
+                }
+            ],
+        )
+        write_json(
+            self.templates / "TIMapRegionTemplate.json",
+            [{"dataName": "map_Region_Test", "latitude": 1.0, "longitude": 2.0}],
+        )
+        write_json(
+            self.templates / "TIStartTimeTemplate.json",
+            [{"dataName": "Start_Test", "populationRegressionPeriod_years": 20.0}],
+        )
+        write_json(
+            self.templates / "TIBilateralTemplate.json",
+            [{"dataName": "Adj_Test", "relationType": "PhysicalAdjacency", "region1": "map_Region_Test", "region2": "map_Region_Test"}],
+        )
+        write_json(
+            self.templates / "TIFactionTemplate.json",
+            [{"dataName": "ResistCouncil", "ideologyName": "resist", "isAlien": False}],
+        )
+        write_json(
+            self.templates / "TIFactionIdeologyTemplate.json",
+            [
+                {
+                    "dataName": "resist",
+                    "ideology": "Resist",
+                    "sortOrder": 1,
+                    "ideologyCoordinates": {"x": 1, "y": 0, "z": 0},
+                },
+                {
+                    "dataName": "undecided",
+                    "ideology": "Undecided",
+                    "sortOrder": 2,
+                    "undecided": True,
+                    "ideologyCoordinates": {"x": 0, "y": 0, "z": 0},
+                },
+            ],
+        )
         for collection, (filename, _kind, _fields) in runtime_builder.SHIP_COLLECTIONS.items():
             row = {
                 "dataName": f"{collection}_Test",
@@ -140,6 +206,14 @@ class CatalogVerifyTests(unittest.TestCase):
             self.assertTrue(check["payloadMatch"])
             self.assertTrue(check["sourceHashes"]["match"])
             self.assertGreater(check["rowsCompared"], 0)
+        nation_development_check = self._check(result, "nation_development-catalog-parity")
+        expected_rows = sum(
+            len(rows)
+            for rows in verifier.RuntimeCatalogs.load("ModernScenario", self.data).nation_development.values()
+            if isinstance(rows, dict)
+        )
+        self.assertEqual(nation_development_check["status"], "passed", nation_development_check)
+        self.assertEqual(nation_development_check["rowsCompared"], expected_rows)
         self.assertEqual(self._check(result, "mercury-solar")["status"], "unavailable")
         self.assertEqual(self._check(result, "saved-design-simulation")["status"], "unavailable")
         self.assertEqual(result["summary"]["failed"], 0)
