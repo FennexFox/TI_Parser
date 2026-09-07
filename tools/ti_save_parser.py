@@ -9667,7 +9667,6 @@ def calculate_nation_projection(
     all_advisors, available_advisors = projection_advisor_profiles(indexed, faction_id, faction, councilor_by_id)
     owner_bonuses: dict[int, dict[str, float]] = {}
     owner_bonus_bases: dict[int, dict[str, float]] = {}
-    hab_module_templates = load_hab_module_catalog()
     for cp in nation_control_points(indexed, nation):
         owner_id = ref_id(cp.get("faction"))
         owner = state_value_by_id(indexed, owner_id)
@@ -9679,7 +9678,6 @@ def calculate_nation_projection(
                 priorities,
                 catalogs.traits,
                 catalogs.effects,
-                hab_module_templates=hab_module_templates,
             )
     advisor_schedule = projection_advisor_mission_schedule(indexed, development)
     state = extract_nation_projection_state(

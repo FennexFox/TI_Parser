@@ -69,7 +69,9 @@
 - Passed focused validation: `81 passed, 13 subtests passed`.
 - Passed full validation: `287 passed, 12 skipped, 25 subtests passed`.
 - Strict plan validation passed for all 19 phase files.
-- The opt-in real-save suite was attempted with the only discovered local `.gz` candidate, but it is a Solar Expanse save rather than Terra Invicta JSON; the suite correctly failed before setup and no Terra Invicta real-save assertion was recorded in this run.
+- The opt-in real-save assertion passed against `C:\Users\techn\OneDrive\문서\My Games\TerraInvicta\Saves\ExitSave.gz`; the observed ocean-state distribution was `Yes: 236`, `No: 119`, and `Seasonal: 8`.
+- That run exposed and fixed two independent projection wiring defects: a stale unsupported `hab_module_templates` keyword and a test helper that passed the `(bonuses, baseBonuses)` tuple where extraction requires the first mapping.
+- The complete opt-in real-save suite still has a pre-existing `MissionControl` completion-event expectation that does not hold for this save; it is outside this phase's BuildNavy scope.
 
 ## Decision log
 

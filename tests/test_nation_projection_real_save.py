@@ -89,7 +89,7 @@ class NationProjectionRealSaveTests(unittest.TestCase):
             owner_id = parser.ref_id(cp.get("faction"))
             owner = parser.state_value_by_id(self.indexed, owner_id)
             if owner_id is not None and isinstance(owner, dict) and owner_id not in owner_bonuses:
-                owner_bonuses[owner_id] = parser.faction_priority_bonuses_for_projection(
+                owner_bonuses[owner_id], _ = parser.faction_priority_bonuses_for_projection(
                     self.indexed, owner_id, owner, development["priorities"], catalogs.traits, catalogs.effects
                 )
         state = parser.extract_nation_projection_state(
