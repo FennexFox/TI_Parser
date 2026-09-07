@@ -71,6 +71,8 @@ downgrade.
 | `nation.priority.build-army.complete` | verified | conditional | `TINationState.OnBuildArmyPriorityComplete` |
 | `nation.priority.build-army.placement` | verified | conditional | `TINationState.GetNextArmyRegion` |
 | `nation.priority.build-army.market` | verified | conditional | `TIGlobalValuesState.ModifyMarketValuesForArmyPriority` |
+| `nation.priority.build-navy.complete` | verified | exact | `TINationState.GetNextNavy`, `TIArmyState.AddNavy` |
+| `nation.priority.build-navy.market` | verified | conditional | `TIGlobalValuesState.ModifyMarketValuesForArmyPriority` |
 | `nation.asset.army.maintenance` | verified | exact | `TINationState.SetBaseInvestmentPoints_month` |
 | `nation.effect.context-expiration` | verified | exact | `TIFactionState.RemoveExpiredEffectContexts` |
 | `nation.priority.validation-trigger` | verified | exact | `TINationState.PossiblePriorityValidationChange` |
@@ -195,7 +197,6 @@ The following completion/downstream rules remain non-authoritative:
 - `nation.priority.launch-facilities.complete`
 - `nation.priority.found-military.complete`
 - `nation.priority.military.complete`
-- `nation.priority.build-navy.complete`
 - `nation.priority.initiate-nuclear-program.complete`
 - `nation.priority.build-nuclear-weapons.complete`
 - `nation.priority.build-space-defenses.complete`
@@ -242,8 +243,22 @@ coastal region, and have four control points; the three-control-point exception
 requires PCGDP of at least 40,000 and permits only the first navy. Coastal state
 comes from serialized `TIRegionState.oceanType`; `Yes` and `Seasonal` match
 `TIRegionState.isCoastal`, while missing or unsupported values remain unknown
-in UI and fail closed during projection extraction. BuildNavy completion itself
-remains unsupported.
+in UI and fail closed during projection extraction.
+
+BuildNavy completion follows `TINationState.GetNextNavy`,
+`TINationState.OnBuildSealiftPriorityComplete`, and `TIArmyState.AddNavy`.
+It counts Human armies by control point, scans control points descending for
+an unconverted army, and selects the first Standard Human army in saved order
+at that position. Conversion changes deployment to Naval while preserving army
+identity, strength, home/current region, faction, and control point. Live
+non-naval/naval counts and subsequent maintenance follow that conversion.
+Naval armies remain military assets for BuildArmy capacity, placement, and
+unrest suppression; the existing public non-naval count does not define those
+mechanics. Destroyed references are excluded consistently from live selection.
+The ordinary completion boundary consumes cost and revalidates priority weights.
+Its market mutation uses the same independent mean-input branch as BuildArmy,
+under `nation.priority.build-navy.market`; it is not exact RNG replay.
+Movement, combat, accessibility graphs, and notifications are not simulated.
 
 MissionControl accepts either the nation's own spaceflight program or its
 federation's program. `TIFederationState.SetSpaceProgramValue` derives that flag

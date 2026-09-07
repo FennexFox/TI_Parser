@@ -22,6 +22,7 @@ def context(*, priorities=None, diversity=None):
         "Funding": {"enumValue": 7, "investmentCost": 1},
         "MissionControl": {"enumValue": 11, "investmentCost": 1},
         "Military_BuildArmy": {"enumValue": 14, "investmentCost": 1},
+        "Military_BuildNavy": {"enumValue": 15, "investmentCost": 1},
     }
     values = {
         "nationalInvestmentArmyFactorHome": {"value": 0.5},
@@ -1011,6 +1012,72 @@ class NationProjectionTransactionTests(unittest.TestCase):
         self.assertEqual(event["homeRegionId"], 2)
         self.assertEqual(event["controlPointPosition"], 1)
         self.assertAlmostEqual(projection._base_ip(initial, context()), expected_before - 0.5)
+
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+        Rules.NATION_PRIORITY_BUILD_NAVY_MARKET.id,
+        Rules.NATION_ASSET_ARMY_MAINTENANCE.id,
+        evidence="stateTransition",
+    )
+    def test_build_navy_selects_human_standard_army_and_next_tick_maintenance(self):
+        initial = state(pips={"Military_BuildNavy": 3}, cp_count=4, progress={"Military_BuildNavy": 1.99})
+        # Army list order is intentional: only Human armies count, the highest
+        # CP with an unconverted Human army wins, then its first Standard army.
+        initial.armies = [
+            projection.ArmyProjectionState(10, 1.0, "Standard", 1, 1, 3, 7, "AlienInvader"),
+            projection.ArmyProjectionState(11, 1.0, "Naval", 1, 1, 3, 7, "Human"),
+            projection.ArmyProjectionState(12, 1.0, "Standard", 1, 1, 2, 7, "Human"),
+            projection.ArmyProjectionState(13, 1.0, "Standard", 1, 1, 3, 7, "Human"),
+            projection.ArmyProjectionState(14, 1.0, "Standard", 1, 1, 3, 7, "Human"),
+            projection.ArmyProjectionState(15, 1.0, "Standard", 1, 1, 4, 7, "Human", destroyed=True),
+        ]
+        initial.army_count = 4  # Existing public convention: all non-naval armies.
+        initial.navy_count = 1
+        before_unrest_effect = projection._own_army_unrest_impact(initial, context())
+        build_army_valid_before = projection._priority_valid(initial, "Military_BuildArmy", context())
+        transaction = projection._run_investment_transaction(initial, context(), 1, 0)
+        events = [row for row in transaction["completions"] if row["priority"] == "Military_BuildNavy"]
+        self.assertEqual([event["armyId"] for event in events], [13, 14])
+        self.assertEqual([army.id for army in initial.armies], [10, 11, 12, 13, 14, 15])
+        self.assertEqual([army.deployment_type for army in initial.armies], ["Standard", "Naval", "Standard", "Naval", "Naval", "Standard"])
+        self.assertEqual((initial.army_count, initial.navy_count), (2, 3))
+        self.assertEqual(len(initial.standard_armies), 5)
+        self.assertFalse(build_army_valid_before)  # The one-region nation is already at army capacity.
+        self.assertEqual(projection._priority_valid(initial, "Military_BuildArmy", context()), build_army_valid_before)
+        self.assertAlmostEqual(projection._own_army_unrest_impact(initial, context()), before_unrest_effect)
+        self.assertAlmostEqual(projection._army_maintenance(initial, context()), 4.0)
+        for cp in initial.control_points.values():
+            cp.pips = {"Knowledge": 3}
+        next_transaction = projection._run_investment_transaction(initial, context(), 2, 0)
+        self.assertAlmostEqual(
+            next_transaction["baseInvestmentPointsMonth"],
+            transaction["baseInvestmentPointsMonth"] - 1.0,
+        )
+        market = [row for row in transaction["ruleExecutions"] if row["ruleId"] == Rules.NATION_PRIORITY_BUILD_NAVY_MARKET.id]
+        self.assertEqual([row["effectiveCoverage"] for row in market], ["expected", "expected"])
+        self.assertEqual(initial.metric_tracker.evidence["nation.armies"].coverage, "exact")
+        self.assertEqual(initial.metric_tracker.evidence["nation.navies"].coverage, "exact")
+
+    @mechanic_rule_test(
+        Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+        Rules.NATION_PRIORITY_BUILD_NAVY_MARKET.id,
+        evidence="stateTransition",
+    )
+    def test_build_navy_stops_after_final_convertible_army_and_revalidates(self):
+        initial = state(pips={"Military_BuildNavy": 3}, cp_count=4, progress={"Military_BuildNavy": 1.99})
+        initial.armies = [
+            projection.ArmyProjectionState(10, 1.0, "Standard", 1, 1, 4, 7, "Human"),
+            projection.ArmyProjectionState(11, 1.0, "Standard", 1, 1, 2, 7, "Human"),
+        ]
+        initial.army_count = 2
+        transaction = projection._run_investment_transaction(initial, context(), 1, 0)
+
+        events = [row for row in transaction["completions"] if row["priority"] == "Military_BuildNavy"]
+        self.assertEqual([event["armyId"] for event in events], [10, 11])
+        self.assertEqual((initial.army_count, initial.navy_count), (0, 2))
+        self.assertFalse(projection._priority_valid(initial, "Military_BuildNavy", context()))
+        trigger = next(row for row in transaction["ruleExecutions"] if row["ruleId"] == Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id)
+        self.assertIn("Military_BuildNavyBecameInvalid", trigger["triggerReasons"])
 
     @mechanic_rule_test(Rules.NATION_POPULATION_ANNUAL_GROWTH.id, evidence="expectedValue")
     def test_population_formula_uses_deterministic_mean_input_not_trajectory_expectation(self):

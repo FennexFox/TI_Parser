@@ -78,14 +78,14 @@ class NationProjectionRealSaveTests(unittest.TestCase):
             diagnostics=True,
         )["plans"][0]
 
-    def _projection_state_context(self):
+    def _projection_state_context_for(self, nation_id, nation):
         catalogs = parser.calculation_catalogs(self.indexed, "nation-projection")
         development = catalogs.nation_development
         faction_id, faction = parser.find_faction_state(self.indexed, None)
         _, summaries = parser.councilor_summary_maps(self.indexed, catalogs.traits)
         all_advisors, _ = parser.projection_advisor_profiles(self.indexed, faction_id, faction, summaries)
         owner_bonuses = {}
-        for cp in parser.nation_control_points(self.indexed, self.nation):
+        for cp in parser.nation_control_points(self.indexed, nation):
             owner_id = parser.ref_id(cp.get("faction"))
             owner = parser.state_value_by_id(self.indexed, owner_id)
             if owner_id is not None and isinstance(owner, dict) and owner_id not in owner_bonuses:
@@ -93,17 +93,20 @@ class NationProjectionRealSaveTests(unittest.TestCase):
                     self.indexed, owner_id, owner, development["priorities"], catalogs.traits, catalogs.effects
                 )
         state = parser.extract_nation_projection_state(
-            self.indexed, self.nation_id, self.nation, all_advisors, owner_bonuses, development
+            self.indexed, nation_id, nation, all_advisors, owner_bonuses, development
         )
         context = projection.ProjectionContext(
             faction_id=faction_id,
             priorities=development["priorities"],
             global_config=development["globalConfig"],
             diversity_bonuses=development["diversityBonuses"],
-            nation_template=development["nationTemplates"][self.nation["templateName"]],
+            nation_template=development["nationTemplates"][nation["templateName"]],
             start_template=development["startTimeTemplates"][parser.first_value(self.indexed, "TITimeState")["templateName"]],
         )
         return state, context, development
+
+    def _projection_state_context(self):
+        return self._projection_state_context_for(self.nation_id, self.nation)
 
     @staticmethod
     def _expected_mc_candidates(state, context):
@@ -158,6 +161,42 @@ class NationProjectionRealSaveTests(unittest.TestCase):
                 selected = position
                 selected_count = count
         return selected
+
+    @staticmethod
+    def _expected_navy_target(state):
+        human = [army for army in state.armies if army.army_type == "Human"]
+        totals = {}
+        navies = {}
+        for army in human:
+            totals[army.control_point_position] = totals.get(army.control_point_position, 0) + 1
+            if army.deployment_type == "Naval":
+                navies[army.control_point_position] = navies.get(army.control_point_position, 0) + 1
+        for position in range(max(totals, default=-1), -1, -1):
+            if totals.get(position, 0) > navies.get(position, 0):
+                return next((
+                    army for army in human
+                    if army.control_point_position == position and army.deployment_type == "Standard"
+                ), None)
+        return None
+
+    def _eligible_navy_state_context(self):
+        candidates = [(self.nation_id, self.nation)]
+        candidates.extend(
+            (parser.raw_state_id(entry), entry.get("Value") or {})
+            for entry in parser.type_entries(self.indexed, "TINationState")
+            if parser.raw_state_id(entry) != self.nation_id
+        )
+        for nation_id, nation in candidates:
+            if nation_id is None or not isinstance(nation, dict):
+                continue
+            try:
+                state, context, development = self._projection_state_context_for(nation_id, nation)
+            except (KeyError, parser.CalculationDependencyError):
+                continue
+            target = self._expected_navy_target(state)
+            if target is not None and projection._priority_valid(state, "Military_BuildNavy", context):
+                return state, context, development, target
+        raise unittest.SkipTest("The selected real save has no nation eligible to build a navy")
 
     def test_default_plan_reports_active_dormant_and_fail_closed_blockers(self):
         result = parser.calculate_nation_projection(
@@ -264,6 +303,36 @@ class NationProjectionRealSaveTests(unittest.TestCase):
             ui_validity["Military_BuildNavy"]["valid"],
             projection._priority_valid(state, "Military_BuildNavy", context),
         )
+
+    def test_build_navy_observes_real_save_target_with_synthetic_near_completion(self):
+        """The target is observed from the save; only the near-completion progress is synthetic."""
+        state, context, development, expected = self._eligible_navy_state_context()
+        cost = float(development["priorities"]["Military_BuildNavy"]["investmentCost"])
+        state.progress["Military_BuildNavy"] = max(0.0, cost - 1e-9)
+        policies = tuple(
+            projection.ControlPointPolicy(cp.id, {"Military_BuildNavy": 3})
+            for cp in state.control_points.values()
+        )
+        result = projection.run_projection(
+            state,
+            projection.PriorityPlan(
+                "real-save-navy-synthetic-near-completion",
+                (projection.PlanSegment(None, None, policies, None),),
+            ),
+            context,
+            days=1,
+            details=True,
+        )
+
+        event = next(event for event in result["completionEvents"] if event["priority"] == "Military_BuildNavy")
+        self.assertEqual(event["armyId"], expected.id)
+        self.assertEqual(event["controlPointPosition"], expected.control_point_position)
+        self.assertEqual(event["effectiveCoverage"], "exact")
+        market = [
+            row for row in result["ruleExecutions"]
+            if row["ruleId"] == "nation.priority.build-navy.market"
+        ]
+        self.assertEqual([row["effectiveCoverage"] for row in market], ["expected"])
 
     def test_current_mc_and_army_paths_resolve_from_save_state_without_hardcoded_ids(self):
         output = parser.calculate_nation_projection(

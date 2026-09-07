@@ -198,13 +198,16 @@ inactive gap, and required Influence; future resource availability, target
 invalidation, detention, and competing orders remain held fixed.
 
 Projection mechanics are fail closed. Economy, Knowledge, Government, Welfare,
-Unity, Funding, Mission Control, and BuildArmy have supported paths; MC and
+Unity, Funding, Mission Control, BuildArmy, and BuildNavy have supported paths; MC and
 BuildArmy coverage is resolved from the actual execution path. Economy keeps
 GDP, inequality, and region effects authoritative even when only its independent
 world-market branch is unavailable. Unity requires a plan-level
 `stochasticPolicy.unityPublicOpinion: "meanPath"` opt-in. Its direct cohesion,
 education, and legitimize branches remain exact when their own inputs are exact,
 while CP-owner propaganda is a sequential conditional expected transition.
+BuildNavy converts the DLL-selected Human Standard army to Naval without creating
+a new army. It preserves identity and location, updates live maintenance and
+eligibility, and keeps its mean-input market effect independently covered.
 
 Population and Unity both use `coverage: expected`, `provenance: meanPath`, and
 `expectationGuarantee: false`, but they are not the same approximation.
@@ -222,7 +225,7 @@ Unsupported priorities or newly activated blocking dependencies return an `incom
 plan and are excluded from comparison/ranking. A completed handler, its cost,
 and CP fallback/cache repair remain in the authoritative prefix; an unsupported
 next allocation/effect is never executed. A missing independent Economy or
-BuildArmy market value instead leaves nation/faction scopes complete and marks
+BuildArmy/BuildNavy market value instead leaves nation/faction scopes complete and marks
 only `scopeStatus.worldMarket` incomplete. `runtimeStop` identifies the exact
 timestamp/day/transaction/phase, trigger, authoritative mutations, unsupported
 next step, state context, affected metrics, and attempted transaction.

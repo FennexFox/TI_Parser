@@ -42,6 +42,7 @@
 17. [Unity public opinion and direct effects](17-unity-public-opinion.md)
 18. [Real-save verification, documentation, and Graphify](18-economy-unity-verification.md)
 19. [Exact BuildNavy coastal validity](19-build-navy-validity.md)
+20. [BuildNavy completion simulation](20-build-navy-completion.md)
 
 ## Phase Dependencies
 
@@ -68,6 +69,8 @@
 - Phase 19 depends on phase 11's shared validity contract and phase 18's verified extraction state. It closes BuildNavy validity using the audited DLL predicate and serialized region ocean state.
 
 ## Source Of Truth Decisions
+
+- Phase 20 depends on phase 19 and extends its validity-only scope to audited navy conversion, maintenance, and market consequences.
 
 - `00-master-plan.md` is the phased implementation plan source of truth.
 - Phase files in this directory define phase-local scope and validation.
@@ -111,4 +114,4 @@
 - Economy market mutation is modeled only as a deterministic mean-input branch; coupled climate/environment feedback remains held fixed.
 - Unity public opinion is a sequential conditional-expected approximation, not exact RNG replay or the expectation of the complete nonlinear trajectory.
 - Monte Carlo, optimizer, actual CP-count mutation, and market/public-opinion goal metrics remain out of scope.
-- BuildNavy completion behavior is unchanged; phase 19 changes only shared validity and the state required to evaluate it.
+- Phase 19 changes only shared BuildNavy validity; phase 20 extends that work to completion simulation.

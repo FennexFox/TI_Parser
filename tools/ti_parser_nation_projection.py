@@ -48,6 +48,7 @@ STATIC_COMPLETIONS = {
     "Welfare": ("exact", Rules.NATION_PRIORITY_WELFARE_COMPLETE),
     "MissionControl": ("exact", Rules.NATION_PRIORITY_MISSION_CONTROL_COMPLETE),
     "Military_BuildArmy": ("exact", Rules.NATION_PRIORITY_BUILD_ARMY_COMPLETE),
+    "Military_BuildNavy": ("exact", Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE),
     "Funding": ("exact", Rules.NATION_PRIORITY_FUNDING_COMPLETE),
 }
 PRIORITY_BONUS_EFFECT_CONTEXTS = {
@@ -185,6 +186,7 @@ class ArmyProjectionState:
     current_region_id: int
     control_point_position: int
     faction_id: int | None
+    army_type: str
     operations: float = 0.0
     destroyed: bool = False
 
@@ -318,7 +320,13 @@ class NationProjectionState:
 
     @property
     def standard_armies(self) -> list[ArmyProjectionState]:
-        return [army for army in self.armies if not army.destroyed and army.deployment_type.casefold() != "naval"]
+        """Live military assets, including those with naval deployment.
+
+        The game treats a Navy as a deployment upgrade of the same standard
+        army for army-capacity, placement, and occupation calculations.
+        ``army_count`` remains the public non-naval summary instead.
+        """
+        return [army for army in self.armies if not army.destroyed]
 
 
 @dataclass(frozen=True)
@@ -1075,6 +1083,38 @@ def _next_army_control_point_position(state: NationProjectionState) -> int:
             selected = position
             selected_count = count
     return selected
+
+
+def _next_navy(state: NationProjectionState, context: ProjectionContext) -> ArmyProjectionState | None:
+    """Reproduce ``TINationState.GetNextNavy`` without changing army identity/order."""
+
+    # The DLL validates before inspecting its army list.  Keep this local guard
+    # even though the completion loop has already performed the same check.
+    if not _priority_valid(state, "Military_BuildNavy", context):
+        return None
+    human_armies = [army for army in state.armies if not army.destroyed and army.army_type == "Human"]
+    if not human_armies:
+        return None
+    selected_position = max(army.control_point_position for army in human_armies)
+    totals: dict[int, int] = {}
+    navies: dict[int, int] = {}
+    for army in human_armies:
+        totals[army.control_point_position] = totals.get(army.control_point_position, 0) + 1
+        if army.deployment_type == "Naval":
+            navies[army.control_point_position] = navies.get(army.control_point_position, 0) + 1
+    for position in range(selected_position, -1, -1):
+        if totals.get(position, 0) > navies.get(position, 0):
+            selected_position = position
+            break
+    else:
+        return None
+    return next(
+        (
+            army for army in human_armies
+            if army.control_point_position == selected_position and army.deployment_type == "Standard"
+        ),
+        None,
+    )
 
 
 def _ideology_coordinates(row: Mapping[str, Any]) -> tuple[float, float, float] | None:
@@ -1980,6 +2020,7 @@ def _apply_completion(
                 current_region_id=target.id,
                 control_point_position=position,
                 faction_id=cp.owner_faction_id,
+                army_type="Human",
                 operations=0.0,
             ))
             state.army_count += 1
@@ -1996,6 +2037,31 @@ def _apply_completion(
             ))
             if trace is not None:
                 trace.append({"operation": "createArmy", "homeRegionId": target.id, "controlPointPosition": position})
+    elif priority == "Military_BuildNavy":
+        used.add(Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id)
+        target = _next_navy(state, context)
+        if target is None:
+            execution["noAssetCreated"] = True
+        else:
+            target.deployment_type = "Naval"
+            state.army_count -= 1
+            state.navy_count += 1
+            used.add(Rules.NATION_ASSET_ARMY_MAINTENANCE.id)
+            used.add(Rules.NATION_PRIORITY_BUILD_NAVY_MARKET.id)
+            execution.update({
+                "armyId": target.id,
+                "controlPointPosition": target.control_point_position,
+            })
+            metric_outputs.extend(("nation.armies", "nation.navies"))
+            execution["dependencies"].append(Rules.NATION_PRIORITY_BUILD_NAVY_MARKET.id)
+            child_executions.append(_apply_market_mean_path(
+                state,
+                Rules.NATION_PRIORITY_BUILD_NAVY_MARKET,
+                metals_increase=0.00015,
+                noble_metals_increase=0.000075,
+            ))
+            if trace is not None:
+                trace.append({"operation": "upgradeArmyToNavy", "armyId": target.id, "controlPointPosition": target.control_point_position})
     else:
         raise ProjectionRuntimeStop(
             f"Priority completion is not implemented: {priority}",
@@ -2463,6 +2529,8 @@ def _run_investment_transaction(
             allocation_inputs.extend(("nation.missionControl", "nation.gdp", "nation.education"))
         elif priority == "Military_BuildArmy":
             allocation_inputs.extend(("nation.population", "nation.armies"))
+        elif priority == "Military_BuildNavy":
+            allocation_inputs.extend(("nation.population", "nation.gdp", "nation.armies", "nation.navies"))
         state.metric_tracker.record(
             allocation_metric,
             inputs=allocation_inputs,

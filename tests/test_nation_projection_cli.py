@@ -151,6 +151,48 @@ class NationProjectionCliTests(unittest.TestCase):
         self.assertEqual(dependency["kind"], "save-field")
         self.assertEqual(dependency["name"], "oceanType")
 
+    def test_projection_army_type_is_required_for_build_navy(self):
+        indexed = ti_save_parser.build_index({"gamestates": {}})
+        with (
+            patch.object(ti_save_parser, "scenario_template_name", return_value="ModernScenario"),
+            self.assertRaises(ti_save_parser.CalculationDependencyError) as caught,
+        ):
+            ti_save_parser._required_projection_army_type(
+                indexed, {}, "armyType", source="save-field",
+                rule_id=ti_save_parser.Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+            )
+
+        dependency = caught.exception.missing_dependencies[0]
+        self.assertEqual(dependency["kind"], "save-field")
+        self.assertEqual(dependency["name"], "armyType")
+        self.assertEqual(dependency["context"], ti_save_parser.Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id)
+
+        with self.assertRaises(ti_save_parser.CalculationDependencyError):
+            ti_save_parser._required_projection_army_type(
+                indexed, {"armyType": "UnknownArmy"}, "armyType", source="save-field",
+                rule_id=ti_save_parser.Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+            )
+
+    def test_projection_deployment_type_is_required_for_build_navy(self):
+        indexed = ti_save_parser.build_index({"gamestates": {}})
+        with self.assertRaises(ti_save_parser.CalculationDependencyError):
+            ti_save_parser._required_projection_deployment_type(
+                indexed, {}, "deploymentType", source="save-field",
+                rule_id=ti_save_parser.Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+            )
+        self.assertEqual(
+            ti_save_parser._required_projection_deployment_type(
+                indexed, {"deploymentType": "Naval"}, "deploymentType", source="save-field",
+                rule_id=ti_save_parser.Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+            ),
+            "Naval",
+        )
+        with self.assertRaises(ti_save_parser.CalculationDependencyError):
+            ti_save_parser._required_projection_deployment_type(
+                indexed, {"deploymentType": "UnknownDeployment"}, "deploymentType", source="save-field",
+                rule_id=ti_save_parser.Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

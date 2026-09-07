@@ -8703,7 +8703,7 @@ def calculate_nation_ui(
         development_catalog,
         population=population,
         allowed_armies=allowed_armies,
-        current_armies=armies["standardArmies"],
+        current_armies=armies["count"],
         army_count=armies["count"],
         navy_count=armies["navies"],
         per_capita_gdp=pc_gdp,
@@ -9166,6 +9166,52 @@ def _required_projection_string(
     return value
 
 
+def _required_projection_army_type(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> str:
+    """Require one of the audited ``ArmyType`` enum names for Navy selection."""
+    value = _required_projection_string(
+        indexed, source_value, field, source=source, rule_id=rule_id,
+    )
+    if value not in {"Human", "AlienMegafauna", "AlienInvader"}:
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="army type is not a supported ArmyType enum value; no projection default is permitted",
+        )
+    return value
+
+
+def _required_projection_deployment_type(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> str:
+    """Require one of the audited ``DeploymentType`` enum names."""
+    value = _required_projection_string(
+        indexed, source_value, field, source=source, rule_id=rule_id,
+    )
+    if value not in {"None", "Standard", "Naval"}:
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="deployment type is not a supported DeploymentType enum value; no projection default is permitted",
+        )
+    return value
+
+
 def _required_projection_ocean_type(
     indexed: IndexedState,
     source_value: dict[str, Any],
@@ -9492,7 +9538,10 @@ def extract_nation_projection_state(
         army = state_value_by_id(indexed, army_id)
         if army_id is None or not isinstance(army, dict):
             raise _projection_dependency_error(indexed, source="save-reference", field="nation.armies", rule_id=Rules.NATION_ASSET_ARMY_MAINTENANCE.id, reason="army reference cannot be resolved")
-        deployment = str(army.get("deploymentType") or "")
+        deployment = _required_projection_deployment_type(
+            indexed, army, "deploymentType", source="save-field",
+            rule_id=Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id,
+        )
         if deployment == "Naval" and not army.get("destroyed"):
             navy_count += 1
         armies.append(nation_projection_layer.ArmyProjectionState(
@@ -9503,6 +9552,7 @@ def extract_nation_projection_state(
             current_region_id=int(ref_id(army.get("currentRegion")) or -1),
             control_point_position=int(_required_projection_number(indexed, army, "controlPointIdx", source="save-field", rule_id=Rules.NATION_PRIORITY_BUILD_ARMY_PLACEMENT.id)),
             faction_id=ref_id(army.get("faction")),
+            army_type=_required_projection_army_type(indexed, army, "armyType", source="save-field", rule_id=Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE.id),
             operations=float(len(army.get("currentOperations") or [])),
             destroyed=bool(army.get("destroyed")),
         ))

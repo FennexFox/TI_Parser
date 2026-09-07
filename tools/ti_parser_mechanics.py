@@ -467,8 +467,21 @@ class Rules:
         coverage_resolver_id=CoverageResolvers.MARKET_MEAN_INPUT.id,
     )
     NATION_PRIORITY_BUILD_NAVY_COMPLETE = MechanicRule(
-        "nation.priority.build-navy.complete", 1, "Upgrade an army to naval deployment and retain maintenance.",
-        "partial", "unsupported", ("TINationState.OnBuildSealiftPriorityComplete",),
+        "nation.priority.build-navy.complete", 2,
+        "Upgrade the DLL-selected Human Standard army to naval deployment while retaining identity and maintenance.",
+        "verified", "exact", ("TINationState.OnBuildSealiftPriorityComplete", "TINationState.GetNextNavy", "TIArmyState.AddNavy"),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_build_navy_selects_human_standard_army_and_next_tick_maintenance",),
+    )
+    NATION_PRIORITY_BUILD_NAVY_MARKET = MechanicRule(
+        "nation.priority.build-navy.market", 1,
+        "Project the Navy completion Metals and Noble Metals mutation as an independent mean-input branch.",
+        "verified", "expected",
+        ("TINationState.OnBuildSealiftPriorityComplete", "TIGlobalValuesState.ModifyMarketValuesForArmyPriority"),
+        deterministic=False,
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_build_navy_selects_human_standard_army_and_next_tick_maintenance",),
+        coverage_mode="conditional",
+        allowed_coverages=CoverageResolvers.MARKET_MEAN_INPUT.allowed_coverages,
+        coverage_resolver_id=CoverageResolvers.MARKET_MEAN_INPUT.id,
     )
     NATION_ASSET_ARMY_MAINTENANCE = MechanicRule(
         "nation.asset.army.maintenance", 1,
@@ -652,6 +665,7 @@ REGISTRY = {rule.id: rule for rule in (
     Rules.NATION_PRIORITY_BUILD_ARMY_PLACEMENT,
     Rules.NATION_PRIORITY_BUILD_ARMY_MARKET,
     Rules.NATION_PRIORITY_BUILD_NAVY_COMPLETE,
+    Rules.NATION_PRIORITY_BUILD_NAVY_MARKET,
     Rules.NATION_ASSET_ARMY_MAINTENANCE,
     Rules.NATION_PRIORITY_INITIATE_NUCLEAR_COMPLETE,
     Rules.NATION_PRIORITY_BUILD_NUCLEAR_COMPLETE,
