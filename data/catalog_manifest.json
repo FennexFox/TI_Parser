@@ -1,5 +1,5 @@
 {
-  "bundleFingerprint": "3de68b5754b471f792553ef0261d7db7f2368d2606d9814b40f0624f0dcf7a20",
+  "bundleFingerprint": "430d7e9dfe4ce9062d4b3dc2ec0509852872797fc4b9b37ac560e804c1aaf599",
   "catalogs": {
     "effect_catalog.json": {
       "payloadFingerprint": "b913b2d945d30d2b63e12844cc3a02bfb1ceabd5ca992a4662d3cf4f44380ebe",
@@ -9,12 +9,12 @@
     "nation_claim_catalog.json": {
       "payloadFingerprint": "7ef5efe1e90e9be7469ca29a16921fdd502282281ca75a19d65b5b2d3fc8c510",
       "schemaVersion": 1,
-      "sha256": "2178103106ac40d14981f918a52121dab12b357c85fe6b857912c347be29aa84"
+      "sha256": "c8393bba45e1385aa2dba19b93df638e80873a4a64d4d78c3dda664619d19df1"
     },
     "nation_development_catalog.json": {
-      "payloadFingerprint": "bc8dff547ea5a44e0fec59769dac95720051fb396fad2c0bb10540998bf0f956",
+      "payloadFingerprint": "be71db7b44575f895afb63e8a0219dccc718bf3ce4a1363f7235178c4821d40a",
       "schemaVersion": 1,
-      "sha256": "34b26fca27932208bd6cd36142e310d5ac0f0e4a5c2f8298ac6f71ec1ca90d13"
+      "sha256": "c43a8a8f792bdfa410355e23dd7e090c6f42974720751157e47222edecfaa8fa"
     },
     "org_catalog.json": {
       "payloadFingerprint": "62c90f9eeb27c558ad99ee7997eb1f36ec49d2c85ab9e19da43537d612135cca",
