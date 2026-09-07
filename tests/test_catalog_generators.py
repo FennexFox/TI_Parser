@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import build_module_catalog as mc
 import build_location_catalog as lc
 import build_research_catalog as rc
+import build_runtime_catalogs as runtime_builder
 import catalog_utils as cu
 import ti_parser_catalogs as runtime_catalogs
 
@@ -25,6 +26,23 @@ def write_text(path: Path, content: str) -> None:
 
 
 class CatalogGeneratorTests(unittest.TestCase):
+    def test_nation_development_rejects_boolean_numeric_config_values(self):
+        payload = runtime_builder._nation_development_payload({
+            "priority_MC": True,
+            "coreEcoRegionGDPModifier": False,
+        })
+
+        self.assertEqual(payload["priorities"]["MissionControl"]["investmentCost"], 25.0)
+        self.assertEqual(
+            payload["priorities"]["MissionControl"]["valueOrigin"],
+            "TIGlobalConfig compiled field initializer",
+        )
+        self.assertEqual(payload["globalConfig"]["coreEcoRegionGDPModifier"]["value"], 1.25)
+        self.assertEqual(
+            payload["globalConfig"]["coreEcoRegionGDPModifier"]["valueOrigin"],
+            "TIGlobalConfig compiled field initializer",
+        )
+
     def test_catalog_writers_emit_utf8_lf_with_one_trailing_newline(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -64,6 +64,14 @@ class ProjectionCoverageTests(unittest.TestCase):
         self.assertEqual(row["coverage"], "unsupported")
         self.assertEqual(row["blockers"], ["nation.priority.economy.complete"])
 
+    def test_record_replaces_stale_reverse_dependencies(self):
+        tracker = MetricDependencyTracker()
+        tracker.record("nation.output", inputs=("nation.inputA",))
+        tracker.record("nation.output", inputs=("nation.inputB",))
+
+        self.assertEqual(tracker.descendants(("nation.inputA",)), set())
+        self.assertEqual(tracker.descendants(("nation.inputB",)), {"nation.output"})
+
     def test_deepcopy_is_transaction_safe(self):
         tracker = MetricDependencyTracker()
         tracker.ensure("nation.gdp")

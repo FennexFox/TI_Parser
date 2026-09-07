@@ -190,6 +190,8 @@ def _row_count(domain: str, payload: Mapping[str, Any]) -> int:
         )
     if domain == "research":
         return sum(len(payload.get(name) or {}) for name in ("techs", "projects"))
+    if domain == "nation_development":
+        return sum(len(rows) for rows in payload.values() if isinstance(rows, Mapping))
     return 0
 
 

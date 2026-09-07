@@ -60,7 +60,7 @@
 - py -3 -m unittest tests.test_nation_projection tests.test_nation_projection_cli tests.test_mechanics_registry
 - py -3 -m unittest tests.test_catalog_generators tests.test_runtime_catalogs tests.test_package_only_runtime
 - py -3 -m unittest tests.test_nation_projection_real_save
-- $env:TI_PARSER_REAL_SAVE = 'C:\Users\techn\OneDrive\문서\My Games\TerraInvicta\Saves\ExitSave.gz'; py -3 -m unittest tests.test_nation_projection_real_save; Remove-Item Env:TI_PARSER_REAL_SAVE
+- $env:TI_PARSER_REAL_SAVE = '<local-save-path>'; py -3 -m unittest tests.test_nation_projection_real_save; Remove-Item Env:TI_PARSER_REAL_SAVE
 - py -3 -m unittest discover -s tests -p 'test_*.py'
 - graphify update
 - graphify diagnose multigraph --graph graphify-out/graph.json --json

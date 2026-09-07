@@ -450,6 +450,23 @@ class PackageOnlyRuntimeTests(unittest.TestCase):
                 self.assertEqual(dependency["kind"], expected_kind)
                 self.assertEqual(dependency["name"], expected_name)
 
+    def test_nation_development_catalog_is_loaded_only_for_nation_commands(self) -> None:
+        indexed = ti.build_index(
+            {
+                "gamestates": {
+                    "TITimeState": [state(1, {"scenarioMetaTemplateName": "ModernScenario"})],
+                }
+            }
+        )
+        with patch.object(ti, "load_runtime_catalogs", return_value=object()) as load_catalogs:
+            ti.calculation_catalogs(indexed, "topbar")
+            unrelated_files = tuple(load_catalogs.call_args.kwargs["catalog_files"])
+            ti.calculation_catalogs(indexed, "nation-ui")
+            nation_files = tuple(load_catalogs.call_args.kwargs["catalog_files"])
+
+        self.assertNotIn("nation_development_catalog.json", unrelated_files)
+        self.assertIn("nation_development_catalog.json", nation_files)
+
 
 if __name__ == "__main__":
     unittest.main()

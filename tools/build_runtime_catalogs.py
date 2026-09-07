@@ -895,24 +895,26 @@ def _nation_development_payload(config: dict[str, Any]) -> dict[str, Any]:
     priorities: dict[str, dict[str, Any]] = {}
     for priority, enum_value, field, compiled_default in PRIORITY_CONFIG_FIELDS:
         configured = config.get(field)
-        value = configured if isinstance(configured, (int, float)) else compiled_default
+        configured_is_number = isinstance(configured, (int, float)) and not isinstance(configured, bool)
+        value = configured if configured_is_number else compiled_default
         priorities[priority] = {
             "enumValue": enum_value,
             "configField": field,
             "investmentCost": float(value),
-            "valueOrigin": "TIGlobalConfig.json" if isinstance(configured, (int, float)) else "TIGlobalConfig compiled field initializer",
+            "valueOrigin": "TIGlobalConfig.json" if configured_is_number else "TIGlobalConfig compiled field initializer",
         }
     global_config: dict[str, dict[str, Any]] = {}
     for field, compiled_default in COMPILED_NATION_GLOBALS.items():
         configured = config.get(field)
-        value = configured if isinstance(configured, (int, float)) else compiled_default
+        configured_is_number = isinstance(configured, (int, float)) and not isinstance(configured, bool)
+        value = configured if configured_is_number else compiled_default
         if isinstance(compiled_default, int):
             value = int(value)
         else:
             value = float(value)
         global_config[field] = {
             "value": value,
-            "valueOrigin": "TIGlobalConfig.json" if isinstance(configured, (int, float)) else "TIGlobalConfig compiled field initializer",
+            "valueOrigin": "TIGlobalConfig.json" if configured_is_number else "TIGlobalConfig compiled field initializer",
         }
     return {
         "priorities": priorities,

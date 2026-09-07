@@ -299,6 +299,14 @@ class RuntimeCatalogTests(unittest.TestCase):
             broken / "TIStartTimeTemplate.json",
             [{"dataName": "BrokenStart", "populationRegressionPeriod_years": 60}],
         )
+        write_json(
+            broken / "TIDriveTemplate.json",
+            [{
+                "dataName": "drives_Test",
+                "thrust_N": 250,
+                "weightedBuildMaterials": {"nobleMetals": 2},
+            }],
+        )
 
     def test_loader_selects_exact_scenario_overlay_and_exposes_claim_config(self):
         modern = RuntimeCatalogs.load("ModernScenario", self.output)

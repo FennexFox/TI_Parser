@@ -134,18 +134,20 @@ def calculation_catalogs(indexed: IndexedState, context: str) -> RuntimeCatalogs
                 reason="save does not identify a canonical supported scenario",
             )
         )
+    catalog_files = [
+        "effect_catalog.json",
+        "trait_catalog.json",
+        "org_catalog.json",
+        "research_catalog.json",
+        "ship_catalog.json",
+        "nation_claim_catalog.json",
+    ]
+    if context in {"nation-ui", "nation-projection"}:
+        catalog_files.append("nation_development_catalog.json")
     try:
         return load_runtime_catalogs(
             scenario,
-            catalog_files=(
-                "effect_catalog.json",
-                "trait_catalog.json",
-                "org_catalog.json",
-                "research_catalog.json",
-                "ship_catalog.json",
-                "nation_claim_catalog.json",
-                "nation_development_catalog.json",
-            ),
+            catalog_files=catalog_files,
         )
     except UnsupportedCatalogScenarioError as exc:
         raise CalculationDependencyError(
@@ -8797,7 +8799,7 @@ def faction_priority_bonuses_for_projection(
     effect_templates: dict[str, dict[str, Any]],
     *,
     apply_effects: bool = True,
-) -> dict[str, float]:
+) -> tuple[dict[str, float], dict[str, float]]:
     bonuses = {name: 0.0 for name in priorities}
     for councilor_id in faction_councilor_ids(faction):
         councilor = state_value_by_id(indexed, councilor_id) or {}
@@ -8816,16 +8818,18 @@ def faction_priority_bonuses_for_projection(
                 priority = str(row.get("priority") or "")
                 if priority in bonuses:
                     bonuses[priority] += as_float(row.get("bonus"), 0.0)
+    hab_module_templates = load_hab_module_catalog()
     for _, hab in faction_hab_states(indexed, faction):
-        for priority, value in hab_leo_priority_bonuses(hab, hab_module_records(indexed, hab, load_hab_module_catalog())).items():
+        for priority, value in hab_leo_priority_bonuses(hab, hab_module_records(indexed, hab, hab_module_templates)).items():
             if priority in bonuses:
                 bonuses[priority] += as_float(value, 0.0)
+    base_bonuses = dict(bonuses)
     if apply_effects:
         contexts = faction_effect_contexts(indexed, faction_id)
         for priority, context_name in PRIORITY_BONUS_EFFECT_CONTEXTS.items():
             if priority in bonuses:
                 bonuses[priority] = apply_effect_modifiers(contexts, effect_templates, context_name, bonuses[priority])
-    return bonuses
+    return bonuses, base_bonuses
 
 
 def faction_effect_expirations_for_projection(indexed: IndexedState) -> dict[int, dict[str, datetime]]:
@@ -8846,8 +8850,12 @@ def faction_effect_expirations_for_projection(indexed: IndexedState) -> dict[int
             for effect_name, raw_expiration in raw_expirations.items():
                 expiration = ti_datetime(raw_expiration)
                 if expiration is None:
-                    raise nation_projection_layer.ProjectionInputError(
-                        f"Faction effect {effect_name!r} has an invalid expiration timestamp"
+                    raise _projection_dependency_error(
+                        indexed,
+                        source="save-field",
+                        field="TIEffectsState.factionEffectExpirations",
+                        rule_id=Rules.NATION_EFFECT_CONTEXT_EXPIRATION.id,
+                        reason=f"faction effect {effect_name!r} has an invalid expiration timestamp",
                     )
                 parsed[str(effect_name)] = expiration
             result[faction_id] = parsed
@@ -8958,7 +8966,13 @@ def projection_advisor_mission_schedule(
     repeat_changes: list[tuple[float, str, bool]] = []
     for index, row in enumerate(raw_changes):
         if not isinstance(row, dict):
-            continue
+            raise _projection_dependency_error(
+                indexed,
+                source="catalog-field",
+                field="advisorMission.missionPhaseEvent.repeatChanges",
+                rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+                reason="mission-phase repeat change row is not an object",
+            )
         threshold = row.get("campaignYearsGreaterThan")
         updated_type = row.get("repeatType")
         saved_trigger = triggered[index] if index < len(triggered) else False
@@ -9080,6 +9094,26 @@ def _required_projection_bool(
             field=field,
             rule_id=rule_id,
             reason="required boolean value is absent or invalid; no projection default is permitted",
+        )
+    return value
+
+
+def _required_projection_string(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> str:
+    value = source_value.get(field)
+    if not isinstance(value, str) or not value:
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="required non-empty string value is absent or invalid; no projection default is permitted",
         )
     return value
 
@@ -9256,7 +9290,13 @@ def extract_nation_projection_state(
         region_id = ref_id(region_ref)
         region = state_value_by_id(indexed, region_id)
         if region_id is None or not isinstance(region, dict):
-            raise nation_projection_layer.ProjectionInputError("Target nation contains an unresolved region reference")
+            raise _projection_dependency_error(
+                indexed,
+                source="save-reference",
+                field="nation.regions",
+                rule_id=Rules.NATION_POPULATION_MONTHLY_GROWTH.id,
+                reason="target nation contains an unresolved region reference",
+            )
         template_name = str(region.get("templateName") or "")
         template = _required_projection_catalog_row(
             indexed, region_templates, template_name,
@@ -9290,6 +9330,30 @@ def extract_nation_projection_state(
         resource_region = _required_projection_bool(indexed, region, "resourceRegion", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM.id)
         oil_region = _required_projection_bool(indexed, region, "oilRegion", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM.id)
         core_region = _required_projection_bool(indexed, region, "coreEconomicRegion", source="save-field", rule_id=Rules.NATION_PRIORITY_BUILD_ARMY_PLACEMENT.id)
+        latitude_field = f"mapRegionTemplates.{map_name}.latitude"
+        longitude_field = f"mapRegionTemplates.{map_name}.longitude"
+        environment_field = f"regionTemplates.{template_name}.environment"
+        latitude = _required_projection_number(
+            indexed,
+            {latitude_field: map_template.get("latitude")},
+            latitude_field,
+            source="catalog-field",
+            rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+        )
+        longitude = _required_projection_number(
+            indexed,
+            {longitude_field: map_template.get("longitude")},
+            longitude_field,
+            source="catalog-field",
+            rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+        )
+        environment = _required_projection_string(
+            indexed,
+            {environment_field: template.get("environment")},
+            environment_field,
+            source="catalog-field",
+            rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
+        )
         region_map_names[region_id] = map_name
         regions[region_id] = nation_projection_layer.RegionProjectionState(
             id=region_id,
@@ -9301,10 +9365,10 @@ def extract_nation_projection_state(
             gdp=None,
             region_order=region_order,
             template_name=template_name,
-            latitude=float(map_template["latitude"]),
-            longitude=float(map_template["longitude"]),
+            latitude=latitude,
+            longitude=longitude,
             annual_population_growth_modifier=_required_projection_number(indexed, region, "annualPopGrowthModifier", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
-            environment=str(template.get("environment")),
+            environment=environment,
             xenoforming_level=_required_projection_number(indexed, xeno, "xenoformingLevel", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
             nuclear_detonations=int(_required_projection_number(indexed, region, "nuclearDetonations", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id)),
             colony=colony,
@@ -9320,13 +9384,18 @@ def extract_nation_projection_state(
             mission_control_cap=None,
             welfare_colony_counter=int(_required_projection_number(indexed, region, "accumulatedDecolonizeTriggers", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id)),
             economy_region_counters={
-                key: int(region[field])
+                key: int(_required_projection_number(
+                    indexed,
+                    region,
+                    field,
+                    source="save-field",
+                    rule_id=Rules.NATION_PRIORITY_ECONOMY_MARKET.id,
+                ))
                 for key, field in (
                     ("coreEconomic", "accumulatedCoreEconomyRegionTriggers"),
                     ("mining", "accumulatedCoreMiningRegionTriggers"),
                     ("oil", "accumulatedCoreOilRegionTriggers"),
                 )
-                if isinstance(region.get(field), (int, float)) and not isinstance(region.get(field), bool)
             },
         )
         defense = state_value_by_id(indexed, ref_id(region.get("spaceDefenseFacility"))) or {}
@@ -9391,19 +9460,36 @@ def extract_nation_projection_state(
             repeating_advisors.append(all_advisors[councilor_id])
     advisor_policy = tuple(dict.fromkeys(repeating_advisors))
     phase_assignments = tuple(dict.fromkeys(current_phase_assignments))
-    admin = income_layer.adviser_attribute_bonus_from_values([profile.administration for profile in current_advisors])
     economy_score = _required_projection_number(indexed, nation, "economyScore", source="save-field", rule_id=Rules.NATION_IP_ECONOMY_SCORE.id)
-    unrest_factor = 1.0 - max(as_float(nation.get("unrest"), 0.0) - 2.0, 0.0) / 10.0
-    denominator = economy_score * (1.0 + admin) * unrest_factor
+    gdp_modifiers = {
+        name: _required_projection_number(
+            indexed,
+            {
+                f"globalConfig.{name}.value": (
+                    global_config.get(name, {}).get("value")
+                    if isinstance(global_config.get(name), dict)
+                    else None
+                )
+            },
+            f"globalConfig.{name}.value",
+            source="catalog-field",
+            rule_id=Rules.NATION_IP_BASE.id,
+        )
+        for name in (
+            "coreEcoRegionGDPModifier",
+            "coreResourceRegionGDPModifier",
+            "colonyRegionGDPModifier",
+        )
+    }
     weights: dict[int, float] = {}
     for region in regions.values():
         weight = region.population_millions
         if region.core_economic_region:
-            weight *= float(global_config["coreEcoRegionGDPModifier"]["value"])
+            weight *= gdp_modifiers["coreEcoRegionGDPModifier"]
         if region.resource_region or region.oil_region:
-            weight *= float(global_config["coreResourceRegionGDPModifier"]["value"])
+            weight *= gdp_modifiers["coreResourceRegionGDPModifier"]
         if region.colony:
-            weight *= float(global_config["colonyRegionGDPModifier"]["value"])
+            weight *= gdp_modifiers["colonyRegionGDPModifier"]
         weights[region.id] = weight
     total_weight = sum(weights.values())
     occupation_penalty = sum((weights[region.id] / total_weight) * float(region.occupation_fraction or 0.0) for region in regions.values()) if total_weight else 0.0
@@ -9418,6 +9504,14 @@ def extract_nation_projection_state(
     global_state = first_value(indexed, "TIGlobalValuesState") or {}
     temperature = temperature_anomaly_components(global_state)
     hostile_ids = {region_id for region_id in (ref_id(value) for value in nation.get("hostileClaims", [])) if region_id in regions}
+    if not control_points:
+        raise _projection_dependency_error(
+            indexed,
+            source="save-reference",
+            field="nation.controlPoints",
+            rule_id=Rules.NATION_PERIODIC_CONTROL_POINTS.id,
+            reason="target nation has no resolvable control point; the executive faction cannot be determined",
+        )
     executive_cp = max(control_points.values(), key=lambda value: value.position)
     raw_public_opinion = nation.get("publicOpinion")
     public_opinion = {
@@ -9521,19 +9615,19 @@ def calculate_nation_projection(
     all_advisors, available_advisors = projection_advisor_profiles(indexed, faction_id, faction, councilor_by_id)
     owner_bonuses: dict[int, dict[str, float]] = {}
     owner_bonus_bases: dict[int, dict[str, float]] = {}
+    hab_module_templates = load_hab_module_catalog()
     for cp in nation_control_points(indexed, nation):
         owner_id = ref_id(cp.get("faction"))
         owner = state_value_by_id(indexed, owner_id)
         if owner_id is not None and isinstance(owner, dict) and owner_id not in owner_bonuses:
-            owner_bonuses[owner_id] = faction_priority_bonuses_for_projection(indexed, owner_id, owner, priorities, catalogs.traits, catalogs.effects)
-            owner_bonus_bases[owner_id] = faction_priority_bonuses_for_projection(
+            owner_bonuses[owner_id], owner_bonus_bases[owner_id] = faction_priority_bonuses_for_projection(
                 indexed,
                 owner_id,
                 owner,
                 priorities,
                 catalogs.traits,
                 catalogs.effects,
-                apply_effects=False,
+                hab_module_templates=hab_module_templates,
             )
     advisor_schedule = projection_advisor_mission_schedule(indexed, development)
     state = extract_nation_projection_state(

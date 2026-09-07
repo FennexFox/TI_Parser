@@ -21,7 +21,8 @@ class NationProjectionRealSaveTests(unittest.TestCase):
         if not cls.save_path.is_file():
             raise unittest.SkipTest("TI_PARSER_REAL_SAVE does not point to a file")
         cls.indexed = parser.build_index(parser.load_save(cls.save_path))
-        preferred_id, preferred = parser.match_raw_state(cls.indexed, "TINationState", "CAL")
+        found = parser.match_raw_state(cls.indexed, "TINationState", "CAL")
+        preferred_id, preferred = found if found else (None, None)
 
         def viable(nation):
             if not isinstance(nation, dict) or not nation.get("controlPoints") or not nation.get("regions"):
@@ -78,7 +79,7 @@ class NationProjectionRealSaveTests(unittest.TestCase):
         )["plans"][0]
 
     def _projection_state_context(self):
-        catalogs = parser.calculation_catalogs(self.indexed, "nation-projection-real-save")
+        catalogs = parser.calculation_catalogs(self.indexed, "nation-projection")
         development = catalogs.nation_development
         faction_id, faction = parser.find_faction_state(self.indexed, None)
         _, summaries = parser.councilor_summary_maps(self.indexed, catalogs.traits)
@@ -150,7 +151,7 @@ class NationProjectionRealSaveTests(unittest.TestCase):
                 counts[army.control_point_position] += 1
         maximum = max(counts.values(), default=0)
         selected = positions[-1]
-        selected_count = selected
+        selected_count = counts[selected]
         for position in reversed(positions):
             count = counts[position]
             if count < maximum and count < selected_count:

@@ -58,7 +58,7 @@
 - py -3 -m unittest tests.test_mechanics_registry
 - py -3 -m unittest tests.test_catalog_generators tests.test_runtime_catalogs tests.test_package_only_runtime
 - py -3 tools/ti_save_parser.py catalog-verify --catalog nation-development
-- py -3 C:/Users/techn/.codex/skills/phased-issue-implementation/scripts/phase_plan_helper.py validate --strict --plan-dir docs/plan/nation_projection
+- strict phase-plan validation over `docs/plan/nation_projection` using the phased-issue-implementation `phase_plan_helper.py validate --strict` helper from your local skills install
 
 ## Manual smoke tests
 

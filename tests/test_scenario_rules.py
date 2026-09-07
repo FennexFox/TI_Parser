@@ -153,7 +153,7 @@ class ScenarioRuleTests(unittest.TestCase):
             "totalWeightsForControlPoint": 3,
             "numPrioritiesWithWeight": 1,
         })
-        development = ti.calculation_catalogs(indexed, "test").nation_development
+        development = ti.calculation_catalogs(indexed, "nation-ui").nation_development
         validity = ti._nation_ui_priority_validity(
             indexed,
             nation,

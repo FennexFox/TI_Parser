@@ -14,7 +14,7 @@ COVERAGE_LEVELS = frozenset({"exact", "expected", "aggregateOnly", "unsupported"
 COVERAGE_MODES = frozenset({"static", "conditional"})
 AUDIT_STATUSES = frozenset({"verified", "partial", "pending", "deprecated"})
 TEST_EVIDENCE_TYPES = frozenset({"expectedValue", "stateTransition", "ordering", "coverageBranch", "contract"})
-ASSEMBLY_CSHARP_SHA256 = "5ec67c601a6ce39d985aa9830a99faa9844aee7d7e12ec5e28ea46ff020ba982"
+ASSEMBLY_CSHARP_SHA256 = "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5"
 REGISTRY_CONTRACT_TEST_ID = (
     "tests.test_mechanics_registry.MechanicsRegistryTests."
     "test_real_save_rule_contracts_are_registered"

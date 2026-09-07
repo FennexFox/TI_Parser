@@ -107,6 +107,11 @@ class MetricDependencyTracker:
             raise ValueError(f"Unknown metric coverage: {coverage}")
         output_names = _names(outputs)
         input_names = tuple(str(value) for value in inputs)
+        previous_inputs = {
+            name: set(self.evidence[name].depends_on)
+            for name in output_names
+            if name in self.evidence
+        }
         snapshots = {
             name: self.evidence.get(name, MetricEvidence())
             for name in input_names
@@ -135,6 +140,15 @@ class MetricDependencyTracker:
             )
             self.evidence[output] = evidence
             written[output] = evidence
+            old_inputs = previous_inputs.get(output, set())
+            stale_inputs = old_inputs.difference(input_names)
+            for input_name in stale_inputs:
+                targets = self.reverse_dependencies.get(input_name)
+                if targets is None:
+                    continue
+                targets.discard(output)
+                if not targets:
+                    del self.reverse_dependencies[input_name]
             for input_name in input_names:
                 self.reverse_dependencies.setdefault(input_name, set()).add(output)
         if len(written) == 1:
