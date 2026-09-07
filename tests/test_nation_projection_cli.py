@@ -137,6 +137,20 @@ class NationProjectionCliTests(unittest.TestCase):
         self.assertEqual(dependency["kind"], "save-reference")
         self.assertEqual(dependency["name"], "nation.regions")
 
+    def test_projection_ocean_type_rejects_unknown_enum(self):
+        indexed = ti_save_parser.build_index({"gamestates": {}})
+        with (
+            patch.object(ti_save_parser, "scenario_template_name", return_value="ModernScenario"),
+            self.assertRaises(ti_save_parser.CalculationDependencyError) as caught,
+        ):
+            ti_save_parser._required_projection_ocean_type(
+                indexed, {"oceanType": "Lake"}, "oceanType",
+                source="save-field", rule_id="nation.priority.validity",
+            )
+        dependency = caught.exception.missing_dependencies[0]
+        self.assertEqual(dependency["kind"], "save-field")
+        self.assertEqual(dependency["name"], "oceanType")
+
 
 if __name__ == "__main__":
     unittest.main()

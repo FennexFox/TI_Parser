@@ -190,6 +190,40 @@ class ScenarioRuleTests(unittest.TestCase):
         self.assertIsNone(unknown_diagnostics["consistent"])
         self.assertIn("MissionControl", unknown_diagnostics["unknownPriorities"])
 
+    def test_nation_ui_build_navy_uses_serialized_ocean_type(self):
+        indexed = self._build_indexed("BrokenEarthScenario")
+        nation = core.state_value_by_id(indexed, 21)
+        control_point = core.state_value_by_id(indexed, 31)
+        region = core.state_value_by_id(indexed, 41)
+        assert nation is not None and control_point is not None and region is not None
+        nation.update({
+            "military": True,
+            "numControlPoints": 4,
+        })
+        region["oceanType"] = "Seasonal"
+        control_point["controlPointPriorities"] = {"Military_BuildNavy": 1}
+        development = ti.calculation_catalogs(indexed, "nation-ui").nation_development
+        validity = ti._nation_ui_priority_validity(
+            indexed, nation, development,
+            population=100.0, allowed_armies=1, current_armies=1,
+            army_count=1, navy_count=0, per_capita_gdp=10_000.0,
+        )
+        self.assertTrue(validity["Military_BuildNavy"].valid)
+
+        region["oceanType"] = "No"
+        self.assertFalse(ti._nation_ui_priority_validity(
+            indexed, nation, development,
+            population=100.0, allowed_armies=1, current_armies=1,
+            army_count=1, navy_count=0, per_capita_gdp=10_000.0,
+        )["Military_BuildNavy"].valid)
+
+        region.pop("oceanType")
+        self.assertIsNone(ti._nation_ui_priority_validity(
+            indexed, nation, development,
+            population=100.0, allowed_armies=1, current_armies=1,
+            army_count=1, navy_count=0, per_capita_gdp=10_000.0,
+        )["Military_BuildNavy"].valid)
+
     def test_inactive_or_invalid_national_ip_multiplier_is_ignored(self):
         inactive = self._build_indexed(
             "BrokenEarthScenario",

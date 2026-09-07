@@ -86,7 +86,14 @@ import ti_parser_hab as hab_layer
 import ti_parser_org as org_layer
 import ti_parser_nation_projection as nation_projection_layer
 from ti_parser_mechanics import Rules
-from ti_parser_nation_validity import PriorityValidityResult, evaluate_priority_validity
+from ti_parser_nation_validity import (
+    MIN_CONTROL_POINTS_FOR_NAVY,
+    MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION,
+    PCGDP_FOR_NAVY_EXCEPTION,
+    PriorityValidityResult,
+    can_build_navy,
+    evaluate_priority_validity,
+)
 from ti_parser_snapshot import SnapshotConfig
 
 
@@ -195,9 +202,6 @@ DEFAULT_CP_MAINTENANCE_GDP_SCALE = 1_000_000_000.0
 CP_MAINTENANCE_CAMPAIGN_START_GDP_FACTOR = 6.26e-06
 MIN_POPULATION_FOR_FIRST_ARMY_MILLIONS = 5.0
 MIN_POPULATION_FOR_ADDITIONAL_ARMIES_PER_MILLIONS = 25.0
-MIN_CONTROL_POINTS_FOR_NAVY = 4
-MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION = 3
-PCGDP_FOR_NAVY_EXCEPTION = 40000.0
 STANDARD_GRAVITY_MPS2 = 9.806650161743164
 GRAVITATIONAL_CONSTANT = 6.67384e-11
 ASTRONOMICAL_UNIT_KM = 149_597_870.7
@@ -8444,6 +8448,9 @@ def _nation_ui_priority_validity(
     population: float,
     allowed_armies: int,
     current_armies: int,
+    army_count: int | None = None,
+    navy_count: int | None = None,
+    per_capita_gdp: float | None = None,
 ) -> dict[str, PriorityValidityResult]:
     priorities = development.get("priorities") if isinstance(development.get("priorities"), dict) else {}
     global_config = development.get("globalConfig") if isinstance(development.get("globalConfig"), dict) else {}
@@ -8501,6 +8508,23 @@ def _nation_ui_priority_validity(
     boost_known = regions_complete and bool(region_values) and all(
         isinstance(region.get("boostPerYear_dekatons"), (int, float)) for region in region_values
     )
+    ocean_types = [region.get("oceanType") for region in region_values]
+    coastal_regions = (
+        sum(ocean_type in {"Yes", "Seasonal"} for ocean_type in ocean_types)
+        if regions_complete and all(ocean_type in {"No", "None", "Yes", "Seasonal"} for ocean_type in ocean_types)
+        else None
+    )
+    build_navy = can_build_navy({
+        "military": nation.get("military") if isinstance(nation.get("military"), bool) else None,
+        "armyCount": army_count,
+        "navyCount": navy_count,
+        "coastalRegions": coastal_regions,
+        "controlPointCount": nation.get("numControlPoints"),
+        "perCapitaGDP": per_capita_gdp,
+        "minControlPointsForNavy": MIN_CONTROL_POINTS_FOR_NAVY,
+        "minControlPointsForNavyException": MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION,
+        "pcgdpForNavyException": PCGDP_FOR_NAVY_EXCEPTION,
+    })
     view = {
         "democracy": nation.get("democracy"),
         "hasHostileRegion": bool(hostile) if hostile_known else None,
@@ -8510,6 +8534,7 @@ def _nation_ui_priority_validity(
         "missionControlHasCapacity": mission_capacity,
         "allowedArmies": allowed_armies if regions_complete else None,
         "currentArmies": current_armies,
+        "canBuildNavy": build_navy,
         "military": nation.get("military") if isinstance(nation.get("military"), bool) else None,
         "nuclearProgram": nation.get("nuclearProgram") if isinstance(nation.get("nuclearProgram"), bool) else None,
         "canBuildSpaceDefenses": nation.get("canBuildSpaceDefenses") if isinstance(nation.get("canBuildSpaceDefenses"), bool) else None,
@@ -8653,9 +8678,6 @@ def calculate_nation_ui(
     capital = ref_summary(indexed, nation.get("capital"))
     armies = nation_army_details(indexed, nation, military_tech_level)
     allowed_armies = nation_allowed_armies(indexed, nation, population)
-    can_have_navy = nation_can_have_navy(nation, pc_gdp)
-    max_navies = allowed_armies if can_have_navy else 0
-    navies_can_build = max(0, armies["count"] - armies["navies"]) if can_have_navy else 0
     control_points = nation_control_points(indexed, nation)
     priority_validity = _nation_ui_priority_validity(
         indexed,
@@ -8664,7 +8686,14 @@ def calculate_nation_ui(
         population=population,
         allowed_armies=allowed_armies,
         current_armies=armies["standardArmies"],
+        army_count=armies["count"],
+        navy_count=armies["navies"],
+        per_capita_gdp=pc_gdp,
     )
+    navy_validity = priority_validity.get("Military_BuildNavy")
+    can_have_navy = navy_validity.valid if navy_validity is not None else None
+    max_navies = allowed_armies if can_have_navy else (0 if can_have_navy is False else None)
+    navies_can_build = max(0, armies["count"] - armies["navies"]) if can_have_navy else (0 if can_have_navy is False else None)
     control_point_weights = _nation_ui_control_point_weights(control_points, priority_validity)
     representative_cp = first_control_point(indexed, nation) or {}
     total_weight = int(as_float(representative_cp.get("totalWeightsForControlPoint"), 0.0))
@@ -9118,6 +9147,28 @@ def _required_projection_string(
     return value
 
 
+def _required_projection_ocean_type(
+    indexed: IndexedState,
+    source_value: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    rule_id: str,
+) -> str:
+    value = _required_projection_string(
+        indexed, source_value, field, source=source, rule_id=rule_id,
+    )
+    if value not in {"No", "None", "Yes", "Seasonal"}:
+        raise _projection_dependency_error(
+            indexed,
+            source=source,
+            field=field,
+            rule_id=rule_id,
+            reason="required ocean type is unsupported; no projection default is permitted",
+        )
+    return value
+
+
 def _required_projection_mapping(
     indexed: IndexedState,
     source_value: dict[str, Any],
@@ -9360,6 +9411,7 @@ def extract_nation_projection_state(
             population_millions=_required_projection_number(indexed, region, "populationInMillions", source="save-field", rule_id=Rules.NATION_POPULATION_MONTHLY_GROWTH.id),
             boost_per_year=_required_projection_number(indexed, region, "boostPerYear_dekatons", source="save-field", rule_id=Rules.NATION_FACTION_CONTRIBUTION.id),
             mission_control=int(_required_projection_number(indexed, region, "missionControl", source="save-field", rule_id=Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT.id)),
+            ocean_type=_required_projection_ocean_type(indexed, region, "oceanType", source="save-field", rule_id=Rules.NATION_PRIORITY_VALIDITY.id),
             annual_population_growth=None,
             per_capita_gdp=pcgdp,
             gdp=None,

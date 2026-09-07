@@ -235,6 +235,16 @@ only positive raw pips whose live validity is explicitly false. The static key
 grouping that previously mislabeled active Government/MC pips is not used for
 the nation-UI result.
 
+`Military_BuildNavy` is now a shared reconstruction of
+`TINationState.canBuildNavy` from the audited `Assembly-CSharp.dll` fingerprint:
+the nation must be military, have at least one non-naval live army, have a
+coastal region, and have four control points; the three-control-point exception
+requires PCGDP of at least 40,000 and permits only the first navy. Coastal state
+comes from serialized `TIRegionState.oceanType`; `Yes` and `Seasonal` match
+`TIRegionState.isCoastal`, while missing or unsupported values remain unknown
+in UI and fail closed during projection extraction. BuildNavy completion itself
+remains unsupported.
+
 ## User-facing transaction and metric semantics
 
 - All allocations, completions, and immediate downstream effects in one game

@@ -41,6 +41,7 @@
 16. [Economy and BuildArmy market branches](16-economy-market.md)
 17. [Unity public opinion and direct effects](17-unity-public-opinion.md)
 18. [Real-save verification, documentation, and Graphify](18-economy-unity-verification.md)
+19. [Exact BuildNavy coastal validity](19-build-navy-validity.md)
 
 ## Phase Dependencies
 
@@ -64,6 +65,7 @@
 - Phase 16 depends on phases 14 and 15 and enables Economy plus BuildArmy's independently covered market branch.
 - Phase 17 depends on phases 14 and 15 and enables Unity only under the explicit stochastic policy.
 - Phase 18 depends on phases 16 and 17 and completes full-suite, observational real-save, documentation, and Graphify verification.
+- Phase 19 depends on phase 11's shared validity contract and phase 18's verified extraction state. It closes BuildNavy validity using the audited DLL predicate and serialized region ocean state.
 
 ## Source Of Truth Decisions
 
@@ -84,6 +86,7 @@
 - Economy market values are an independent output scope. Missing market-only data leaves nation/faction output and ranking available, records `worldMarket` incomplete, and becomes blocking only if a simulated nation/faction rule reads that value.
 - Population and Unity both use `coverage: expected` and `provenance: meanPath`, but Population uses `deterministicMeanInput` while Unity uses `deterministicExpectedTransition`; neither claims full-path mathematical expectation.
 - Unity opt-in is checked against every materialized segment after pip inheritance, including the implicit current-pip segment when no plan file is supplied.
+- BuildNavy validity derives coastal presence from serialized `TIRegionState.oceanType`; `Yes` and `Seasonal` are coastal exactly as the audited DLL defines. Missing or invalid ocean state remains unknown rather than being inferred.
 
 ## Global Validation Expectations
 
@@ -108,3 +111,4 @@
 - Economy market mutation is modeled only as a deterministic mean-input branch; coupled climate/environment feedback remains held fixed.
 - Unity public opinion is a sequential conditional-expected approximation, not exact RNG replay or the expectation of the complete nonlinear trajectory.
 - Monte Carlo, optimizer, actual CP-count mutation, and market/public-opinion goal metrics remain out of scope.
+- BuildNavy completion behavior is unchanged; phase 19 changes only shared validity and the state required to evaluate it.

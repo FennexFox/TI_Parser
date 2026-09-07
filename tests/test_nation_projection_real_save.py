@@ -256,6 +256,15 @@ class NationProjectionRealSaveTests(unittest.TestCase):
             if not row["unknownPriorities"]:
                 self.assertTrue(row["consistent"])
 
+    def test_build_navy_validity_matches_extracted_coastal_state(self):
+        ui_validity = parser.calculate_nation_ui(self.indexed, None, self.nation_token)["priorities"]["validityByPriority"]
+        state, context, _ = self._projection_state_context()
+        self.assertTrue(all(region.ocean_type in {"No", "None", "Yes", "Seasonal"} for region in state.regions.values()))
+        self.assertEqual(
+            ui_validity["Military_BuildNavy"]["valid"],
+            projection._priority_valid(state, "Military_BuildNavy", context),
+        )
+
     def test_current_mc_and_army_paths_resolve_from_save_state_without_hardcoded_ids(self):
         output = parser.calculate_nation_projection(
             self.indexed,

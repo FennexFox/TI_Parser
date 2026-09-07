@@ -11,6 +11,12 @@ ALWAYS_VALID_PRIORITIES = frozenset({
     "Spoils", "LaunchFacilities", "Military",
 })
 
+# Audited from TINationState.canBuildNavy in Assembly-CSharp.dll.  These are
+# compiled mechanics values, not save- or template-provided catalog data.
+MIN_CONTROL_POINTS_FOR_NAVY = 4
+MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION = 3
+PCGDP_FOR_NAVY_EXCEPTION = 40_000.0
+
 
 @dataclass(frozen=True)
 class PriorityValidityResult:
@@ -42,6 +48,45 @@ def _boolean(view: Mapping[str, Any], field: str) -> bool | None:
 def _number(view: Mapping[str, Any], field: str) -> float | None:
     value = view.get(field)
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def can_build_navy(view: Mapping[str, Any]) -> bool | None:
+    """Return the DLL's ``TINationState.canBuildNavy`` predicate, or unknown.
+
+    ``armyCount`` is the full live standard-army list and ``navyCount`` is its
+    Naval subset.  Therefore ``armyCount > navyCount`` exactly represents the
+    game's requirement for at least one convertible non-naval army.
+    """
+
+    military = _boolean(view, "military")
+    fields = {
+        name: _number(view, name)
+        for name in (
+            "armyCount",
+            "navyCount",
+            "coastalRegions",
+            "controlPointCount",
+            "perCapitaGDP",
+            "minControlPointsForNavy",
+            "minControlPointsForNavyException",
+            "pcgdpForNavyException",
+        )
+    }
+    if military is None or any(value is None for value in fields.values()):
+        return None
+    return bool(
+        military
+        and fields["armyCount"] > fields["navyCount"]
+        and fields["coastalRegions"] > 0
+        and (
+            fields["controlPointCount"] >= fields["minControlPointsForNavy"]
+            or (
+                fields["controlPointCount"] == fields["minControlPointsForNavyException"]
+                and fields["perCapitaGDP"] >= fields["pcgdpForNavyException"]
+                and fields["navyCount"] == 0
+            )
+        )
+    )
 
 
 def evaluate_priority_validity(priority: str, view: Mapping[str, Any]) -> PriorityValidityResult:
@@ -87,6 +132,12 @@ def evaluate_priority_validity(priority: str, view: Mapping[str, Any]) -> Priori
             ))
         valid = allowed > current
         return PriorityValidityResult(valid, "army capacity remains" if valid else "army capacity is full")
+    if priority == "Military_BuildNavy":
+        valid = _boolean(view, "canBuildNavy")
+        return _unknown("canBuildNavy") if valid is None else PriorityValidityResult(
+            valid,
+            "navy prerequisites are satisfied" if valid else "navy prerequisites are not satisfied",
+        )
     if priority == "Military_FoundMilitary":
         military = _boolean(view, "military")
         return _unknown("military") if military is None else PriorityValidityResult(not military, "military capability is absent" if not military else "military already exists")

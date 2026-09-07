@@ -18,7 +18,13 @@ from ti_parser_income import (
     proportional_cp_contribution,
 )
 from ti_parser_mechanics import Rules, mechanic_diagnostics, validate_rule_execution
-from ti_parser_nation_validity import evaluate_priority_validity
+from ti_parser_nation_validity import (
+    MIN_CONTROL_POINTS_FOR_NAVY,
+    MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION,
+    PCGDP_FOR_NAVY_EXCEPTION,
+    can_build_navy,
+    evaluate_priority_validity,
+)
 from ti_parser_projection_coverage import MetricDependencyTracker
 
 
@@ -142,6 +148,7 @@ class RegionProjectionState:
     population_millions: float
     boost_per_year: float = 0.0
     mission_control: int = 0
+    ocean_type: str | None = None
     annual_population_growth: float | None = None
     per_capita_gdp: float = 0.0
     gdp: float | None = None
@@ -783,6 +790,15 @@ def _priority_valid(state: NationProjectionState, priority: str, context: Projec
             priority=priority,
             mechanic="ValidPriority",
         ) from exc
+    coastal_regions: int | None = None
+    if priority == "Military_BuildNavy":
+        ocean_types = [region.ocean_type for region in state.regions.values()]
+        coastal_regions = (
+            sum(ocean_type in {"Yes", "Seasonal"} for ocean_type in ocean_types)
+            if all(ocean_type in {"No", "None", "Yes", "Seasonal"} for ocean_type in ocean_types)
+            else None
+        )
+    per_capita_gdp = state.gdp / (state.population_millions * 1_000_000.0) if state.population_millions else 0.0
     result = evaluate_priority_validity(priority, {
         "democracy": state.democracy,
         "hasHostileRegion": any(region_id in state.regions for region_id in state.hostile_region_ids),
@@ -792,6 +808,17 @@ def _priority_valid(state: NationProjectionState, priority: str, context: Projec
         "missionControlHasCapacity": mission_control_capacity,
         "allowedArmies": allowed_armies,
         "currentArmies": len(state.standard_armies),
+        "canBuildNavy": can_build_navy({
+            "military": state.military,
+            "armyCount": state.army_count + state.navy_count,
+            "navyCount": state.navy_count,
+            "coastalRegions": coastal_regions,
+            "controlPointCount": state.num_control_points,
+            "perCapitaGDP": per_capita_gdp,
+            "minControlPointsForNavy": MIN_CONTROL_POINTS_FOR_NAVY,
+            "minControlPointsForNavyException": MIN_CONTROL_POINTS_FOR_NAVY_EXCEPTION,
+            "pcgdpForNavyException": PCGDP_FOR_NAVY_EXCEPTION,
+        }),
         "military": state.military,
         "nuclearProgram": state.nuclear_program,
         "canBuildSpaceDefenses": state.can_build_space_defenses,

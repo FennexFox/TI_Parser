@@ -113,6 +113,7 @@ def state(*, pips=None, cp_count=1, progress=None, advisors=(), at=None, annual_
         progress=initial_progress,
         regions={1: projection.RegionProjectionState(
             id=1, population_millions=50.0, boost_per_year=12.0, mission_control=4,
+            ocean_type="Yes",
             annual_population_growth=annual_growth, per_capita_gdp=20_000, gdp=1_000_000_000_000.0,
             region_order=0, template_name="Region_1", latitude=10.0, longitude=20.0,
             annual_population_growth_modifier=0.0, environment="Standard", xenoforming_level=0.0,
@@ -1132,6 +1133,35 @@ class NationProjectionEconomyTests(unittest.TestCase):
         self.assertEqual(missing.army_count, 1)
         self.assertEqual(market["effectiveCoverage"], "unsupported")
         self.assertIn(Rules.NATION_PRIORITY_BUILD_ARMY_MARKET.id, missing.world_market_blockers)
+
+
+class NationProjectionNavyValidityTests(unittest.TestCase):
+    @mechanic_rule_test(Rules.NATION_PRIORITY_VALIDITY.id, evidence="expectedValue")
+    def test_build_navy_uses_coastal_regions_and_control_point_exception(self):
+        normal = state(pips={"Military_BuildNavy": 1}, cp_count=4)
+        normal.army_count = 1
+        self.assertTrue(projection._priority_valid(normal, "Military_BuildNavy", context()))
+
+        no_coast = state(pips={"Military_BuildNavy": 1}, cp_count=4)
+        no_coast.army_count = 1
+        no_coast.regions[1].ocean_type = "No"
+        self.assertFalse(projection._priority_valid(no_coast, "Military_BuildNavy", context()))
+
+        exception = state(pips={"Military_BuildNavy": 1}, cp_count=3)
+        exception.gdp = 2_000_000_000_000.0  # 40,000 PCGDP at 50M population.
+        exception.army_count = 1
+        self.assertTrue(projection._priority_valid(exception, "Military_BuildNavy", context()))
+        exception.army_count = 2
+        exception.navy_count = 1
+        self.assertFalse(projection._priority_valid(exception, "Military_BuildNavy", context()))
+
+    def test_build_navy_missing_ocean_state_stops_projection(self):
+        incomplete = state(pips={"Military_BuildNavy": 1}, cp_count=4)
+        incomplete.army_count = 1
+        incomplete.regions[1].ocean_type = None
+        with self.assertRaises(projection.ProjectionRuntimeStop) as caught:
+            projection._priority_valid(incomplete, "Military_BuildNavy", context())
+        self.assertEqual(caught.exception.dependencies[0]["field"], "canBuildNavy")
 
 
 class NationProjectionSchedulerTests(unittest.TestCase):
