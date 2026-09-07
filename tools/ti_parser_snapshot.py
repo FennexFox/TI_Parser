@@ -29,7 +29,11 @@ from ti_parser_core import (
     template_source_paths,
     type_entries,
 )
-from ti_parser_catalogs import CatalogError, load_runtime_catalogs
+from ti_parser_catalogs import (
+    CatalogIntegrityError,
+    UnsupportedCatalogScenarioError,
+    load_runtime_catalogs,
+)
 
 
 @dataclass(frozen=True)
@@ -601,10 +605,20 @@ def build_snapshot(
         )
     try:
         runtime_catalogs = load_runtime_catalogs(scenario)
-    except CatalogError as exc:
+    except UnsupportedCatalogScenarioError as exc:
         raise CalculationDependencyError(
             CalculationDependency(
-                kind="catalog",
+                kind="scenario",
+                name=exc.scenario,
+                context="snapshot",
+                scenario=scenario,
+                reason=str(exc),
+            )
+        ) from exc
+    except CatalogIntegrityError as exc:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="catalog-integrity",
                 name="runtime bundle",
                 context="snapshot",
                 scenario=scenario,

@@ -82,6 +82,39 @@ class ProjectAnalysisTests(unittest.TestCase):
         self.assertEqual(points["modifiers"]["category"]["activeSlotsWithCategory"], 2)
         self.assertEqual(points["modifiers"]["category"]["extraSlotPenaltyPower"], 1)
 
+    def test_zero_weight_hypothetical_slot_does_not_require_modifier_definitions(self):
+        gamestates = {}
+        faction = add_state(
+            gamestates,
+            "TIFactionState",
+            1,
+            {
+                "researchWeights": [1, 0, 0, 0, 0, 0],
+                "orgProjectSlotUnlocked": True,
+                "currentProjectProgress": [
+                    {"projectTemplateName": "MissingCurrentProject", "slot": 3},
+                ],
+            },
+        )
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        points = ti.hypothetical_project_points_to_slot(
+            indexed,
+            faction,
+            {"dataName": "Candidate", "techCategory": "SpaceScience"},
+            4,
+            100.0,
+            {},
+            {},
+            {"ComputerScientist": {}},
+            {"CERN": {}},
+            {"EnergyLab": {}},
+            {},
+        )
+
+        self.assertEqual(points["daily"], 0.0)
+        self.assertIsNone(points["modifiers"])
+
     def test_bottleneck_penalty_charges_critical_resource_worsening(self):
         penalty = ti.bottleneck_penalty_from_delta(
             {"Water": {"net": -3.0}, "Metals": {"net": -5.0}},

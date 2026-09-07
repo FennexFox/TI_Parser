@@ -22,7 +22,11 @@ from ti_parser_core import (
     scenario_template_name,
     type_entries,
 )
-from ti_parser_catalogs import CatalogError, load_runtime_catalogs
+from ti_parser_catalogs import (
+    CatalogIntegrityError,
+    UnsupportedCatalogScenarioError,
+    load_runtime_catalogs,
+)
 from ti_parser_snapshot import SnapshotConfig
 
 
@@ -1123,10 +1127,20 @@ def calculate_org_plan(
             )
         try:
             runtime_catalogs = load_runtime_catalogs(scenario)
-        except CatalogError as exc:
+        except UnsupportedCatalogScenarioError as exc:
             raise CalculationDependencyError(
                 CalculationDependency(
-                    kind="catalog",
+                    kind="scenario",
+                    name=exc.scenario,
+                    context="org-plan",
+                    scenario=scenario,
+                    reason=str(exc),
+                )
+            ) from exc
+        except CatalogIntegrityError as exc:
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="catalog-integrity",
                     name="runtime bundle",
                     context="org-plan",
                     scenario=scenario,

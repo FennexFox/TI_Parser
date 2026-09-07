@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -11,7 +12,9 @@ import build_runtime_catalogs as builder
 from ti_parser_catalogs import (
     CalculationDependencyError,
     CatalogError,
+    CatalogIntegrityError,
     RuntimeCatalogs,
+    UnsupportedCatalogScenarioError,
     file_sha256,
     validate_catalog_envelope,
     value_fingerprint,
@@ -300,6 +303,7 @@ class RuntimeCatalogTests(unittest.TestCase):
     def test_loader_selects_exact_scenario_overlay_and_exposes_claim_config(self):
         modern = RuntimeCatalogs.load("ModernScenario", self.output)
         millennium = RuntimeCatalogs.load("2003Scenario", self.output)
+        broken = RuntimeCatalogs.load("BrokenEarthScenario", self.output)
 
         self.assertEqual(modern.effects["Effect_Test"]["operation"], "Additive")
         self.assertEqual(millennium.effects["Effect_Test"]["operation"], "Multiplicative")
@@ -307,6 +311,14 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.assertEqual(millennium.orgs["Org_Test"]["tier"], 2)
         self.assertIn("Trait_2003", millennium.traits)
         self.assertNotIn("unrelatedAsset", modern.effects["Effect_Test"])
+        self.assertEqual(modern.ships["drives"]["drives_Test"]["thrust_N"], 100)
+        self.assertEqual(broken.ships["drives"]["drives_Test"]["thrust_N"], 250)
+        self.assertEqual(
+            broken.ships["drives"]["drives_Test"]["weightedBuildMaterials"],
+            {"metals": 1, "nobleMetals": 2},
+        )
+        self.assertTrue(broken.calculation_diagnostics()["catalogs"]["ship"]["overrideApplied"])
+        self.assertFalse(modern.calculation_diagnostics()["catalogs"]["ship"]["overrideApplied"])
         self.assertEqual(
             modern.nation_claims["democracyDecreaseToMakeHostileClaim"],
             1.5,
@@ -396,14 +408,14 @@ class RuntimeCatalogTests(unittest.TestCase):
         )
 
     def test_unsupported_scenario_does_not_fall_back(self):
-        with self.assertRaisesRegex(CatalogError, "Unsupported scenario"):
+        with self.assertRaisesRegex(UnsupportedCatalogScenarioError, "Unsupported scenario"):
             RuntimeCatalogs.load("UnknownScenario", self.output)
 
     def test_manifest_detects_catalog_file_corruption(self):
         path = self.output / "effect_catalog.json"
         path.write_text(path.read_text(encoding="utf-8") + " ", encoding="utf-8")
 
-        with self.assertRaisesRegex(CatalogError, "file sha256 mismatch"):
+        with self.assertRaisesRegex(CatalogIntegrityError, "file sha256 mismatch"):
             RuntimeCatalogs.load("ModernScenario", self.output)
 
     def test_envelope_detects_payload_corruption_even_when_json_is_valid(self):
@@ -411,7 +423,7 @@ class RuntimeCatalogTests(unittest.TestCase):
         envelope = json.loads(path.read_text(encoding="utf-8"))
         envelope["base"]["traits"]["Trait_Test"]["incomeMoney"] = 999
 
-        with self.assertRaisesRegex(CatalogError, "payload fingerprint mismatch"):
+        with self.assertRaisesRegex(CatalogIntegrityError, "payload fingerprint mismatch"):
             validate_catalog_envelope(envelope, path=path)
 
     def test_missing_manifest_entry_is_fail_closed(self):
@@ -421,8 +433,30 @@ class RuntimeCatalogTests(unittest.TestCase):
         manifest["bundleFingerprint"] = value_fingerprint(manifest["catalogs"])
         write_json(manifest_path, manifest)
 
-        with self.assertRaisesRegex(CatalogError, "missing required entries"):
+        with self.assertRaisesRegex(CatalogIntegrityError, "missing required entries"):
             RuntimeCatalogs.load("ModernScenario", self.output)
+
+    def test_lf_normalized_copy_loads_every_supported_scenario(self):
+        normalized = self.root / "normalized"
+        shutil.copytree(self.output, normalized)
+        for path in normalized.glob("*.json"):
+            content = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            path.write_bytes(content)
+            self.assertNotIn(b"\r", content)
+            self.assertTrue(content.endswith(b"\n"))
+
+        envelope = json.loads((normalized / "effect_catalog.json").read_text(encoding="utf-8"))
+        for scenario in envelope["supportedScenarios"]:
+            loaded = RuntimeCatalogs.load(scenario, normalized)
+            self.assertEqual(loaded.scenario, scenario)
+
+    def test_generated_manifest_hashes_the_actual_lf_bytes(self):
+        manifest = json.loads((self.output / "catalog_manifest.json").read_text(encoding="utf-8"))
+        for filename, entry in manifest["catalogs"].items():
+            content = (self.output / filename).read_bytes()
+            self.assertNotIn(b"\r", content)
+            self.assertTrue(content.endswith(b"\n"))
+            self.assertEqual(entry["sha256"], file_sha256(self.output / filename))
 
     def test_missing_dependency_uses_shared_structured_error(self):
         catalogs = RuntimeCatalogs.load("ModernScenario", self.output)
@@ -452,6 +486,47 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.assertEqual(first_files, second_files)
         for filename in first_files:
             self.assertEqual((self.output / filename).read_bytes(), (second_output / filename).read_bytes())
+
+    def test_ship_override_is_recursive_minimal_and_tracks_overlay_source(self):
+        envelope = json.loads((self.output / "ship_catalog.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            envelope["scenarioOverrides"]["BrokenEarthScenario"],
+            {
+                "drives": {
+                    "drives_Test": {
+                        "thrust_N": 250,
+                        "weightedBuildMaterials": {"nobleMetals": 2},
+                    }
+                }
+            },
+        )
+        self.assertIn(
+            "BrokenEarthScenario/TIDriveTemplate.json",
+            {source["name"] for source in envelope["sourceFiles"]},
+        )
+
+    def test_generator_rejects_duplicate_ship_rows_in_scenario_overlay(self):
+        overlay_path = (
+            self.dlc / builder.SCENARIO_DIRECTORIES["BrokenEarthScenario"] / "TIDriveTemplate.json"
+        )
+        row = json.loads(overlay_path.read_text(encoding="utf-8"))[0]
+        write_json(overlay_path, [row, row])
+
+        with self.assertRaisesRegex(CatalogError, "Duplicate dataName"):
+            builder.build_all(self.templates, self.root / "duplicate-ship", dlc_content_dir=self.dlc)
+
+    def test_generator_rejects_cross_family_weapon_collision_in_scenario_overlay(self):
+        overlay_path = (
+            self.dlc / builder.SCENARIO_DIRECTORIES["2003Scenario"] / "TIMissileTemplate.json"
+        )
+        write_json(
+            overlay_path,
+            [{"dataName": "guns_Test", "friendlyName": "Collision", "mount": "OneHull"}],
+        )
+
+        with self.assertRaisesRegex(CatalogError, "2003Scenario"):
+            builder.build_all(self.templates, self.root / "weapon-collision", dlc_content_dir=self.dlc)
 
     def test_generator_rejects_duplicate_template_rows(self):
         effect_path = self.templates / "TIEffectTemplate.json"
