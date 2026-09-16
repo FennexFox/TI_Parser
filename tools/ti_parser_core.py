@@ -16,6 +16,7 @@ DEFAULT_CACHE_DIR = ".ti_cache"
 SAVE_GLOB = "*.gz"
 DEFAULT_MODULE_CATALOG = Path(__file__).resolve().parents[1] / "data" / "module_catalog.json"
 DEFAULT_LOCATION_CATALOG = Path(__file__).resolve().parents[1] / "data" / "location_catalog.json"
+DEFAULT_RUNTIME_CATALOG_DIR = Path(__file__).resolve().parents[1] / "data"
 TemplateSource = Path | tuple[Path, ...] | list[Path] | None
 SCENARIO_DLC_TEMPLATE_HINTS = {
     "2003Scenario": Path("DLC_Content/DarkSkies/2003_Scenario/Templates"),
@@ -291,11 +292,44 @@ def template_file_fingerprints(templates: TemplateSource, filename: str) -> list
     ]
 
 
+def runtime_catalog_content_fingerprint(
+    catalog_dir: Path | None = None,
+) -> str:
+    """Hash the packaged runtime bundle bytes used by snapshot calculations.
+
+    This deliberately does not validate or parse the bundle: callers still use
+    ``load_runtime_catalogs`` for that fail-closed check.  Hashing raw bytes
+    means a catalog update cannot reuse an earlier snapshot before validation.
+    """
+
+    # Keep this list coupled to the package loader without importing catalogs
+    # during core module initialization (catalogs itself imports core errors).
+    from ti_parser_catalogs import CATALOG_MANIFEST, DEFAULT_CATALOG_FILES
+
+    root = catalog_dir or DEFAULT_RUNTIME_CATALOG_DIR
+    digest = hashlib.sha256()
+    for filename in (CATALOG_MANIFEST, *DEFAULT_CATALOG_FILES):
+        path = root / filename
+        digest.update(filename.encode("utf-8"))
+        digest.update(b"\0")
+        try:
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError as exc:
+            # Preserve a stable key for an unreadable bundle; the catalog
+            # loader below remains responsible for reporting the dependency.
+            digest.update(f"<unreadable:{type(exc).__name__}>".encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def snapshot_fingerprint(save_path: Path, templates_dir: TemplateSource) -> dict[str, Any]:
     return {
         "save": save_fingerprint(save_path),
         "templateSources": template_source_paths(templates_dir),
         "traitTemplates": template_file_fingerprints(templates_dir, "TITraitTemplate.json"),
+        "runtimeCatalogBundle": runtime_catalog_content_fingerprint(),
     }
 
 

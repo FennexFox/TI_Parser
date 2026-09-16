@@ -7039,13 +7039,20 @@ def command_ai_fleet_diagnostics(save_path: Path, templates_dir: Path | None, ar
     print_json(result, compact=args.compact)
 
 
-def command_catalog_verify(args: argparse.Namespace) -> None:
+def command_catalog_verify(args: argparse.Namespace) -> int:
+    try:
+        save_path = resolve_save_path(args.save)
+    except FileNotFoundError:
+        if args.save:
+            raise
+        save_path = None
     result = verify_catalogs(
         Path(args.templates_dir),
         args.scenario,
-        save_path=resolve_save_path(args.save),
+        save_path=save_path,
     )
     print_json(result, compact=args.compact)
+    return 0 if result["status"] == "passed" else 2
 
 
 def faction_yearly_income_from_ships(
@@ -7694,18 +7701,9 @@ def calculate_topbar(
     hab_module_templates = research_templates.hab_modules if research_templates else load_hab_module_catalog()
     faction_id, faction = find_faction_state(indexed, faction_name)
     effect_contexts = faction_effect_contexts(indexed, faction_id)
-    missing_effects = sorted(
-        {
-            name
-            for context in TOPBAR_EFFECT_CONTEXTS
-            for name in effect_contexts.get(context, [])
-            if name not in effect_templates
-        }
-    )
-    if missing_effects:
-        raise RuntimeError(
-            "Effects required by topbar calculations are missing template data: " + ", ".join(missing_effects)
-        )
+    for context in sorted(TOPBAR_EFFECT_CONTEXTS):
+        for name in effect_contexts.get(context, []):
+            required_catalog_row(indexed, effect_templates, "effect", name, f"topbar.{context}")
     _, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     mc_components = faction_max_mission_control_components(
         indexed,

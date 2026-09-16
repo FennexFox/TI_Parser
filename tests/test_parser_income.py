@@ -163,6 +163,58 @@ class ParserIncomeTests(unittest.TestCase):
             income.nation_mission_control_contribution(indexed, nation, 1),
         )
 
+    def test_mission_control_remainder_uses_nation_position_for_owned_subset(self):
+        indexed = self._build_indexed()
+        nation = core.state_value_by_id(indexed, 21)
+        second_cp = core.state_value_by_id(indexed, 32)
+        self.assertIsNotNone(nation)
+        self.assertIsNotNone(second_cp)
+        # Five MC over two points gives the final, position-1 point the extra MC.
+        core.state_value_by_id(indexed, 31)["faction"] = {"value": 2}
+        self.assertEqual(income.nation_mission_control_contribution(indexed, nation, 1), 3)
+
+    def test_mission_control_missing_position_fails_closed_when_remainder_matters(self):
+        indexed = self._build_indexed()
+        nation = core.state_value_by_id(indexed, 21)
+        second_cp = core.state_value_by_id(indexed, 32)
+        self.assertIsNotNone(nation)
+        self.assertIsNotNone(second_cp)
+        core.state_value_by_id(indexed, 31)["faction"] = {"value": 2}
+        second_cp.pop("positionInNation")
+
+        with self.assertRaises(core.CalculationDependencyError) as raised:
+            income.nation_mission_control_contribution(indexed, nation, 1)
+
+        dependency = raised.exception.missing_dependencies[0]
+        self.assertEqual(dependency["kind"], "control-point-position")
+        self.assertEqual(dependency["context"], "nation-mission-control-contribution")
+
+    def test_mission_control_invalid_position_fails_closed_when_remainder_matters(self):
+        indexed = self._build_indexed()
+        nation = core.state_value_by_id(indexed, 21)
+        second_cp = core.state_value_by_id(indexed, 32)
+        self.assertIsNotNone(nation)
+        self.assertIsNotNone(second_cp)
+        core.state_value_by_id(indexed, 31)["faction"] = {"value": 2}
+        second_cp["positionInNation"] = 2
+
+        with self.assertRaises(core.CalculationDependencyError):
+            income.nation_mission_control_contribution(indexed, nation, 1)
+
+    def test_mission_control_missing_position_is_not_needed_for_even_split(self):
+        indexed = self._build_indexed()
+        nation = core.state_value_by_id(indexed, 21)
+        second_cp = core.state_value_by_id(indexed, 32)
+        first_region = core.state_value_by_id(indexed, 11)
+        self.assertIsNotNone(nation)
+        self.assertIsNotNone(second_cp)
+        self.assertIsNotNone(first_region)
+        core.state_value_by_id(indexed, 31)["faction"] = {"value": 2}
+        second_cp.pop("positionInNation")
+        first_region["missionControl"] = 2
+
+        self.assertEqual(income.nation_mission_control_contribution(indexed, nation, 1), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

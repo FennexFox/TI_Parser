@@ -531,10 +531,37 @@ def nation_mission_control_contribution(indexed: IndexedState, nation: dict[str,
     if current_mc <= 0 or num_control_points <= 0:
         return 0
     owned_points = active_owned_control_points(indexed, nation, faction_id)
+    if not owned_points:
+        return 0
+    # The quotient is shared evenly.  Only the remainder uses the control-point
+    # ordering, so do not make an otherwise determinate contribution depend on
+    # a position that the save does not provide.
+    if current_mc % num_control_points == 0:
+        return current_mc // num_control_points * len(owned_points)
     positions: list[int] = []
-    for index, cp in enumerate(owned_points):
+    seen_positions: set[int] = set()
+    for cp in owned_points:
         position = cp.get("positionInNation")
-        if not isinstance(position, int):
-            position = index
+        if (
+            not isinstance(position, int)
+            or isinstance(position, bool)
+            or position < 0
+            or position >= num_control_points
+            or position in seen_positions
+        ):
+            cp_id = ref_id(cp.get("ID"))
+            raise CalculationDependencyError(
+                CalculationDependency(
+                    kind="control-point-position",
+                    name=str(cp_id if cp_id is not None else "unknown"),
+                    context="nation-mission-control-contribution",
+                    scenario=None,
+                    reason=(
+                        "positionInNation is required to allocate the nation's "
+                        "Mission Control remainder"
+                    ),
+                )
+            )
         positions.append(position)
+        seen_positions.add(position)
     return mission_control_contribution_from_values(current_mc, positions, num_control_points)
