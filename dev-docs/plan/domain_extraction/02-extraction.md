@@ -38,12 +38,19 @@
 
 ## Progress
 
-- Not started.
+- Complete. Implemented 14 modules and an explicit public facade (9,727 to 629 lines including compatibility imports).
 
 ## Decision log
 
-- Existing graph is stale; use its relationships as navigation and current AST/source as authority.
+- Preserve function, class and assignment bodies exactly. 457 top-level AST nodes match the baseline.
+- Separate research planning from base research, and keep shared solar/body primitives in hab_ui. This removes dependency cycles without function-local imports, injected facade contexts, or global rebinding.
+- Shared settings live in config; existing configured calculation wrappers and save-state helpers live in runtime. The facade contains only imports, build_parser and main.
+- Mock patches target the implementation lookup module; direct public calls remain facade-compatible.
 
 ## Outcomes / Retrospective
 
-- Pending.
+- All moved global references resolve. Independent module imports and acyclic dependency tests pass (3 tests including raw-loader guard, 14 subtests).
+- Existing mock assertions and fixtures preserved; focused suite: 78 passed, 5 subtests passed.
+- Full suite: 327 passed, 13 skipped, 59 subtests passed.
+- Actual-save baseline comparison against 36539ae: 11/11 raw stdout, parsed JSON and exit codes identical. Seven successful commands and four pre-existing incomplete results are preserved.
+- Independent review found no missing public exports or signature/default mismatches.

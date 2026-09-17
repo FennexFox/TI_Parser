@@ -8,6 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import ti_parser_cli
+import ti_parser_projection_adapter as projection_adapter
 import ti_save_parser
 
 
@@ -50,8 +51,8 @@ class NationProjectionCliTests(unittest.TestCase):
             "repeatChangeTriggered": [False],
         }
         with (
-            patch.object(ti_save_parser, "type_entries", return_value=[{"Value": event}]),
-            patch.object(ti_save_parser, "first_value", return_value={"phaseActive": True}),
+            patch.object(projection_adapter, "type_entries", return_value=[{"Value": event}]),
+            patch.object(projection_adapter, "first_value", return_value={"phaseActive": True}),
         ):
             schedule = ti_save_parser.projection_advisor_mission_schedule(object(), development)
 
@@ -81,9 +82,9 @@ class NationProjectionCliTests(unittest.TestCase):
             "repeatChangeTriggered": [False],
         }
         with (
-            patch.object(ti_save_parser, "type_entries", return_value=[{"Value": event}]),
-            patch.object(ti_save_parser, "first_value", return_value={"phaseActive": True}),
-            patch.object(ti_save_parser, "scenario_template_name", return_value="ModernScenario"),
+            patch.object(projection_adapter, "type_entries", return_value=[{"Value": event}]),
+            patch.object(projection_adapter, "first_value", return_value={"phaseActive": True}),
+            patch.object(projection_adapter, "scenario_template_name", return_value="ModernScenario"),
             self.assertRaises(ti_save_parser.CalculationDependencyError) as caught,
         ):
             ti_save_parser.projection_advisor_mission_schedule(object(), development)
@@ -102,8 +103,8 @@ class NationProjectionCliTests(unittest.TestCase):
             },
         }]
         with (
-            patch.object(ti_save_parser, "type_entries", return_value=effects),
-            patch.object(ti_save_parser, "scenario_template_name", return_value="ModernScenario"),
+            patch.object(projection_adapter, "type_entries", return_value=effects),
+            patch.object(projection_adapter, "scenario_template_name", return_value="ModernScenario"),
             self.assertRaises(ti_save_parser.CalculationDependencyError) as caught,
         ):
             ti_save_parser.faction_effect_expirations_for_projection(object())
@@ -116,12 +117,12 @@ class NationProjectionCliTests(unittest.TestCase):
         indexed = ti_save_parser.build_index({"gamestates": {}})
         nation = {"GDP": 1_000_000.0, "regions": [{"value": 41}]}
         with (
-            patch.object(ti_save_parser, "first_value", return_value={
+            patch.object(projection_adapter, "first_value", return_value={
                 "currentDateTime": {"year": 2045, "month": 1, "day": 1, "hour": 0},
             }),
-            patch.object(ti_save_parser, "nation_control_points", return_value=[]),
-            patch.object(ti_save_parser, "nation_population_millions", return_value=1.0),
-            patch.object(ti_save_parser, "state_value_by_id", return_value=None),
+            patch.object(projection_adapter, "nation_control_points", return_value=[]),
+            patch.object(projection_adapter, "nation_population_millions", return_value=1.0),
+            patch.object(projection_adapter, "state_value_by_id", return_value=None),
             self.assertRaises(ti_save_parser.CalculationDependencyError) as caught,
         ):
             ti_save_parser.extract_nation_projection_state(
@@ -140,7 +141,7 @@ class NationProjectionCliTests(unittest.TestCase):
     def test_projection_ocean_type_rejects_unknown_enum(self):
         indexed = ti_save_parser.build_index({"gamestates": {}})
         with (
-            patch.object(ti_save_parser, "scenario_template_name", return_value="ModernScenario"),
+            patch.object(projection_adapter, "scenario_template_name", return_value="ModernScenario"),
             self.assertRaises(ti_save_parser.CalculationDependencyError) as caught,
         ):
             ti_save_parser._required_projection_ocean_type(
@@ -154,7 +155,7 @@ class NationProjectionCliTests(unittest.TestCase):
     def test_projection_army_type_is_required_for_build_navy(self):
         indexed = ti_save_parser.build_index({"gamestates": {}})
         with (
-            patch.object(ti_save_parser, "scenario_template_name", return_value="ModernScenario"),
+            patch.object(projection_adapter, "scenario_template_name", return_value="ModernScenario"),
             self.assertRaises(ti_save_parser.CalculationDependencyError) as caught,
         ):
             ti_save_parser._required_projection_army_type(

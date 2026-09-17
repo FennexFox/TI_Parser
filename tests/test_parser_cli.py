@@ -10,6 +10,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import ti_save_parser as ti
+import ti_parser_commands as commands
+import ti_parser_topbar as topbar
 from ti_parser_catalogs import RuntimeCatalogs
 from tests import test_package_only_runtime as fixtures
 
@@ -53,8 +55,8 @@ class ParserCliTests(unittest.TestCase):
         for status, expected in (("passed", 0), ("failed", 2), ("partial", 2)):
             with (
                 self.subTest(status=status),
-                patch.object(ti, "resolve_save_path", return_value=Path("fixture.gz")),
-                patch.object(ti, "verify_catalogs", return_value={"status": status}),
+                patch.object(commands, "resolve_save_path", return_value=Path("fixture.gz")),
+                patch.object(commands, "verify_catalogs", return_value={"status": status}),
             ):
                 code, output, errors = self.run_cli([
                     "--templates-dir", "templates", "catalog-verify", "--scenario", "ModernScenario",
@@ -65,8 +67,8 @@ class ParserCliTests(unittest.TestCase):
 
     def test_verification_without_local_save_reports_partial_checks(self):
         with (
-            patch.object(ti, "resolve_save_path", side_effect=FileNotFoundError("No saves")),
-            patch.object(ti, "verify_catalogs", return_value={"status": "partial"}) as verify,
+            patch.object(commands, "resolve_save_path", side_effect=FileNotFoundError("No saves")),
+            patch.object(commands, "verify_catalogs", return_value={"status": "partial"}) as verify,
         ):
             code, output, _ = self.run_cli([
                 "--templates-dir", "templates", "catalog-verify", "--scenario", "ModernScenario",
@@ -87,11 +89,11 @@ class ParserCliTests(unittest.TestCase):
         context = sorted(ti.TOPBAR_EFFECT_CONTEXTS)[0]
         with (
             patch.object(ti, "resolve_save_path", return_value=Path("fixture.gz")),
-            patch.object(ti, "load_save", return_value={"gamestates": {}}),
-            patch.object(ti, "calculation_catalogs", return_value=SimpleNamespace(traits={}, effects={})),
-            patch.object(ti, "load_hab_module_catalog", return_value={}),
-            patch.object(ti, "find_faction_state", return_value=(1, {})),
-            patch.object(ti, "faction_effect_contexts", return_value={context: ["MissingEffect"]}),
+            patch.object(commands, "load_save", return_value={"gamestates": {}}),
+            patch.object(topbar, "calculation_catalogs", return_value=SimpleNamespace(traits={}, effects={})),
+            patch.object(topbar, "load_hab_module_catalog", return_value={}),
+            patch.object(topbar, "find_faction_state", return_value=(1, {})),
+            patch.object(topbar, "faction_effect_contexts", return_value={context: ["MissingEffect"]}),
         ):
             code, output, errors = self.run_cli(["topbar"])
         self.assertEqual(code, 2)

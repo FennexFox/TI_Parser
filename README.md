@@ -14,14 +14,33 @@ Implementation layout:
 - `tools/ti_parser_hab.py` owns hab module, support, mining, and power calculations.
 - `tools/ti_parser_org.py` owns org-plan parsing, conditional evaluation, and committee assignment search.
 - `tools/ti_parser_ship.py` owns pure ship component, resource, power, armor, and ranking helpers.
+- `tools/ti_parser_ship_plan.py` owns saved-design simulation, shipyard timing, and ship plans.
+- `tools/ti_parser_hab_ui.py` owns hab location, solar power, UI, and slot calculations.
+- `tools/ti_parser_hab_construction.py` owns build requirements, materials, timing, and economic deltas.
+- `tools/ti_parser_hab_plan.py` owns module candidate scoring, upgrade selection, and fill plans.
+- `tools/ti_parser_research.py` owns research income, category modifiers, distribution, and current research UI.
+- `tools/ti_parser_research_plan.py` owns available research candidates and planning scores.
+- `tools/ti_parser_project_analysis.py` owns project consequences, module unlocks, and resource tradeoffs.
+- `tools/ti_parser_topbar.py` owns faction income aggregation, maintenance, and resource forecasts.
+- `tools/ti_parser_world.py` owns world population, environment, markets, wars, and atrocities.
+- `tools/ti_parser_nation_ui.py` owns nation display values and priority-validity presentation.
+- `tools/ti_parser_projection_adapter.py` extracts save state and assembles inputs for the projection engine.
+- `tools/ti_parser_config.py` owns shared constants and configured calculation settings.
+- `tools/ti_parser_runtime.py` owns configured snapshot/income/hab adapters and shared save-state helpers.
+- `tools/ti_parser_commands.py` owns CLI input loading, domain calls, and output rendering.
 - `tools/ti_parser_cli.py` owns argument parsing and command dispatch.
 - `tools/ti_parser_catalogs.py` validates the packaged runtime bundle, manifest, exact scenario overlays, and fingerprints.
 - `tools/ti_parser_mechanics.py` owns stable mechanics rule IDs and DLL/catalog/test provenance.
 - `tools/ti_parser_nation_validity.py` owns the shared value-only, tri-state priority-validity evaluator.
 - `tools/ti_parser_nation_projection.py` owns cloned projection state, plan parsing, transactional updates, and fail-closed coverage.
 - `tools/ti_parser_projection_coverage.py` owns execution-derived metric evidence and dependency propagation.
-- `tools/ti_save_parser.py` keeps the public script entrypoint, compatibility exports, and the remaining domain orchestration.
+- `tools/ti_save_parser.py` keeps only the public script entrypoint and explicit compatibility exports. Existing function names and signatures remain available.
 - `tools/catalog_utils.py` contains shared catalog-generator helpers.
+
+Domain modules import their dependencies directly and do not import the public
+facade. Their dependency graph is acyclic. Tests or integrations that replace a
+dependency with a mock should patch the module where it is used, rather than
+rebinding the facade export.
 
 Examples:
 
