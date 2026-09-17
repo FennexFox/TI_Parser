@@ -36,3 +36,7 @@
 ## Known Risks And Assumptions
 
 - Generated data must be regenerated or restored byte-for-byte from Git, never hand-authored. Existing trait catalog has stale CRLF checkout bytes; restore committed LF bytes after proving equivalence. No semantic change based only on parser disagreement. Keep module moves separate from mechanics corrections; use focused compatibility tests. Runtime commands remain package-only. Commit each validated phase with scoped staging.
+
+## Completed extraction follow-up
+
+- The initially bounded ship-helper extraction was completed across the remaining domains in [domain_extraction](../domain_extraction/00-master-plan.md). The public facade now contains only explicit compatibility exports and CLI entry functions.
