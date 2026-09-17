@@ -25,6 +25,24 @@ from ti_parser_catalogs import (
 
 
 class ParserSnapshotTests(unittest.TestCase):
+    def test_serialized_councilor_status_and_detainer_reconstruct_activity(self):
+        cases = (
+            ({"status": "Active", "detainingFaction": None}, (True, False)),
+            ({"status": "Active", "detainingFaction": {"value": 7}}, (False, True)),
+            ({"status": "Offmap", "detainingFaction": None}, (False, False)),
+            ({"status": "Dead", "detainingFaction": None}, (False, False)),
+            ({"status": "Active"}, (None, None)),
+            ({"status": "NewStatus", "detainingFaction": None}, (None, False)),
+            ({"active": True, "detained": False}, (True, False)),
+        )
+        for fields, expected in cases:
+            with self.subTest(fields=fields):
+                indexed = core.build_index({"gamestates": {"TICouncilorState": [
+                    {"Key": {"value": 1}, "Value": {"ID": {"value": 1}, **fields}}
+                ]}})
+                row = snapshot.summarize_councilors(indexed, {}, ti.SNAPSHOT_CONFIG)[0]
+                self.assertEqual((row["active"], row["detained"]), expected)
+
     def test_faction_reference_helpers_keep_name_fallbacks(self):
         indexed = core.build_index(
             {

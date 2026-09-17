@@ -337,19 +337,57 @@ def load_trait_templates(templates_dir: TemplateSource) -> dict[str, dict[str, A
     return load_named_templates(templates_dir, "TITraitTemplate.json")
 
 
+def _catalog_content_fingerprint(path: Path, error_type: type[RuntimeError], label: str) -> str:
+    """Hash catalog bytes so cache entries cannot hide same-stat rewrites."""
+
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise error_type(f"Unable to read {label} {path}: {exc}") from exc
+    return digest.hexdigest()
+
+
+def _read_standalone_catalog(
+    path: Path, error_type: type[RuntimeError], label: str
+) -> dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8-sig") as handle:
+            raw = json.load(handle)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise error_type(f"Unable to read {label} {path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise error_type(f"Invalid {label} structure: {path}")
+    return raw
+
+
+def _validate_standalone_payload_fingerprint(
+    raw: dict[str, Any], error_type: type[RuntimeError], label: str, path: Path
+) -> None:
+    from standalone_catalog_integrity import payload_fingerprint
+
+    actual = raw.get("payloadFingerprint")
+    try:
+        expected = payload_fingerprint(raw)
+    except (TypeError, ValueError) as exc:
+        raise error_type(f"Invalid {label} fingerprint payload: {path}: {exc}") from exc
+    if not isinstance(actual, str) or actual != expected:
+        raise error_type(f"{label.capitalize()} payload fingerprint mismatch: {path}")
+
+
 def module_catalog_diagnostics(catalog_path: Path = DEFAULT_MODULE_CATALOG) -> dict[str, Any]:
     resolved = catalog_path.resolve()
     if not resolved.is_file():
         raise ModuleCatalogError(f"Required module catalog not found: {resolved}")
     stat = resolved.stat()
-    with resolved.open("r", encoding="utf-8-sig") as handle:
-        raw = json.load(handle)
-    if not isinstance(raw, dict) or not isinstance(raw.get("modules"), list):
-        raise ModuleCatalogError(f"Invalid module catalog structure: {resolved}")
+    templates = load_hab_module_catalog(resolved)
+    raw = _load_module_catalog_raw(resolved)
     return {
         "path": str(resolved),
         "schemaVersion": raw.get("schemaVersion"),
-        "moduleCount": len(raw["modules"]),
+        "moduleCount": len(templates),
         "size": stat.st_size,
         "mtime_ns": stat.st_mtime_ns,
         "source": raw.get("source"),
@@ -380,21 +418,26 @@ def load_location_catalog(catalog_path: Path = DEFAULT_LOCATION_CATALOG) -> Loca
     resolved = catalog_path.resolve()
     if not resolved.is_file():
         raise LocationCatalogError(f"Required location catalog not found: {resolved}")
-    stat = resolved.stat()
-    return _load_location_catalog_cached(str(resolved), stat.st_size, stat.st_mtime_ns)
+    try:
+        stat = resolved.stat()
+    except OSError as exc:
+        raise LocationCatalogError(f"Unable to read location catalog {resolved}: {exc}") from exc
+    return _load_location_catalog_cached(
+        str(resolved),
+        stat.st_size,
+        stat.st_mtime_ns,
+        _catalog_content_fingerprint(resolved, LocationCatalogError, "location catalog"),
+    )
 
 
 @lru_cache(maxsize=None)
-def _load_location_catalog_cached(path_value: str, size: int, mtime_ns: int) -> LocationCatalog:
-    del size, mtime_ns
+def _load_location_catalog_cached(path_value: str, size: int, mtime_ns: int, content_fingerprint: str) -> LocationCatalog:
+    del size, mtime_ns, content_fingerprint
     path = Path(path_value)
-    try:
-        with path.open("r", encoding="utf-8-sig") as handle:
-            raw = json.load(handle)
-    except (OSError, json.JSONDecodeError) as exc:
-        raise LocationCatalogError(f"Unable to read location catalog {path}: {exc}") from exc
-    if not isinstance(raw, dict) or raw.get("schemaVersion") != 2:
+    raw = _read_standalone_catalog(path, LocationCatalogError, "location catalog")
+    if raw.get("schemaVersion") != 2:
         raise LocationCatalogError(f"Unsupported or missing location catalog schemaVersion in: {path}")
+    _validate_standalone_payload_fingerprint(raw, LocationCatalogError, "location catalog", path)
     if not isinstance(raw.get("scenarioOverrides"), dict):
         raise LocationCatalogError(f"Invalid scenarioOverrides collection in location catalog: {path}")
     if raw["scenarioOverrides"]:
@@ -574,16 +617,33 @@ def load_hab_module_catalog(catalog_path: Path = DEFAULT_MODULE_CATALOG) -> dict
     resolved = catalog_path.resolve()
     if not resolved.is_file():
         raise ModuleCatalogError(f"Required module catalog not found: {resolved}")
-    stat = resolved.stat()
-    return _load_hab_module_catalog_cached(str(resolved), stat.st_size, stat.st_mtime_ns)
+    try:
+        stat = resolved.stat()
+    except OSError as exc:
+        raise ModuleCatalogError(f"Unable to read module catalog {resolved}: {exc}") from exc
+    return _load_hab_module_catalog_cached(
+        str(resolved),
+        stat.st_size,
+        stat.st_mtime_ns,
+        _catalog_content_fingerprint(resolved, ModuleCatalogError, "module catalog"),
+    )
+
+
+def _load_module_catalog_raw(path: Path) -> dict[str, Any]:
+    raw = _read_standalone_catalog(path, ModuleCatalogError, "module catalog")
+    if type(raw.get("schemaVersion")) is not int or raw["schemaVersion"] != 1:
+        raise ModuleCatalogError(f"Unsupported or missing module catalog schemaVersion in: {path}")
+    _validate_standalone_payload_fingerprint(raw, ModuleCatalogError, "module catalog", path)
+    return raw
 
 
 @lru_cache(maxsize=None)
-def _load_hab_module_catalog_cached(path_value: str, size: int, mtime_ns: int) -> dict[str, dict[str, Any]]:
-    del size, mtime_ns
+def _load_hab_module_catalog_cached(
+    path_value: str, size: int, mtime_ns: int, content_fingerprint: str
+) -> dict[str, dict[str, Any]]:
+    del size, mtime_ns, content_fingerprint
     path = Path(path_value)
-    with path.open("r", encoding="utf-8-sig") as handle:
-        raw = json.load(handle)
+    raw = _load_module_catalog_raw(path)
     modules = raw.get("modules") if isinstance(raw, dict) else None
     if not isinstance(modules, list) or not modules:
         raise ModuleCatalogError(f"Invalid or empty module catalog: {path}")
@@ -597,8 +657,11 @@ def _load_hab_module_catalog_cached(path_value: str, size: int, mtime_ns: int) -
         "miningModifier",
     }
     for module in modules:
-        if not isinstance(module, dict) or not module.get("dataName"):
+        if not isinstance(module, dict) or not isinstance(module.get("dataName"), str) or not module["dataName"]:
             raise ModuleCatalogError(f"Invalid module row in catalog: {path}")
+        data_name = module["dataName"]
+        if data_name in templates:
+            raise ModuleCatalogError(f"Duplicate module dataName {data_name!r} in catalog: {path}")
         operation = module.get("operation")
         missing_operation_fields = required_operation_fields - set(operation if isinstance(operation, dict) else {})
         if missing_operation_fields:
@@ -607,7 +670,10 @@ def _load_hab_module_catalog_cached(path_value: str, size: int, mtime_ns: int) -
                 f"{sorted(missing_operation_fields)} in catalog: {path}"
             )
         template = _catalog_module_to_template(module)
-        templates[str(template["dataName"])] = template
+        templates[data_name] = template
+    expected_indexes = {name: index for index, name in enumerate(module["dataName"] for module in modules)}
+    if raw.get("byDataName") != expected_indexes:
+        raise ModuleCatalogError(f"Module catalog byDataName indexes do not match row order: {path}")
     return templates
 
 

@@ -2,7 +2,9 @@
 
 Small local parser for Terra Invicta `.gz` saves. It reads the full save once,
 builds a compact indexed snapshot, and reuses a cache keyed by save path, size,
-and modification time.
+modification time, and packaged runtime catalog bytes. Cache hits validate the
+current runtime bundle; malformed cache entries rebuild automatically, and
+completed cache files replace previous entries atomically.
 
 Implementation layout:
 
@@ -11,13 +13,14 @@ Implementation layout:
 - `tools/ti_parser_income.py` owns councilor and nation income calculations.
 - `tools/ti_parser_hab.py` owns hab module, support, mining, and power calculations.
 - `tools/ti_parser_org.py` owns org-plan parsing, conditional evaluation, and committee assignment search.
+- `tools/ti_parser_ship.py` owns pure ship component, resource, power, armor, and ranking helpers.
 - `tools/ti_parser_cli.py` owns argument parsing and command dispatch.
 - `tools/ti_parser_catalogs.py` validates the packaged runtime bundle, manifest, exact scenario overlays, and fingerprints.
 - `tools/ti_parser_mechanics.py` owns stable mechanics rule IDs and DLL/catalog/test provenance.
 - `tools/ti_parser_nation_validity.py` owns the shared value-only, tri-state priority-validity evaluator.
 - `tools/ti_parser_nation_projection.py` owns cloned projection state, plan parsing, transactional updates, and fail-closed coverage.
 - `tools/ti_parser_projection_coverage.py` owns execution-derived metric evidence and dependency propagation.
-- `tools/ti_save_parser.py` keeps the public script entrypoint and thin compatibility wrappers.
+- `tools/ti_save_parser.py` keeps the public script entrypoint, compatibility exports, and the remaining domain orchestration.
 - `tools/catalog_utils.py` contains shared catalog-generator helpers.
 
 Examples:
@@ -68,6 +71,11 @@ subcommand.
 Normal commands do not discover or read an installed Terra Invicta template tree. Calculation data comes from the packaged effect, trait, org, research, ship, nation-claim, hab-module, and location catalogs under `data/`. Raw base/DLC templates and `Assembly-CSharp.dll` are generation or `catalog-verify` inputs only. `--templates-dir` is verification-only and is rejected for normal commands.
 
 The common `catalog_manifest.json` records each new runtime catalog's file SHA-256, schema version, payload fingerprint, and a bundle fingerprint. Catalog envelopes contain deterministic source hashes, supported canonical scenarios, base data, and exact scenario overrides; timestamps and mtimes are excluded. Unsupported scenarios never inherit another scenario's values.
+
+Each CLI invocation reuses its validated runtime bundles for matching scenario,
+data directory, and requested catalogs. The next invocation validates files
+again. Library callers can opt into the same lifetime with
+`ti_parser_catalogs.runtime_catalog_scope()`; otherwise loads remain fresh.
 
 If a save references a required effect, trait, applying org, active hab module/body location, weighted research row, saved ship component, or packaged shipyard that cannot be resolved, the CLI exits with code 2 and prints `status: "incomplete"` plus structured `missingDependencies`. Valid absence remains valid: empty source lists, non-applying orgs, zero-weight or locked research slots, and empty optional ship slots do not require catalog rows. Successful command JSON keeps its existing result shape.
 
@@ -317,3 +325,5 @@ comparison proxies rather than a transfer or combat simulation.
 The `nation-claims` command distinguishes peaceful, statically hostile, and democracy-conditional hostile claims. It reports the strict comparison `target.democracy > claimant.democracy + democracyDecreaseToMakeHostileClaim` with values and provenance. Permanence and post-annexation/unification/independence succession remain `unknown / not reconstructed` unless directly evidenced.
 
 The `ai-fleet-diagnostics` command inspects supported attack/transport goals, assigned and pending fleets, ships, habs, shipyards, queues, resources, and mission-control evidence for one or all AI factions. It separates observed, derived, suspected, and unknown facts. An empty queue never implies a resource shortage, and stale suspicion is added only when `--stale-days` is supplied.
+
+Module and location catalogs carry embedded canonical payload fingerprints. Runtime loaders reject altered payloads and duplicate module IDs; provenance timestamps are excluded from the fingerprint. Regenerate older custom catalogs with `tools/build_module_catalog.py` or `tools/build_location_catalog.py` before use. These standalone fingerprints are separate from the runtime bundle manifest.

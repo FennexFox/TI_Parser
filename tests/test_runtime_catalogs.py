@@ -3,6 +3,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -16,6 +17,8 @@ from ti_parser_catalogs import (
     RuntimeCatalogs,
     UnsupportedCatalogScenarioError,
     file_sha256,
+    load_runtime_catalogs,
+    runtime_catalog_scope,
     validate_catalog_envelope,
     value_fingerprint,
 )
@@ -28,6 +31,42 @@ def write_json(path: Path, value):
 
 
 class RuntimeCatalogTests(unittest.TestCase):
+    def test_scoped_loads_reuse_only_matching_validated_inputs(self):
+        with patch.object(RuntimeCatalogs, "load", wraps=RuntimeCatalogs.load) as loader:
+            with runtime_catalog_scope():
+                first = load_runtime_catalogs("ModernScenario", self.output)
+                self.assertIs(first, load_runtime_catalogs("ModernScenario", self.output))
+                other_scenario = load_runtime_catalogs("BrokenEarthScenario", self.output)
+                self.assertIsNot(first, other_scenario)
+                subset = load_runtime_catalogs("ModernScenario", self.output, catalog_files=["trait_catalog.json"])
+                self.assertIsNot(first, subset)
+                self.assertEqual(loader.call_count, 3)
+            with runtime_catalog_scope():
+                self.assertIsNot(first, load_runtime_catalogs("ModernScenario", self.output))
+            self.assertEqual(loader.call_count, 4)
+
+    def test_new_scope_revalidates_changed_catalog_and_failed_load_is_not_cached(self):
+        with runtime_catalog_scope():
+            load_runtime_catalogs("ModernScenario", self.output)
+        path = self.output / "trait_catalog.json"
+        original = path.read_bytes()
+        path.write_bytes(original + b" ")
+        with runtime_catalog_scope():
+            with self.assertRaises(CatalogIntegrityError):
+                load_runtime_catalogs("ModernScenario", self.output)
+            path.write_bytes(original)
+            self.assertIn("Trait_Test", load_runtime_catalogs("ModernScenario", self.output).traits)
+
+    def test_scope_is_reset_after_exception(self):
+        with self.assertRaisesRegex(RuntimeError, "command failed"):
+            with runtime_catalog_scope():
+                load_runtime_catalogs("ModernScenario", self.output)
+                raise RuntimeError("command failed")
+        path = self.output / "trait_catalog.json"
+        path.write_bytes(path.read_bytes() + b" ")
+        with self.assertRaises(CatalogIntegrityError):
+            load_runtime_catalogs("ModernScenario", self.output)
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)

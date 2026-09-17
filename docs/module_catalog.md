@@ -34,7 +34,7 @@ Module count: `156` total, `110` normally buildable human modules.
 | 군사 과학 연구실 | MilitaryScienceLab | 1 | Any | powerConsumer, research, upkeep | -5 | 3 | 0 | 0 | Research:5 | Money:2.025, Water:0.0875, Volatiles:0.0875 | Project_MilitaryScienceLab |
 | 사회 과학 연구실 | SocialScienceLab | 1 | Any | powerConsumer, research, upkeep | -4 | 3 | 0 | 0 | Research:5 | Money:3.025, Water:0.0875, Volatiles:0.0875 | Project_SocialScienceLab |
 | 태양광 수집기 | SolarCollector | 1 | Any | powerProducer, upkeep | 20 | 1 | 0 | 0 |  | Money:1.008333, Water:0.029167, Volatiles:0.029167 | Project_SolarCollector |
-| 우주 정거장 | SpaceDock | 1 | Any | powerConsumer, resupply, shipyard, upkeep | -20 | 40 | 0 | 0 |  | Money:0.333333, Water:1.166667, Volatiles:1.166667, Metals:1, NobleMetals:0.1 | Project_SpaceDock |
+| 우주 도크 | SpaceDock | 1 | Any | powerConsumer, resupply, shipyard, upkeep | -20 | 40 | 0 | 0 |  | Money:0.333333, Water:1.166667, Volatiles:1.166667, Metals:1, NobleMetals:0.1 | Project_SpaceDock |
 | 우주 과학 연구실 | SpaceScienceLab | 1 | Any | powerConsumer, research, upkeep | -5 | 3 | 0 | 0 | Research:5 | Money:2.025, Water:0.0875, Volatiles:0.0875 | Project_SpaceScienceLab |
 | 외계학 연구실 | XenologyLab | 1 | Any | powerConsumer, research, upkeep | -10 | 3 | 0 | 0 | Research:5 | Money:2.025, Water:0.0875, Volatiles:0.0875 | Project_XenologyLab |
 | 자동화된 채굴단지 | AutomatedMiningComplex | 1 | Base | mine, powerConsumer, upkeep | -12 | 0 | 0 | 0 |  | Water:2, Volatiles:0.5 | Project_AutomatedMiningComplex |
@@ -95,7 +95,7 @@ Module count: `156` total, `110` normally buildable human modules.
 | 기후 연구원 | ClimateInstitute | 3 | Station | powerConsumer, research, upkeep | -60 | 75 | 0 | 0 | Research:15 | Money:20.625, Water:2.1875, Volatiles:2.6875, Metals:0.5, NobleMetals:0.5 | Project_ClimateInstitute |
 | 헬륨-3 광산 | Helium-3Mine | 3 | Station | mcConsumer, powerConsumer, upkeep | -300 | 75 | -3 | 0 | MissionControl:-3 | Money:30.625, Water:4.1875, Volatiles:4.1875, Metals:10, NobleMetals:1.5 | Project_Helium-3Mine |
 | 성간 발사 시설 | InterstellarLaunchingLaser | 3 | Station | mcConsumer, powerConsumer, upkeep | -5000 | 80 | -20 | 0 | MissionControl:-20 | Money:20.666667, Water:2.333333, Volatiles:2.333333 | Project_InterstellarLaunchingLaser |
-| 링형 거주지 코어 | RingCore | 3 | Station | core, mcConsumer, upkeep | 0 | 75 | -4 | 0 | MissionControl:-4 | Money:20.625, Water:2.1875, Volatiles:2.1875 | Project_RingCore |
+| 고리형 거주지 코어 | RingCore | 3 | Station | core, mcConsumer, upkeep | 0 | 75 | -4 | 0 | MissionControl:-4 | Money:20.625, Water:2.1875, Volatiles:2.1875 | Project_RingCore |
 | 센티넬 복합단지 | SentinelComplex | 3 | Station | mcConsumer, powerConsumer, upkeep | -150 | 100 | -1 | 0 | MissionControl:-1 | Money:20.833333, Water:2.916667, Volatiles:2.916667 | Project_SentinelComplex |
 | 초대형 입자 가속기 | Supercollider | 3 | Station | powerConsumer, research, upkeep | -750 | 100 | 0 | 0 | Research:10, Antimatter:0.1 | Money:120.833333, Water:32.916667, Volatiles:32.916667, Metals:20, NobleMetals:20, Fissiles:10 | Project_Supercollider |
 
@@ -124,7 +124,7 @@ Module count: `156` total, `110` normally buildable human modules.
 | 주둔지 | Quarters | 1 | Any | economy, powerConsumer, upkeep | -2 | 50 | 0 | 0 | Money:3, Influence:2 | Water:1.558333, Volatiles:1.558333 | Project_Quarters |
 | 사회 과학 연구실 | SocialScienceLab | 1 | Any | powerConsumer, research, upkeep | -4 | 3 | 0 | 0 | Research:5 | Money:3.025, Water:0.0875, Volatiles:0.0875 | Project_SocialScienceLab |
 | 태양광 수집기 | SolarCollector | 1 | Any | powerProducer, upkeep | 20 | 1 | 0 | 0 |  | Money:1.008333, Water:0.029167, Volatiles:0.029167 | Project_SolarCollector |
-| 우주 정거장 | SpaceDock | 1 | Any | powerConsumer, resupply, shipyard, upkeep | -20 | 40 | 0 | 0 |  | Money:0.333333, Water:1.166667, Volatiles:1.166667, Metals:1, NobleMetals:0.1 | Project_SpaceDock |
+| 우주 도크 | SpaceDock | 1 | Any | powerConsumer, resupply, shipyard, upkeep | -20 | 40 | 0 | 0 |  | Money:0.333333, Water:1.166667, Volatiles:1.166667, Metals:1, NobleMetals:0.1 | Project_SpaceDock |
 | 우주 과학 연구실 | SpaceScienceLab | 1 | Any | powerConsumer, research, upkeep | -5 | 3 | 0 | 0 | Research:5 | Money:2.025, Water:0.0875, Volatiles:0.0875 | Project_SpaceScienceLab |
 | 보급창 | SupplyDepot | 1 | Any | resupply, upkeep | 0 | 3 | 0 | 0 |  | Money:0.025, Water:0.0875, Volatiles:0.0875 | Project_SupplyDepot |
 | 외계학 연구실 | XenologyLab | 1 | Any | powerConsumer, research, upkeep | -10 | 3 | 0 | 0 | Research:5 | Money:2.025, Water:0.0875, Volatiles:0.0875 | Project_XenologyLab |
@@ -208,7 +208,7 @@ Module count: `156` total, `110` normally buildable human modules.
 | 기후 연구원 | ClimateInstitute | 3 | Station | powerConsumer, research, upkeep | -60 | 75 | 0 | 0 | Research:15 | Money:20.625, Water:2.1875, Volatiles:2.6875, Metals:0.5, NobleMetals:0.5 | Project_ClimateInstitute |
 | 헬륨-3 광산 | Helium-3Mine | 3 | Station | mcConsumer, powerConsumer, upkeep | -300 | 75 | -3 | 0 | MissionControl:-3 | Money:30.625, Water:4.1875, Volatiles:4.1875, Metals:10, NobleMetals:1.5 | Project_Helium-3Mine |
 | 성간 발사 시설 | InterstellarLaunchingLaser | 3 | Station | mcConsumer, powerConsumer, upkeep | -5000 | 80 | -20 | 0 | MissionControl:-20 | Money:20.666667, Water:2.333333, Volatiles:2.333333 | Project_InterstellarLaunchingLaser |
-| 링형 거주지 코어 | RingCore | 3 | Station | core, mcConsumer, upkeep | 0 | 75 | -4 | 0 | MissionControl:-4 | Money:20.625, Water:2.1875, Volatiles:2.1875 | Project_RingCore |
+| 고리형 거주지 코어 | RingCore | 3 | Station | core, mcConsumer, upkeep | 0 | 75 | -4 | 0 | MissionControl:-4 | Money:20.625, Water:2.1875, Volatiles:2.1875 | Project_RingCore |
 | 센티넬 복합단지 | SentinelComplex | 3 | Station | mcConsumer, powerConsumer, upkeep | -150 | 100 | -1 | 0 | MissionControl:-1 | Money:20.833333, Water:2.916667, Volatiles:2.916667 | Project_SentinelComplex |
 | 솔레타 | Soletta | 3 | Station | powerConsumer, upkeep | -12 | 25 | 0 | 0 |  | Money:10.208333, Water:0.729167, Volatiles:0.729167, Metals:3, NobleMetals:0.5 | Project_Soletta |
 | 우주 리조트 | SpaceResort | 3 | Station | economy, powerConsumer, upkeep | -90 | 1000 | 0 | 0 | Money:400, Influence:5 | Money:8.333333, Boost:6, Water:39.166667, Volatiles:34.166667 | Project_SpaceResort |

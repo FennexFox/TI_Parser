@@ -513,6 +513,30 @@ def summarize_faction(
     )
 
 
+def councilor_activity(councilor: dict[str, Any]) -> tuple[bool | None, bool | None]:
+    """Reconstruct TICouncilorState.active/detained from serialized fields.
+
+    Computed properties are absent in normal saves. Explicit legacy properties
+    remain usable when their underlying serialized fields are unavailable.
+    """
+
+    detained = councilor.get("detained")
+    if "detainingFaction" in councilor:
+        detainer = councilor["detainingFaction"]
+        detained = False if detainer is None else True if ref_id(detainer) is not None else None
+    if not isinstance(detained, bool):
+        detained = None
+    status = councilor.get("status")
+    if isinstance(status, str) and status in {"None", "Dead", "Offmap"}:
+        return False, detained
+    if detained is True:
+        return False, True
+    if status == "Active":
+        return (None if detained is None else not detained), detained
+    active = councilor.get("active")
+    return (active if isinstance(active, bool) and status is None else None), detained
+
+
 def summarize_councilors(
     indexed: IndexedState,
     trait_templates: dict[str, dict[str, Any]],
@@ -525,6 +549,7 @@ def summarize_councilors(
         home_region = ref_summary(indexed, councilor.get("homeRegion"))
         location = ref_summary(indexed, councilor.get("location"))
         attributes = councilor_attribute_breakdown(indexed, councilor, trait_templates, config)
+        active, detained = councilor_activity(councilor)
         result.append(
             clean_numbers(
                 {
@@ -537,8 +562,8 @@ def summarize_councilors(
                     "locationNation": region_nation_summary(indexed, councilor.get("location")),
                     "homeRegion": home_region,
                     "homeNation": region_nation_summary(indexed, councilor.get("homeRegion")),
-                    "active": councilor.get("active"),
-                    "detained": councilor.get("detained"),
+                    "active": active,
+                    "detained": detained,
                     "turned": councilor.get("turned"),
                     "personalName": councilor.get("personalName"),
                     "familyName": councilor.get("familyName"),

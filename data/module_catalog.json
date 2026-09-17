@@ -1953,7 +1953,7 @@
       "dataName": "SpaceDock",
       "friendlyName": "Space Dock",
       "displayName": {
-        "kor": "우주 정거장",
+        "kor": "우주 도크",
         "en": "Space Dock"
       },
       "description": {
@@ -2777,7 +2777,7 @@
       "dataName": "AlienSpacedock",
       "friendlyName": "Alien Spacedock",
       "displayName": {
-        "kor": "외계 우주 정거장",
+        "kor": "외계 우주 도크",
         "en": "Alien Spacedock"
       },
       "description": {
@@ -6175,7 +6175,7 @@
         "en": "Shipyard"
       },
       "description": {
-        "kor": "거대한 함선 건조 시설로, 우주 정거장보다 훨씬 더 빠르게 거대한 함선을 건조할 수 있는 시설입니다. 또한 보급창으로도 이용될 수 있으며 탐사선을 발사할 수 있습니다.",
+        "kor": "거대한 함선 건조 시설로, 우주 도크보다 훨씬 더 빠르게 거대한 함선을 건조할 수 있는 시설입니다. 또한 보급창으로도 이용될 수 있으며 탐사선을 발사할 수 있습니다.",
         "en": "A large ship construction facility, able to complete larger vessels much more quickly than at a space dock. Also functions as a supply depot and launches probes."
       },
       "tier": 2,
@@ -10143,7 +10143,7 @@
         "en": "Nanofacturing Complex"
       },
       "description": {
-        "kor": "이 거주지의 모듈 건축이 가속되며 현재 행성/소행성계에서 추가적인 링형 거주지 및 식민지의 건설이 가능해집니다.",
+        "kor": "이 거주지의 모듈 건축이 가속되며 현재 행성/소행성계에서 추가적인 고리형 거주지 및 식민지의 건설이 가능해집니다.",
         "en": "Accelerates the construction of all hab modules at a hab and allows founding additional Rings and Colonies in this planetary/asteroidal system."
       },
       "tier": 3,
@@ -12199,11 +12199,11 @@
       "dataName": "RingCore",
       "friendlyName": "Ring Core",
       "displayName": {
-        "kor": "링형 거주지 코어",
+        "kor": "고리형 거주지 코어",
         "en": "Ring Core"
       },
       "description": {
-        "kor": "스테이션을 링형 거주지로 업그레이드 할 경우, 총 5개의 섹터를 갖추게 되며, 3 티어 모듈을 건설할 수 있게 됩니다.",
+        "kor": "스테이션을 고리형 거주지로 업그레이드 할 경우, 총 5개의 섹터를 갖추게 되며, 3 티어 모듈을 건설할 수 있게 됩니다.",
         "en": "Upgrades the station to a Ring, with a total of five sectors, and allowing the construction of Tier 3 modules."
       },
       "tier": 3,
@@ -12632,7 +12632,7 @@
       "dataName": "AlienRingCore",
       "friendlyName": "Alien Ring Core",
       "displayName": {
-        "kor": "외계 링형 거주지 코어",
+        "kor": "외계 고리형 거주지 코어",
         "en": "Alien Ring Core"
       },
       "description": {
@@ -12943,5 +12943,6 @@
     "Supercollider": 153,
     "AlienRingCore": 154,
     "AlienWatchtower": 155
-  }
+  },
+  "payloadFingerprint": "95c33ecab42aab6ed46d1b3220d73183288661f4ea84396efad22d551f683a16"
 }

@@ -21,6 +21,7 @@ from catalog_utils import (
     write_json_output,
     write_text_output,
 )
+from standalone_catalog_integrity import attach_payload_fingerprint
 
 
 SCHEMA_VERSION = 1
@@ -294,7 +295,7 @@ def build_catalog(templates_dir: Path, languages: list[str]) -> dict[str, Any]:
         if not template.get("disable")
     ]
     modules.sort(key=module_sort_key)
-    return {
+    return attach_payload_fingerprint({
         "schemaVersion": SCHEMA_VERSION,
         "source": {
             "templateRoot": "TerraInvicta_Data/StreamingAssets/Templates",
@@ -309,7 +310,7 @@ def build_catalog(templates_dir: Path, languages: list[str]) -> dict[str, Any]:
         "resources": list(RESOURCES),
         "modules": modules,
         "byDataName": {module["dataName"]: index for index, module in enumerate(modules)},
-    }
+    })
 
 
 def format_resource_map(values: dict[str, Any]) -> str:

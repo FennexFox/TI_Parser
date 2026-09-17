@@ -8,6 +8,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from ti_parser_catalogs import runtime_catalog_scope
+
 
 RAW_COMMANDS = {
     "org-plan": "command_org_plan",
@@ -228,6 +230,11 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
 
 
 def main(api: ModuleType, argv: list[str] | None = None) -> int:
+    with runtime_catalog_scope():
+        return _run_command(api, argv)
+
+
+def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
     parser = build_parser(api)
     args = parser.parse_args(argv)
     command = args.command or "summary"

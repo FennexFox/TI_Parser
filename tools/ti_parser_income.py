@@ -359,22 +359,9 @@ def nation_adviser_science_bonus(
     councilor_by_id: dict[int, dict[str, Any]],
     extra_advisor: tuple[int, float] | None = None,
 ) -> float:
-    sciences: list[float] = []
-    existing_ids: set[int] = set()
-    refs = nation.get("advisingCouncilors") if isinstance(nation.get("advisingCouncilors"), list) else []
-    for councilor_ref in refs:
-        councilor_id = ref_id(councilor_ref)
-        if councilor_id is None:
-            continue
-        existing_ids.add(councilor_id)
-        summary = councilor_by_id.get(councilor_id)
-        if not summary:
-            continue
-        final_attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
-        sciences.append(as_float(final_attributes.get("Science"), 0.0))
-    if extra_advisor and extra_advisor[0] not in existing_ids:
-        sciences.append(extra_advisor[1])
-    return adviser_attribute_bonus_from_values(sciences)
+    return adviser_attribute_bonus_from_values(
+        adviser_attribute_values(nation, councilor_by_id, "Science", extra_advisor)
+    )
 
 
 def adviser_attribute_bonus_from_values(values: list[float] | tuple[float, ...]) -> float:
@@ -384,23 +371,53 @@ def adviser_attribute_bonus_from_values(values: list[float] | tuple[float, ...])
     return sum(value / 100.0 / (index + 1.0) for index, value in enumerate(ordered))
 
 
+def adviser_attribute_values(
+    state: dict[str, Any],
+    councilor_by_id: dict[int, dict[str, Any]],
+    attribute: str,
+    extra_advisor: tuple[int, float] | None = None,
+) -> list[float]:
+    """Extract active, non-detained advising attributes from a nation or hab.
+
+    Snapshot summaries reconstruct activity from serialized status and detention
+    references. Unknown activity cannot be treated as an active adviser.
+    """
+
+    values: list[float] = []
+    existing_ids: set[int] = set()
+    refs = state.get("advisingCouncilors") if isinstance(state.get("advisingCouncilors"), list) else []
+    for councilor_ref in refs:
+        councilor_id = ref_id(councilor_ref)
+        if councilor_id is not None:
+            existing_ids.add(councilor_id)
+        summary = councilor_by_id.get(councilor_id)
+        if not isinstance(summary, dict):
+            raise CalculationDependencyError(CalculationDependency(
+                kind="councilor", name=str(councilor_id), context="adviser-bonus",
+                scenario=None, reason="referenced advising councilor cannot be resolved",
+            ))
+        if summary.get("active") is False or summary.get("detained") is True:
+            continue
+        if summary.get("active") is not True:
+            raise CalculationDependencyError(CalculationDependency(
+                kind="councilor-activity", name=str(councilor_id), context="adviser-bonus",
+                scenario=None, reason="advising councilor activity is unknown",
+            ))
+        final_attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
+        values.append(as_float(final_attributes.get(attribute), 0.0))
+    # A scenario-only advisor represents a new assignment.  Keep the historical
+    # identity de-duplication behavior even if that saved reference is inactive.
+    if extra_advisor and extra_advisor[0] not in existing_ids:
+        values.append(extra_advisor[1])
+    return values
+
+
 def state_adviser_attribute_bonus(
     state: dict[str, Any],
     councilor_by_id: dict[int, dict[str, Any]],
     attribute: str,
 ) -> float:
-    values: list[float] = []
-    refs = state.get("advisingCouncilors") if isinstance(state.get("advisingCouncilors"), list) else []
-    for councilor_ref in refs:
-        councilor_id = ref_id(councilor_ref)
-        if councilor_id is None:
-            continue
-        summary = councilor_by_id.get(councilor_id)
-        if not summary or not summary.get("active", True):
-            continue
-        final_attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
-        values.append(as_float(final_attributes.get(attribute), 0.0))
-    return adviser_attribute_bonus_from_values(values)
+    return adviser_attribute_bonus_from_values(adviser_attribute_values(state, councilor_by_id, attribute))
 
 
 def nation_monthly_research_from_values(
@@ -451,19 +468,7 @@ def nation_monthly_research(
     unrest = as_float(nation.get("unrest"), 0.0)
     num_control_points = int(as_float(nation.get("numControlPoints"), len(nation_control_points(indexed, nation))))
 
-    sciences: list[float] = []
-    refs = nation.get("advisingCouncilors") if isinstance(nation.get("advisingCouncilors"), list) else []
-    existing_ids: set[int] = set()
-    for councilor_ref in refs:
-        councilor_id = ref_id(councilor_ref)
-        if councilor_id is None:
-            continue
-        existing_ids.add(councilor_id)
-        summary = councilor_by_id.get(councilor_id, {})
-        attributes = summary.get("finalAttributes") if isinstance(summary.get("finalAttributes"), dict) else {}
-        sciences.append(as_float(attributes.get("Science"), 0.0))
-    if extra_advisor and extra_advisor[0] not in existing_ids:
-        sciences.append(extra_advisor[1])
+    sciences = adviser_attribute_values(nation, councilor_by_id, "Science", extra_advisor)
     return nation_monthly_research_from_values(
         population_millions=population_millions,
         gdp=gdp,

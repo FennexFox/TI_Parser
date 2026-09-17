@@ -1,5 +1,6 @@
 import io
 import json
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -9,9 +10,21 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import ti_save_parser as ti
+from ti_parser_catalogs import RuntimeCatalogs
+from tests import test_package_only_runtime as fixtures
 
 
 class ParserCliTests(unittest.TestCase):
+    def test_topbar_reuses_catalogs_within_each_command_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            save = fixtures.PackageOnlyRuntimeTests()._save(Path(directory))
+            with patch.object(RuntimeCatalogs, "load", wraps=RuntimeCatalogs.load) as loader:
+                for invocation in (1, 2):
+                    code, output, errors = self.run_cli(["--save", str(save), "topbar"])
+                    self.assertEqual(code, 0, errors)
+                    self.assertIn("resources", json.loads(output))
+                    self.assertEqual(loader.call_count, invocation)
+
     def run_cli(self, args):
         output, errors = io.StringIO(), io.StringIO()
         with redirect_stdout(output), redirect_stderr(errors):

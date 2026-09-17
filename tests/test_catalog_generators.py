@@ -128,6 +128,7 @@ class CatalogGeneratorTests(unittest.TestCase):
             catalog = lc.build_catalog(templates_dir)
 
             self.assertEqual(catalog["schemaVersion"], 2)
+            self.assertEqual(len(catalog["payloadFingerprint"]), 64)
             self.assertEqual(catalog["source"]["spaceBodyTemplate"]["file"], "TISpaceBodyTemplate.json")
             self.assertEqual(catalog["source"]["navigableTemplate"]["file"], "TINavigableTemplate.json")
             self.assertEqual(catalog["source"]["orbitTemplate"]["file"], "TIOrbitTemplate.json")
@@ -244,6 +245,7 @@ class CatalogGeneratorTests(unittest.TestCase):
             markdown = mc.build_markdown(catalog, "kor")
 
             self.assertEqual(catalog["schemaVersion"], 1)
+            self.assertEqual(len(catalog["payloadFingerprint"]), 64)
             self.assertEqual(catalog["source"]["moduleTemplate"]["file"], "TIHabModuleTemplate.json")
             self.assertEqual(len(catalog["modules"]), 1)
             self.assertEqual(catalog["modules"][0]["dataName"], "Module_Alpha")
