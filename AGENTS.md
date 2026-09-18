@@ -103,50 +103,44 @@ collection, or materially improves quality.
 
 ### Current preferred routing
 
-When the runtime supports explicit child model and reasoning-effort
-selection:
+When the runtime supports explicit child model and reasoning-effort selection:
 
-- **GPT-6 Astra, low**: preferred root coordinator. Use for task
-  decomposition, deciding what evidence is needed, assigning workers,
-  integrating worker results, and final checks.
-
-- **GPT-5.6 Luna, low**: repository search, symbol/usages lookup,
-  extraction, inventory work, repetitive read-heavy inspection, and simple
-  log/test-output classification.
-
-- **GPT-5.6 Luna, medium**: bounded analysis that needs modest reasoning but
-  has a clear question and narrow evidence set. Also suitable for very small,
+- **GPT-6 Astra, low**: preferred root coordinator. Use for task decomposition,
+  deciding what evidence is needed, assigning workers, integrating worker
+  results, and final checks. Keep the root focused on orchestration and global
+  state rather than routine implementation.
+- **GPT-5.6 Luna, low**: repository search, symbol/usages lookup, extraction,
+  inventory work, repetitive read-heavy inspection, and simple log/test-output
+  classification.
+- **GPT-5.6 Luna, medium**: bounded analysis that needs modest reasoning but has
+  a clear question and narrow evidence set. Also suitable for very small,
   mechanically specified code changes where implementation judgment is minimal.
-
 - **GPT-5.6 Luna, xhigh**: preferred default implementation worker. Use for
   ordinary implementation, refactoring, test writing, and debugging when the
   task is reasonably well specified and the relevant code surface is bounded.
-  Prefer this over Luna max for routine software-engineering work because it
-  provides substantial reasoning headroom without routinely paying for the
-  longest single-agent reasoning pass.
-
-- **GPT-5.6 Luna, max**: bounded implementation/debugging escalation. Use
-  when Luna xhigh has produced an incomplete result, when several plausible
-  implementations or failure causes must be explored and checked, or when a
-  difficult but still well-scoped task benefits from additional search,
-  verification, and revision. Do not use max by default merely because a task
-  involves coding.
-
-- **GPT-5.6 Terra, medium**: capability and context-integration escalation.
-  Use when the task requires reliable judgment across a broad repository
-  surface, integrating many files or subsystems, choosing abstractions or
-  APIs with significant downstream effects, or when Luna xhigh/max repeatedly
-  misses relevant context or produces structurally weak solutions. Prefer Terra
-  over simply increasing Luna effort when the suspected limitation is model
-  capability or context integration rather than insufficient deliberation.
-
-- **GPT-6 Astra, medium**: escalation for conflicting worker evidence,
-  invalidated plans, parser/game-semantics disagreements, repeated worker
+  Prefer this over Luna max for routine software-engineering work.
+- **GPT-5.6 Luna, max**: bounded reasoning escalation. Use when Luna xhigh has
+  produced an incomplete result, several plausible implementations or failure
+  causes must be explored and checked, or a difficult but still well-scoped task
+  benefits from deeper search, verification, and revision. Do not use max by
+  default merely because a task involves coding.
+- **GPT-5.6 Sol, medium**: capability and context-integration escalation. Use
+  when the relevant scope is broad, several subsystems must be integrated,
+  abstraction or API choices have significant downstream effects, or Luna
+  repeatedly misses relevant context or produces structurally weak solutions.
+  Prefer Sol over simply increasing Luna effort when the likely limitation is
+  model capability or context breadth rather than insufficient deliberation.
+- **GPT-5.6 Sol, high**: difficult implementation and engineering escalation.
+  Use for stubborn cross-cutting debugging, complex refactors or migrations,
+  subtle stateful/concurrent behavior, or other bounded technical work where Sol
+  medium is insufficient. Keep final cross-source synthesis and repository-level
+  semantic decisions with the Astra coordinator.
+- **GPT-6 Astra, medium**: root-level escalation for conflicting worker
+  evidence, invalidated plans, parser/game-semantics disagreements, repeated
   failures that suggest the problem framing itself may be wrong, or
   architecture/simulation-semantics decisions requiring stronger global
   reasoning.
-
-- **GPT-6 Astra, high**: exceptional escalation only for unresolved,
+- **GPT-6 Astra, high**: exceptional root escalation only for unresolved,
   high-impact, structurally difficult problems where Astra medium has not been
   sufficient.
 
@@ -154,13 +148,34 @@ Model names are routing preferences, not repository invariants. If a requested
 model or effort is unavailable, preserve the role separation and use the
 cheapest available worker that can reliably perform the bounded task.
 
+### Worker escalation policy
+
+Do not treat the routing list as a mandatory ladder. Escalate according to the
+kind of uncertainty or failure:
+
+- If a task remains well scoped but Luna xhigh needs more search, comparison,
+  verification, or self-correction, escalate to Luna max.
+- If the likely limitation is broad repository context, subsystem integration,
+  abstraction quality, or model capability, skip Luna max when appropriate and
+  escalate directly to Sol medium.
+- If a bounded implementation remains technically difficult after Sol medium,
+  escalate the worker to Sol high before moving global synthesis away from the
+  coordinator.
+- If evidence conflicts, assumptions collapse, or the remaining question is
+  fundamentally about mechanics, architecture, provenance, or simulation
+  semantics, escalate the Astra root rather than merely increasing worker
+  effort.
+- After the difficult decision is resolved, return routine implementation,
+  search, and verification to the cheapest worker that can perform them
+  reliably.
+
 ### Delegation rules
 
 - Prefer a fresh, bounded subagent with only the context required for its task
   over cloning the root's entire conversation into a cheaper worker.
 - When the runtime permits overrides, explicitly request both the worker model
   and reasoning effort rather than assuming the desired budget will be inherited.
-- Do not spawn a copy of the root model for deterministic work that Luna or Terra
+- Do not spawn a copy of the root model for deterministic work that Luna or Sol
   can reliably perform.
 - Do not delegate tiny tasks when spawn/context overhead is likely to exceed the
   work itself.
@@ -185,7 +200,8 @@ Raise the root from Astra low to medium when one or more of these occurs:
 2. A core assumption in the original plan is disproved during execution.
 3. Game-source evidence, save state, packaged catalogs, and parser behavior do
    not agree on the same mechanic.
-4. The same implementation or test failure survives two competent attempts.
+4. Repeated competent worker attempts suggest that the remaining failure is in
+   the problem framing, assumptions, or semantics rather than a localized patch.
 5. A change would alter projection semantics, provenance, fail-closed behavior,
    catalog boundaries, or public result contracts.
 6. The task requires a new architecture or state-transition model rather than a
