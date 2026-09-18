@@ -11,6 +11,7 @@ from typing import Any
 
 import ti_save_parser as ti
 from catalog_utils import source_fingerprint, write_json_output
+from standalone_catalog_integrity import attach_payload_fingerprint
 
 
 SCHEMA_VERSION = 2
@@ -201,7 +202,7 @@ def build_catalog(templates_dir: Path) -> dict[str, Any]:
         orbit_path.name,
     )
     validate_location_relations(bodies, navigables, orbits)
-    return {
+    return attach_payload_fingerprint({
         "schemaVersion": SCHEMA_VERSION,
         "source": {
             "templateRoot": "TerraInvicta_Data/StreamingAssets/Templates",
@@ -225,7 +226,7 @@ def build_catalog(templates_dir: Path) -> dict[str, Any]:
             "orbits": {row["dataName"]: index for index, row in enumerate(orbits)},
         },
         "scenarioOverrides": {},
-    }
+    })
 
 
 def parse_args() -> argparse.Namespace:

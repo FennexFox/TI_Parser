@@ -7,6 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import ti_save_parser as ti
+import ti_parser_hab_ui as hab_ui
 
 
 def ref(state_id):
@@ -116,10 +117,10 @@ class HabSlotSummaryTests(unittest.TestCase):
         else:
             self.assertTrue(records[-1]["sectorOwnedByHabFaction"])
 
-        with patch.object(ti, "load_hab_module_catalog", return_value=templates):
+        with patch.object(hab_ui, "load_hab_module_catalog", return_value=templates):
             result = ti.calculate_hab_slots(indexed, None, "ResistCouncil", include_all=True)
         self.assertEqual(result["habs"][0]["slots"], expected)
-        with patch.object(ti, "load_hab_module_catalog", return_value=templates):
+        with patch.object(hab_ui, "load_hab_module_catalog", return_value=templates):
             filtered = ti.calculate_hab_slots(indexed, None, "ResistCouncil", include_all=False)
         self.assertEqual(len(filtered["habs"]), 1 if expected["empty"] > 0 else 0)
 

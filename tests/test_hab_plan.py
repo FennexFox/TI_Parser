@@ -8,6 +8,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import ti_save_parser as ti
+import ti_parser_hab_plan as hab_plan
 
 
 def ref(state_id):
@@ -489,10 +490,10 @@ class HabPlanTests(unittest.TestCase):
                 "missionControl": 0,
             }
 
-        with patch.object(ti, "load_hab_module_catalog", return_value=templates), patch.object(
-            ti, "calculation_catalogs", return_value=SimpleNamespace(effects={}, traits={})
-        ), patch.object(ti, "faction_mining_rate", return_value=1.0), patch.object(
-            ti,
+        with patch.object(hab_plan, "load_hab_module_catalog", return_value=templates), patch.object(
+            hab_plan, "calculation_catalogs", return_value=SimpleNamespace(effects={}, traits={})
+        ), patch.object(hab_plan, "faction_mining_rate", return_value=1.0), patch.object(
+            hab_plan,
             "module_candidate_row",
             side_effect=candidate_row,
         ):
@@ -548,10 +549,10 @@ class HabPlanTests(unittest.TestCase):
                 "missionControl": 0,
             }
 
-        with patch.object(ti, "load_hab_module_catalog", return_value=templates), patch.object(
-            ti, "calculation_catalogs", return_value=SimpleNamespace(effects={}, traits={})
-        ), patch.object(ti, "faction_mining_rate", return_value=1.0), patch.object(
-            ti,
+        with patch.object(hab_plan, "load_hab_module_catalog", return_value=templates), patch.object(
+            hab_plan, "calculation_catalogs", return_value=SimpleNamespace(effects={}, traits={})
+        ), patch.object(hab_plan, "faction_mining_rate", return_value=1.0), patch.object(
+            hab_plan,
             "module_candidate_row",
             side_effect=candidate_row,
         ):

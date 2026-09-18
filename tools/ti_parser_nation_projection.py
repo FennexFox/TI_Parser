@@ -2246,22 +2246,25 @@ def _seed_metric_evidence(state: NationProjectionState, context: ProjectionConte
     tracker.ensure("internal.economyScore", rule_ids=(Rules.NATION_IP_ECONOMY_SCORE.id,))
     tracker.ensure("internal.populationScaling")
     tracker.ensure("internal.hostileClaims")
-    advisor_provenance = ("hypotheticalPolicy",) if state.advisors else ()
-    if state.advisor_mission_schedule is not None:
-        advisor_provenance += ("expectedMissionTiming",)
-    advisor_rules = (Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,) if state.advisor_mission_schedule is not None else ()
-    tracker.ensure("internal.advisorAdministration", rule_ids=advisor_rules, provenance=advisor_provenance)
-    tracker.ensure("internal.advisorScience", rule_ids=advisor_rules, provenance=advisor_provenance)
+    _refresh_advisor_evidence(state)
     _refresh_public_metric_evidence(state, context)
 
 
 def _refresh_advisor_evidence(state: NationProjectionState) -> None:
-    provenance = ("hypotheticalPolicy",) if state.advisors else ()
-    if state.advisor_mission_schedule is not None:
+    has_advisor_policy = bool(state.advisors or state.advisor_policy)
+    provenance = ("hypotheticalPolicy",) if has_advisor_policy else ()
+    timing_dependent = has_advisor_policy and state.advisor_mission_schedule is not None
+    if timing_dependent:
         provenance += ("expectedMissionTiming",)
-    rules = (Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,) if state.advisor_mission_schedule is not None else ()
-    state.metric_tracker.record("internal.advisorAdministration", rule_ids=rules, provenance=provenance)
-    state.metric_tracker.record("internal.advisorScience", rule_ids=rules, provenance=provenance)
+    rules = (Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,) if timing_dependent else ()
+    inputs = ("internal.advisorPolicy", "save.CouncilorMissionUpdate") if timing_dependent else ()
+    state.metric_tracker.record(
+        ("internal.advisorAdministration", "internal.advisorScience"),
+        inputs=inputs,
+        rule_ids=rules,
+        coverage="expected" if timing_dependent else "exact",
+        provenance=provenance,
+    )
 
 
 def _refresh_public_metric_evidence(state: NationProjectionState, context: ProjectionContext) -> None:

@@ -327,6 +327,39 @@ class NationProjectionTransactionTests(unittest.TestCase):
         self.assertIn("adviseResolved", reasons)
         self.assertIn("expectedMissionTiming", result["metricCoverage"]["nation.baseInvestmentPointsMonth"]["provenance"])
 
+    @mechanic_rule_test(Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id, evidence="coverageBranch")
+    def test_advisor_timing_lowers_coverage_before_monthly_mean_path(self):
+        initial = state(at=datetime(2030, 1, 2))
+        initial.advisor_mission_schedule = advisor_schedule(datetime(2030, 1, 16, 12))
+        advisor = projection.AdvisorProfile("virtual", "admin", 20, 20)
+        plan = projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, (advisor,)),))
+
+        # Day 15 is after the phase clear but before expected renewal. The
+        # absence of the bonus during that gap also depends on mission timing.
+        for days in (15, 17):
+            result = projection.run_projection(initial, plan, context(), days=days, details=True)
+            for metric in (
+                "nation.baseInvestmentPointsMonth",
+                "nation.research",
+                "factionContribution.research",
+                "nation.priorityProgress.Knowledge",
+            ):
+                with self.subTest(days=days, metric=metric):
+                    evidence = result["metricCoverage"][metric]
+                    self.assertEqual(evidence["coverage"], "expected")
+                    self.assertIn("expectedMissionTiming", evidence["provenance"])
+                    self.assertNotIn("meanPath", evidence["provenance"])
+
+    def test_advisor_schedule_without_policy_does_not_lower_coverage(self):
+        initial = state(at=datetime(2030, 1, 2))
+        initial.advisor_mission_schedule = advisor_schedule(datetime(2030, 1, 16, 12))
+        plan = projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, ()),))
+        result = projection.run_projection(initial, plan, context(), days=17)
+        for metric in ("nation.baseInvestmentPointsMonth", "nation.research"):
+            evidence = result["metricCoverage"][metric]
+            self.assertEqual(evidence["coverage"], "exact")
+            self.assertNotIn("expectedMissionTiming", evidence["provenance"])
+
     def test_mission_phase_recurrence_matches_audited_calendar(self):
         self.assertEqual(
             projection._next_mission_phase(datetime(2030, 1, 1), "Semimonthly", 1, 1),

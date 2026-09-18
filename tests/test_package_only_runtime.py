@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import ti_save_parser as ti
 import ti_parser_core as core
+import ti_parser_runtime as runtime
 
 
 def ref(state_id: int) -> dict[str, int]:
@@ -443,7 +444,7 @@ class PackageOnlyRuntimeTests(unittest.TestCase):
         )
         for error, expected_kind, expected_name in cases:
             with self.subTest(error=type(error).__name__):
-                with patch.object(ti, "load_runtime_catalogs", side_effect=error):
+                with patch.object(runtime, "load_runtime_catalogs", side_effect=error):
                     with self.assertRaises(ti.CalculationDependencyError) as caught:
                         ti.calculation_catalogs(indexed, "topbar")
                 dependency = caught.exception.missing_dependencies[0]
@@ -458,7 +459,7 @@ class PackageOnlyRuntimeTests(unittest.TestCase):
                 }
             }
         )
-        with patch.object(ti, "load_runtime_catalogs", return_value=object()) as load_catalogs:
+        with patch.object(runtime, "load_runtime_catalogs", return_value=object()) as load_catalogs:
             ti.calculation_catalogs(indexed, "topbar")
             unrelated_files = tuple(load_catalogs.call_args.kwargs["catalog_files"])
             ti.calculation_catalogs(indexed, "nation-ui")

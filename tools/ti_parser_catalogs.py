@@ -7,10 +7,12 @@ Terra Invicta installation.  Raw templates are an input to the generator only.
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 
 from ti_parser_core import CalculationDependency, CalculationDependencyError
 
@@ -402,13 +404,42 @@ class RuntimeCatalogs:
         }
 
 
+_catalog_scope: ContextVar[dict[tuple[str, str, tuple[str, ...]], RuntimeCatalogs] | None] = ContextVar(
+    "runtime_catalog_scope", default=None
+)
+
+
+@contextmanager
+def runtime_catalog_scope() -> Iterator[None]:
+    """Reuse validated, scenario-selected inputs for one command invocation.
+
+    Callers treat these inputs as read-only. Leaving the scope discards every
+    loaded bundle, so the next command validates the current packaged bytes.
+    Direct loads outside a scope retain their existing fresh-load behavior.
+    """
+
+    token = _catalog_scope.set({})
+    try:
+        yield
+    finally:
+        _catalog_scope.reset(token)
+
+
 def load_runtime_catalogs(
     scenario: str,
     data_dir: str | Path | None = None,
     *,
     catalog_files: Iterable[str] | None = None,
 ) -> RuntimeCatalogs:
-    return RuntimeCatalogs.load(scenario, data_dir, catalog_files=catalog_files)
+    cache = _catalog_scope.get()
+    if cache is None:
+        return RuntimeCatalogs.load(scenario, data_dir, catalog_files=catalog_files)
+    root = Path(data_dir) if data_dir is not None else Path(__file__).resolve().parents[1] / "data"
+    requested = tuple(catalog_files or DEFAULT_CATALOG_FILES)
+    key = (str(root.resolve()), scenario, tuple(sorted(set(requested))))
+    if key not in cache:
+        cache[key] = RuntimeCatalogs.load(scenario, root, catalog_files=requested)
+    return cache[key]
 
 
 def _load_json(path: Path, label: str) -> Any:

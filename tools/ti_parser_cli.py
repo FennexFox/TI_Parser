@@ -8,6 +8,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from ti_parser_catalogs import runtime_catalog_scope
+
 
 RAW_COMMANDS = {
     "org-plan": "command_org_plan",
@@ -40,6 +42,7 @@ SNAPSHOT_COMMANDS = {
 
 def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Parse Terra Invicta saves into compact summaries.")
+    parser.set_defaults(top_nations=20)
     parser.add_argument("--save", help="Path to a .gz Terra Invicta save. Defaults to newest local save.")
     parser.add_argument("--templates-dir", help="Path to TerraInvicta_Data\\StreamingAssets\\Templates.")
     parser.add_argument("--cache-dir", default=api.DEFAULT_CACHE_DIR, help="Directory for compact parser cache.")
@@ -52,7 +55,7 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
         subparser.add_argument("--compact", action="store_true", default=argparse.SUPPRESS, help="Print compact JSON.")
 
     summary = subparsers.add_parser("summary", help="Print compact campaign summary.")
-    summary.add_argument("--top-nations", type=int, default=20)
+    summary.add_argument("--top-nations", type=int, default=argparse.SUPPRESS)
     add_compact_flag(summary)
 
     faction = subparsers.add_parser("faction", help="Print one faction summary.")
@@ -227,6 +230,11 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
 
 
 def main(api: ModuleType, argv: list[str] | None = None) -> int:
+    with runtime_catalog_scope():
+        return _run_command(api, argv)
+
+
+def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
     parser = build_parser(api)
     args = parser.parse_args(argv)
     command = args.command or "summary"
@@ -237,8 +245,7 @@ def main(api: ModuleType, argv: list[str] | None = None) -> int:
         if command == "catalog-verify":
             if not args.templates_dir:
                 parser.error("catalog-verify requires --templates-dir")
-            api.command_catalog_verify(args)
-            return 0
+            return api.command_catalog_verify(args)
         if args.templates_dir:
             parser.error("--templates-dir is verification-only; use it with catalog-verify")
         save_path = api.resolve_save_path(args.save)

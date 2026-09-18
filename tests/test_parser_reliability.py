@@ -1,4 +1,6 @@
 import json
+import copy
+import os
 import sys
 import tempfile
 import unittest
@@ -10,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import ti_parser_core as core
 import ti_save_parser as ti
+from standalone_catalog_integrity import attach_payload_fingerprint
 
 
 def ref(state_id):
@@ -21,6 +24,14 @@ def add_state(gamestates, type_name, state_id, value):
     value.setdefault("ID", ref(state_id))
     gamestates.setdefault(type_name, []).append({"Key": ref(state_id), "Value": value})
     return value
+
+
+def packaged_catalog(filename: str) -> dict:
+    return json.loads((Path(__file__).resolve().parents[1] / "data" / filename).read_text(encoding="utf-8"))
+
+
+def write_catalog(path: Path, catalog: dict) -> None:
+    path.write_text(json.dumps(attach_payload_fingerprint(catalog), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class ParserReliabilityTests(unittest.TestCase):
@@ -54,83 +65,81 @@ class ParserReliabilityTests(unittest.TestCase):
                 core.load_location_catalog(root / "missing.json")
 
             invalid_path = root / "invalid.json"
-            invalid_path.write_text(
-                json.dumps(
-                    {
-                        "schemaVersion": 2,
-                        "counts": {"spaceBodies": 0, "navigables": 0, "orbits": 0},
-                        "spaceBodies": [],
-                        "navigables": [],
-                        "orbits": [],
-                        "byDataName": {"spaceBodies": {}, "navigables": {}, "orbits": {}},
-                        "scenarioOverrides": {},
-                    }
-                ),
-                encoding="utf-8",
-            )
+            invalid = packaged_catalog("location_catalog.json")
+            invalid.update({"counts": {"spaceBodies": 0, "navigables": 0, "orbits": 0}, "spaceBodies": [], "navigables": [], "orbits": []})
+            invalid["byDataName"] = {"spaceBodies": {}, "navigables": {}, "orbits": {}}
+            write_catalog(invalid_path, invalid)
             with self.assertRaisesRegex(core.LocationCatalogError, "empty spaceBodies"):
                 core.load_location_catalog(invalid_path)
 
-            body = {
-                "dataName": "TestBody",
-                "objectType": "Planet",
-                "atmosphere": "None",
-                "irradiatedMultiplier": 1,
-                "maxHabSize": 3,
-            }
-            orbit = {"dataName": "TestOrbit", "irradiatedMultiplier": 1}
-            navigable = {
-                "dataName": "TestL1",
-                "locationKind": "LagrangePoint",
-                "lagrangeValue": "L1",
-                "relatedObject": "TestBody",
-                "orbits": ["TestOrbit"],
-                "maxHabSize": 3,
-            }
             duplicate_path = root / "duplicate.json"
-            duplicate_path.write_text(
-                json.dumps(
-                    {
-                        "schemaVersion": 2,
-                        "counts": {"spaceBodies": 2, "navigables": 1, "orbits": 1},
-                        "spaceBodies": [body, body],
-                        "navigables": [navigable],
-                        "orbits": [orbit],
-                        "byDataName": {
-                            "spaceBodies": {"TestBody": 1},
-                            "navigables": {"TestL1": 0},
-                            "orbits": {"TestOrbit": 0},
-                        },
-                        "scenarioOverrides": {},
-                    }
-                ),
-                encoding="utf-8",
-            )
+            duplicate = packaged_catalog("location_catalog.json")
+            duplicate["spaceBodies"].append(copy.deepcopy(duplicate["spaceBodies"][0]))
+            duplicate["counts"]["spaceBodies"] += 1
+            write_catalog(duplicate_path, duplicate)
             with self.assertRaisesRegex(core.LocationCatalogError, "Duplicate spaceBodies"):
                 core.load_location_catalog(duplicate_path)
 
             collision_path = root / "collision.json"
-            colliding_navigable = dict(navigable, dataName="TestBody")
-            collision_path.write_text(
-                json.dumps(
-                    {
-                        "schemaVersion": 2,
-                        "counts": {"spaceBodies": 1, "navigables": 1, "orbits": 1},
-                        "spaceBodies": [body],
-                        "navigables": [colliding_navigable],
-                        "orbits": [orbit],
-                        "byDataName": {
-                            "spaceBodies": {"TestBody": 0},
-                            "navigables": {"TestBody": 0},
-                            "orbits": {"TestOrbit": 0},
-                        },
-                        "scenarioOverrides": {},
-                    }
-                ),
-                encoding="utf-8",
-            )
+            collision = packaged_catalog("location_catalog.json")
+            collision["navigables"][0]["dataName"] = collision["spaceBodies"][0]["dataName"]
+            write_catalog(collision_path, collision)
             with self.assertRaisesRegex(core.LocationCatalogError, "body/navigable dataName collisions"):
                 core.load_location_catalog(collision_path)
+
+    def test_standalone_catalog_integrity_rejects_tampering_and_duplicate_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            location_path = root / "location.json"
+            location = packaged_catalog("location_catalog.json")
+            write_catalog(location_path, location)
+            core.load_location_catalog(location_path)
+
+            original_stat = location_path.stat()
+            tampered = location_path.read_bytes().replace(b'"irradiatedMultiplier": 3', b'"irradiatedMultiplier": 4', 1)
+            self.assertEqual(len(tampered), original_stat.st_size)
+            location_path.write_bytes(tampered)
+            os.utime(location_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+            with self.assertRaisesRegex(core.LocationCatalogError, "payload fingerprint mismatch"):
+                core.load_location_catalog(location_path)
+
+            module_path = root / "module.json"
+            module = packaged_catalog("module_catalog.json")
+            module["modules"].append(copy.deepcopy(module["modules"][0]))
+            write_catalog(module_path, module)
+            with self.assertRaisesRegex(core.ModuleCatalogError, "Duplicate module dataName"):
+                core.load_hab_module_catalog(module_path)
+
+            malformed_path = root / "malformed.json"
+            malformed_path.write_bytes(b"{bad")
+            with self.assertRaisesRegex(core.LocationCatalogError, "Unable to read location catalog"):
+                core.load_location_catalog(malformed_path)
+
+    def test_module_catalog_numeric_tamper_and_invalid_json_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "module.json"
+            module = packaged_catalog("module_catalog.json")
+            write_catalog(path, module)
+            core.load_hab_module_catalog(path)
+            original_stat = path.stat()
+            module["modules"][0]["operation"]["power"] += 1
+            path.write_text(json.dumps(module, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+            with self.assertRaisesRegex(core.ModuleCatalogError, "payload fingerprint mismatch"):
+                core.load_hab_module_catalog(path)
+            for invalid in (b"{bad", b"\xff"):
+                path.write_bytes(invalid)
+                with self.assertRaisesRegex(core.ModuleCatalogError, "Unable to read module catalog"):
+                    core.load_hab_module_catalog(path)
+
+    def test_standalone_fingerprint_ignores_only_provenance_mtime(self):
+        from standalone_catalog_integrity import payload_fingerprint
+        original = packaged_catalog("module_catalog.json")
+        changed = copy.deepcopy(original)
+        changed["source"]["moduleTemplate"]["mtime_ns"] += 1
+        self.assertEqual(payload_fingerprint(original), payload_fingerprint(changed))
+        changed["modules"][0]["operation"]["power"] += 1
+        self.assertNotEqual(payload_fingerprint(original), payload_fingerprint(changed))
 
     def test_lagrange_hab_location_summary_resolves_from_packaged_catalog(self):
         gamestates = {}
@@ -191,6 +200,42 @@ class ParserReliabilityTests(unittest.TestCase):
         self.assertIs(faction, academy)
         self.assertTrue(ti.faction_is_player(indexed, faction))
         self.assertEqual(ti.find_faction_state(indexed, "ResistCouncil")[0], 10)
+
+    def test_active_human_uses_resolved_non_ai_player_identity(self):
+        gamestates = {}
+        ai_faction = add_state(
+            gamestates,
+            "TIFactionState",
+            10,
+            {"templateName": "ResistCouncil", "displayName": "Resistance", "player": ref(20)},
+        )
+        human_faction = add_state(
+            gamestates,
+            "TIFactionState",
+            11,
+            {"templateName": "CooperateCouncil", "displayName": "Academy", "player": ref(21)},
+        )
+        add_state(gamestates, "TIPlayerState", 20, {"isAI": True, "faction": ref(10)})
+        add_state(gamestates, "TIPlayerState", 21, {"isAI": False, "faction": ref(11)})
+        add_state(gamestates, "TIMetadataState", 1, {"playerFactionName": "Academy"})
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        self.assertFalse(ti.faction_is_active_human(indexed, ai_faction))
+        self.assertTrue(ti.faction_is_active_human(indexed, human_faction))
+
+    def test_active_human_fails_closed_when_player_identity_is_unresolved(self):
+        gamestates = {}
+        faction = add_state(
+            gamestates,
+            "TIFactionState",
+            10,
+            {"templateName": "ResistCouncil", "displayName": "Resistance", "player": ref(20)},
+        )
+        add_state(gamestates, "TIPlayerState", 20, {"isAI": True, "faction": ref(10)})
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        with self.assertRaisesRegex(SystemExit, "Human player faction could not be resolved"):
+            ti.faction_is_active_human(indexed, faction)
 
     def test_unresolved_player_faction_fails_closed(self):
         indexed = ti.build_index(

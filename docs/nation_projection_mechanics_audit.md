@@ -279,8 +279,11 @@ capacity remains separate from current BuildNavy action eligibility.
   before the next investment transaction.
 - `nation.*` is national state. `factionContribution.*` is only the selected
   faction's contribution from the target nation, never the faction-wide total.
-- Advisor plans carry `inputProvenance: "hypotheticalPolicy"`, and affected
-  metrics also carry `expectedMissionTiming`. Actionable Advise has 100% success;
+- Advisor plans carry `inputProvenance: "hypotheticalPolicy"`. While an active
+  or pending adviser policy is governed by the reconstructed mission lifecycle, its timing
+  dependency propagates `expectedMissionTiming` and `expected` coverage through
+  base IP, research, and the allocations that consume them. A schedule without an
+  adviser policy does not lower metric coverage. Actionable Advise has 100% success;
   `MoveToTarget` changes location at assignment, so travel time is zero. Active
   effects are cleared at mission-phase bookkeeping and renewed at the neutral
   mean order-0 stagger time. Renewal Influence is reported. Future affordability,

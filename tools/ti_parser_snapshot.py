@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 from ti_parser_core import (
@@ -511,6 +513,30 @@ def summarize_faction(
     )
 
 
+def councilor_activity(councilor: dict[str, Any]) -> tuple[bool | None, bool | None]:
+    """Reconstruct TICouncilorState.active/detained from serialized fields.
+
+    Computed properties are absent in normal saves. Explicit legacy properties
+    remain usable when their underlying serialized fields are unavailable.
+    """
+
+    detained = councilor.get("detained")
+    if "detainingFaction" in councilor:
+        detainer = councilor["detainingFaction"]
+        detained = False if detainer is None else True if ref_id(detainer) is not None else None
+    if not isinstance(detained, bool):
+        detained = None
+    status = councilor.get("status")
+    if isinstance(status, str) and status in {"None", "Dead", "Offmap"}:
+        return False, detained
+    if detained is True:
+        return False, True
+    if status == "Active":
+        return (None if detained is None else not detained), detained
+    active = councilor.get("active")
+    return (active if isinstance(active, bool) and status is None else None), detained
+
+
 def summarize_councilors(
     indexed: IndexedState,
     trait_templates: dict[str, dict[str, Any]],
@@ -523,6 +549,7 @@ def summarize_councilors(
         home_region = ref_summary(indexed, councilor.get("homeRegion"))
         location = ref_summary(indexed, councilor.get("location"))
         attributes = councilor_attribute_breakdown(indexed, councilor, trait_templates, config)
+        active, detained = councilor_activity(councilor)
         result.append(
             clean_numbers(
                 {
@@ -535,8 +562,8 @@ def summarize_councilors(
                     "locationNation": region_nation_summary(indexed, councilor.get("location")),
                     "homeRegion": home_region,
                     "homeNation": region_nation_summary(indexed, councilor.get("homeRegion")),
-                    "active": councilor.get("active"),
-                    "detained": councilor.get("detained"),
+                    "active": active,
+                    "detained": detained,
                     "turned": councilor.get("turned"),
                     "personalName": councilor.get("personalName"),
                     "familyName": councilor.get("familyName"),
@@ -603,28 +630,7 @@ def build_snapshot(
                 reason="save does not identify a canonical supported scenario",
             )
         )
-    try:
-        runtime_catalogs = load_runtime_catalogs(scenario)
-    except UnsupportedCatalogScenarioError as exc:
-        raise CalculationDependencyError(
-            CalculationDependency(
-                kind="scenario",
-                name=exc.scenario,
-                context="snapshot",
-                scenario=scenario,
-                reason=str(exc),
-            )
-        ) from exc
-    except CatalogIntegrityError as exc:
-        raise CalculationDependencyError(
-            CalculationDependency(
-                kind="catalog-integrity",
-                name="runtime bundle",
-                context="snapshot",
-                scenario=scenario,
-                reason=str(exc),
-            )
-        ) from exc
+    runtime_catalogs = runtime_catalogs_for_snapshot(scenario)
     trait_templates = runtime_catalogs.traits
     type_counts = {
         short_type(full_type): len(entries) if isinstance(entries, list) else 1
@@ -655,6 +661,72 @@ def build_snapshot(
     }
 
 
+def runtime_catalogs_for_snapshot(scenario: str):
+    """Load the package-only bundle and convert its errors to snapshot dependencies."""
+
+    try:
+        return load_runtime_catalogs(scenario)
+    except UnsupportedCatalogScenarioError as exc:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="scenario",
+                name=exc.scenario,
+                context="snapshot",
+                scenario=scenario,
+                reason=str(exc),
+            )
+        ) from exc
+    except CatalogIntegrityError as exc:
+        raise CalculationDependencyError(
+            CalculationDependency(
+                kind="catalog-integrity",
+                name="runtime bundle",
+                context="snapshot",
+                scenario=scenario,
+                reason=str(exc),
+            )
+        ) from exc
+
+
+def cached_snapshot_scenario(cached: Any) -> str | None:
+    if not isinstance(cached, dict):
+        return None
+    diagnostics = cached.get("calculationDiagnostics")
+    time = cached.get("time")
+    scenario = diagnostics.get("scenario") if isinstance(diagnostics, dict) else None
+    time_scenario = time.get("scenarioMetaTemplateName") if isinstance(time, dict) else None
+    if isinstance(scenario, str) and scenario and scenario == time_scenario:
+        return scenario
+    return None
+
+
+def write_snapshot_atomically(path: Path, snapshot: dict[str, Any]) -> None:
+    """Replace a cache entry only after its complete JSON has been written."""
+
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(snapshot, handle, ensure_ascii=False, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def load_or_build_snapshot(
     save_path: Path,
     cache_dir: Path,
@@ -666,13 +738,23 @@ def load_or_build_snapshot(
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = cache_dir / f"{cache_key(fingerprint)}.snapshot.json"
     if not refresh and path.is_file():
-        with path.open("r", encoding="utf-8") as handle:
-            cached = json.load(handle)
-        if cached.get("schemaVersion") == config.schema_version and cached.get("cacheFingerprint") == fingerprint:
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                cached = json.load(handle)
+            scenario = cached_snapshot_scenario(cached)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            cached = None
+            scenario = None
+        if (
+            isinstance(cached, dict)
+            and scenario is not None
+            and cached.get("schemaVersion") == config.schema_version
+            and cached.get("cacheFingerprint") == fingerprint
+        ):
+            runtime_catalogs_for_snapshot(scenario)
             return cached, path, True
 
     data = load_save(save_path)
     snapshot = build_snapshot(save_path, data, templates_dir, config)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(snapshot, handle, ensure_ascii=False, separators=(",", ":"))
+    write_snapshot_atomically(path, snapshot)
     return snapshot, path, False

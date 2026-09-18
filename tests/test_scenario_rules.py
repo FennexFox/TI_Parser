@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import ti_parser_core as core
+import ti_parser_nation_ui as nation_ui
 import ti_save_parser as ti
 
 
@@ -197,11 +198,11 @@ class ScenarioRuleTests(unittest.TestCase):
         nation.update({"military": True, "numControlPoints": 4})
         core.state_value_by_id(indexed, 41)["oceanType"] = "Yes"
         with (
-            patch.object(ti, "find_faction_state", return_value=(10, core.state_value_by_id(indexed, 10))),
-            patch.object(ti, "nation_army_details", return_value={
+            patch.object(nation_ui, "find_faction_state", return_value=(10, core.state_value_by_id(indexed, 10))),
+            patch.object(nation_ui, "nation_army_details", return_value={
                 "count": 2, "navies": 2, "standardArmies": 0, "navalScore": 0, "armies": [],
             }),
-            patch.object(ti, "nation_allowed_armies", return_value=2),
+            patch.object(nation_ui, "nation_allowed_armies", return_value=2),
         ):
             result = ti.calculate_nation_ui(indexed, None, nation["templateName"])
         self.assertEqual(result["military"]["maxNavies"], 2)

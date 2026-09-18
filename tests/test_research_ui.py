@@ -7,6 +7,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import ti_save_parser as ti
+import ti_parser_research as research_layer
+import ti_parser_topbar as topbar
 
 
 def ref(state_id):
@@ -188,8 +190,8 @@ class ResearchUiTests(unittest.TestCase):
         templates = ti.ResearchTemplates({}, {}, {}, hab_templates, {}, {}, {})
 
         with (
-            patch.object(ti, "TOPBAR_RESOURCES", ("MissionControl",)),
-            patch.object(ti, "faction_control_point_maintenance", return_value={}),
+            patch.object(topbar, "TOPBAR_RESOURCES", ("MissionControl",)),
+            patch.object(topbar, "faction_control_point_maintenance", return_value={}),
         ):
             result = ti.calculate_topbar(indexed, None, include_details=True, research_templates=templates)
 
@@ -251,13 +253,13 @@ class ResearchUiTests(unittest.TestCase):
         )
 
         with (
-            patch.object(ti, "TOPBAR_RESOURCES", ("MissionControl",)),
+            patch.object(topbar, "TOPBAR_RESOURCES", ("MissionControl",)),
             patch.object(
-                ti,
+                topbar,
                 "faction_effect_contexts",
                 return_value={"MissionControlDisruption_PCT": ["DisruptMC"]},
             ),
-            patch.object(ti, "faction_control_point_maintenance", return_value={}),
+            patch.object(topbar, "faction_control_point_maintenance", return_value={}),
         ):
             result = ti.calculate_topbar(indexed, None, include_details=True, research_templates=templates)
 
@@ -285,13 +287,13 @@ class ResearchUiTests(unittest.TestCase):
         )
 
         with (
-            patch.object(ti, "TOPBAR_RESOURCES", ("MissionControl",)),
+            patch.object(topbar, "TOPBAR_RESOURCES", ("MissionControl",)),
             patch.object(
-                ti,
+                topbar,
                 "faction_effect_contexts",
                 return_value={"MissionControlDisruption_PCT": ["FixedMC"]},
             ),
-            patch.object(ti, "faction_control_point_maintenance", return_value={}),
+            patch.object(topbar, "faction_control_point_maintenance", return_value={}),
         ):
             result = ti.calculate_topbar(indexed, None, include_details=True, research_templates=templates)
 
@@ -318,7 +320,7 @@ class ResearchUiTests(unittest.TestCase):
         )
 
         with patch.object(
-            ti,
+            research_layer,
             "faction_effect_contexts",
             return_value={"MissionControlDisruption_PCT": ["DisruptMC"]},
         ):
@@ -398,14 +400,14 @@ class ResearchUiTests(unittest.TestCase):
         }
 
         with (
-            patch.object(ti, "TOPBAR_RESOURCES", ("Research",)),
-            patch.object(ti, "find_faction_state", return_value=(7, faction)),
-            patch.object(ti, "faction_effect_contexts", return_value={}),
-            patch.object(ti, "councilor_summary_maps", return_value=([], {})),
-            patch.object(ti, "faction_max_mission_control_components", return_value={"total": 0.0}),
-            patch.object(ti, "faction_control_point_maintenance", return_value={}),
-            patch.object(ti, "calculate_research_breakdown", return_value=research),
-            patch.object(ti, "faction_is_player", return_value=True),
+            patch.object(topbar, "TOPBAR_RESOURCES", ("Research",)),
+            patch.object(topbar, "find_faction_state", return_value=(7, faction)),
+            patch.object(topbar, "faction_effect_contexts", return_value={}),
+            patch.object(topbar, "councilor_summary_maps", return_value=([], {})),
+            patch.object(topbar, "faction_max_mission_control_components", return_value={"total": 0.0}),
+            patch.object(topbar, "faction_control_point_maintenance", return_value={}),
+            patch.object(topbar, "calculate_research_breakdown", return_value=research),
+            patch.object(topbar, "faction_is_player", return_value=True),
         ):
             result = ti.calculate_topbar(indexed, None, research_templates=templates, base_daily_cache=cache)
 
@@ -416,7 +418,7 @@ class ResearchUiTests(unittest.TestCase):
         indexed, faction = build_research_fixture()
         cache = {}
 
-        with patch.object(ti, "calculate_research_breakdown", return_value={"daily": {"beforeDistribution": 12.5}}) as breakdown:
+        with patch.object(research_layer, "calculate_research_breakdown", return_value={"daily": {"beforeDistribution": 12.5}}) as breakdown:
             first = ti.faction_base_research_daily(indexed, None, faction, cache=cache)
             second = ti.faction_base_research_daily(indexed, None, faction, cache=cache)
 
