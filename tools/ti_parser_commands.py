@@ -23,6 +23,7 @@ from ti_parser_core import (
     print_json,
     ref_id,
     resolve_save_path,
+    state_value_by_id,
     type_entries,
 )
 from ti_parser_hab_plan import calculate_hab_plan
@@ -255,6 +256,15 @@ def command_advise(save_path: Path, templates_dir: Path | None, args: argparse.N
     councilor = match_named(summaries, args.councilor)
     if not councilor:
         raise SystemExit(f"Councilor not found: {args.councilor}")
+
+    councilor_id = councilor.get("id")
+    councilor_state = state_value_by_id(indexed, councilor_id if isinstance(councilor_id, int) else None)
+    councilor_faction_id = ref_id(councilor_state.get("faction")) if isinstance(councilor_state, dict) else None
+    if councilor_faction_id != faction_id:
+        raise SystemExit(f"Councilor not available for faction: {args.councilor}")
+    if councilor.get("active") is not True or councilor.get("detained") is True:
+        raise SystemExit(f"Councilor unavailable: {args.councilor}")
+
     nation_match = match_raw_state(indexed, "TINationState", args.nation)
     if not nation_match:
         raise SystemExit(f"Nation not found: {args.nation}")

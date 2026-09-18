@@ -201,6 +201,42 @@ class ParserReliabilityTests(unittest.TestCase):
         self.assertTrue(ti.faction_is_player(indexed, faction))
         self.assertEqual(ti.find_faction_state(indexed, "ResistCouncil")[0], 10)
 
+    def test_active_human_uses_resolved_non_ai_player_identity(self):
+        gamestates = {}
+        ai_faction = add_state(
+            gamestates,
+            "TIFactionState",
+            10,
+            {"templateName": "ResistCouncil", "displayName": "Resistance", "player": ref(20)},
+        )
+        human_faction = add_state(
+            gamestates,
+            "TIFactionState",
+            11,
+            {"templateName": "CooperateCouncil", "displayName": "Academy", "player": ref(21)},
+        )
+        add_state(gamestates, "TIPlayerState", 20, {"isAI": True, "faction": ref(10)})
+        add_state(gamestates, "TIPlayerState", 21, {"isAI": False, "faction": ref(11)})
+        add_state(gamestates, "TIMetadataState", 1, {"playerFactionName": "Academy"})
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        self.assertFalse(ti.faction_is_active_human(indexed, ai_faction))
+        self.assertTrue(ti.faction_is_active_human(indexed, human_faction))
+
+    def test_active_human_fails_closed_when_player_identity_is_unresolved(self):
+        gamestates = {}
+        faction = add_state(
+            gamestates,
+            "TIFactionState",
+            10,
+            {"templateName": "ResistCouncil", "displayName": "Resistance", "player": ref(20)},
+        )
+        add_state(gamestates, "TIPlayerState", 20, {"isAI": True, "faction": ref(10)})
+        indexed = ti.build_index({"gamestates": gamestates})
+
+        with self.assertRaisesRegex(SystemExit, "Human player faction could not be resolved"):
+            ti.faction_is_active_human(indexed, faction)
+
     def test_unresolved_player_faction_fails_closed(self):
         indexed = ti.build_index(
             {

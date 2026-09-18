@@ -102,6 +102,17 @@ class ShipPlanTests(unittest.TestCase):
         self.assertEqual(ti.ship_plan_weapon_row({"dataName": "FighterGun", "mount": "HalfNose"}, "gun")["mountSlots"], 0.5)
         self.assertIsNone(ti.ship_plan_weapon_row({"dataName": "BaseDefense", "mount": "T1BaseDefense"}, "laser"))
 
+    def test_directed_energy_storage_converts_shot_power_before_adding_gj_bonus(self):
+        for kind in ("laser", "particle"):
+            with self.subTest(kind=kind):
+                weapon = {
+                    "_shipPlanKind": kind,
+                    "shotPower_MJ": 100,
+                    "efficiency": 0.2,
+                }
+                self.assertAlmostEqual(ti.ship_plan_weapon_energy_gj(weapon, 0.02), 0.6)
+                self.assertAlmostEqual(ti.ship_plan_weapon_energy_gj(weapon), 0.5)
+
     def test_utility_role_tags_expose_colony_assault_and_science_modules(self):
         colony = ti.ship_plan_utility_role_tags({"dataName": "SolarOutpostKit", "specialModuleRules": ["FoundSolarOutpost"]})
         assault = ti.ship_plan_utility_role_tags({"dataName": "MarineAssaultUnit", "specialModuleRules": ["Assault"]})

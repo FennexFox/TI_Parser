@@ -388,8 +388,12 @@ def adviser_attribute_values(
     refs = state.get("advisingCouncilors") if isinstance(state.get("advisingCouncilors"), list) else []
     for councilor_ref in refs:
         councilor_id = ref_id(councilor_ref)
-        if councilor_id is not None:
-            existing_ids.add(councilor_id)
+        if councilor_id is None:
+            raise CalculationDependencyError(CalculationDependency(
+                kind="councilor-reference", name=str(councilor_ref), context="adviser-bonus",
+                scenario=None, reason="advising councilor reference has no valid integer ID",
+            ))
+        existing_ids.add(councilor_id)
         summary = councilor_by_id.get(councilor_id)
         if not isinstance(summary, dict):
             raise CalculationDependencyError(CalculationDependency(

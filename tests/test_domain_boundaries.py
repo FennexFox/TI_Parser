@@ -9,6 +9,9 @@ import unittest
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 DOMAIN_MODULES = (
+    "ti_parser_ship",
+    "ti_parser_income",
+    "ti_parser_nation_projection",
     "ti_parser_config",
     "ti_parser_runtime",
     "ti_parser_hab_ui",

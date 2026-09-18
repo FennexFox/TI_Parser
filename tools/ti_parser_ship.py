@@ -428,7 +428,8 @@ def ship_plan_weapon_energy_gj(template: dict[str, Any], bonus_power_gj: float =
             * 1e-9
         ) / efficiency
     if kind in {"laser", "particle"}:
-        return (as_float(template.get("shotPower_MJ"), 0.0) + bonus_power_gj) / efficiency / 1000.0
+        shot_power_gj = as_float(template.get("shotPower_MJ"), 0.0) / 1000.0
+        return (shot_power_gj + bonus_power_gj) / efficiency
     return 0.0
 
 

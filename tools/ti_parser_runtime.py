@@ -34,7 +34,6 @@ from ti_parser_core import (
     as_float,
     faction_is_human_player,
     first_value,
-    raw_name_values,
     raw_state_id,
     ref_id,
     scenario_template_name,
@@ -695,11 +694,7 @@ def hab_monthly_resource_income(
 def faction_is_active_human(indexed: IndexedState, faction: dict[str, Any]) -> bool:
     if faction.get("isAlien") or str(faction.get("templateName") or "") == "AlienCouncil":
         return False
-    if faction.get("player"):
-        return True
-    metadata = first_value(indexed, "TIMetadataState") or {}
-    player_faction_name = str(metadata.get("playerFactionName") or "")
-    return player_faction_name in raw_name_values(faction)
+    return faction_is_human_player(indexed, faction)
 
 
 def scenario_customizations(indexed: IndexedState) -> dict[str, Any]:

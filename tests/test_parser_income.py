@@ -250,6 +250,21 @@ class ParserIncomeTests(unittest.TestCase):
                 with self.assertRaises(core.CalculationDependencyError):
                     income.state_adviser_attribute_bonus(state, summaries, "Science")
 
+    def test_invalid_adviser_reference_reports_reference_dependency(self):
+        for councilor_ref in (None, {"value": "7"}):
+            with self.subTest(councilor_ref=councilor_ref):
+                with self.assertRaises(core.CalculationDependencyError) as raised:
+                    income.nation_adviser_science_bonus(
+                        {"advisingCouncilors": [councilor_ref]},
+                        {},
+                    )
+
+                dependency = raised.exception.missing_dependencies[0]
+                self.assertEqual(dependency["kind"], "councilor-reference")
+                self.assertEqual(dependency["name"], str(councilor_ref))
+                self.assertEqual(dependency["context"], "adviser-bonus")
+                self.assertIn("valid integer ID", dependency["reason"])
+
     def test_projection_adviser_roster_excludes_serialized_detention(self):
         rows = [
             {"Key": {"value": identity}, "Value": {

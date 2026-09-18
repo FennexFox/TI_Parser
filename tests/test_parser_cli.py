@@ -105,6 +105,60 @@ class ParserCliTests(unittest.TestCase):
         self.assertEqual(dependency["name"], "MissingEffect")
         self.assertEqual(dependency["context"], f"topbar.{context}")
 
+    def test_advise_rejects_foreign_or_unavailable_councilor_before_projection(self):
+        def indexed_for(councilor, *, faction_id=1):
+            return ti.build_index(
+                {
+                    "gamestates": {
+                        "TIFactionState": [
+                            {
+                                "Key": {"value": faction_id},
+                                "Value": {"ID": {"value": faction_id}, "templateName": "FactionOne"},
+                            }
+                        ],
+                        "TICouncilorState": [
+                            {
+                                "Key": {"value": 10},
+                                "Value": {
+                                    "ID": {"value": 10},
+                                    "displayName": "Ada",
+                                    "faction": {"value": councilor.get("faction", faction_id)},
+                                },
+                            }
+                        ],
+                    }
+                }
+            )
+
+        args = SimpleNamespace(faction="FactionOne", councilor="Ada", nation="Nation", compact=False)
+        for label, councilor, expected in (
+            ("foreign", {"faction": 2, "active": True, "detained": False}, "Councilor not available for faction: Ada"),
+            ("detained", {"faction": 1, "active": True, "detained": True}, "Councilor unavailable: Ada"),
+            ("inactive", {"faction": 1, "active": False, "detained": False}, "Councilor unavailable: Ada"),
+            ("activity-unknown", {"faction": 1, "active": None, "detained": False}, "Councilor unavailable: Ada"),
+        ):
+            with self.subTest(label=label):
+                indexed = indexed_for(councilor)
+                summary = {
+                    "id": 10,
+                    "display": "Ada",
+                    "active": councilor["active"],
+                    "detained": councilor["detained"],
+                    "finalAttributes": {"Science": 20},
+                }
+                with (
+                    patch.object(commands, "load_save", return_value={}),
+                    patch.object(commands, "build_index", return_value=indexed),
+                    patch.object(commands, "calculation_catalogs", return_value=SimpleNamespace(traits={}, effects={})),
+                    patch.object(commands, "find_faction_state", return_value=(1, {"templateName": "FactionOne"})),
+                    patch.object(commands, "faction_effect_contexts", return_value={}),
+                    patch.object(commands, "councilor_summary_maps", return_value=([summary], {10: summary})),
+                    patch.object(commands, "nation_research_contribution_month") as contribution,
+                ):
+                    with self.assertRaisesRegex(SystemExit, expected):
+                        commands.command_advise(Path("fixture.gz"), None, args)
+                contribution.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

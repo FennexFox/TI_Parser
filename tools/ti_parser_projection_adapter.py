@@ -773,7 +773,18 @@ def extract_nation_projection_state(
             operations=float(len(army.get("currentOperations") or [])),
             destroyed=bool(army.get("destroyed")),
         ))
-    current_advisors = tuple(all_advisors[councilor_id] for councilor_id in (ref_id(value) for value in nation.get("advisingCouncilors", [])) if councilor_id in all_advisors)
+    advising_councilor_refs = _required_projection_list(
+        indexed,
+        nation,
+        "advisingCouncilors",
+        source="save-field",
+        rule_id=Rules.NATION_ADVISOR_MISSION_LIFECYCLE.id,
+    )
+    current_advisors = tuple(
+        all_advisors[councilor_id]
+        for councilor_id in (ref_id(value) for value in advising_councilor_refs)
+        if councilor_id in all_advisors
+    )
     current_phase_assignments: list[nation_projection_layer.AdvisorProfile] = []
     repeating_advisors: list[nation_projection_layer.AdvisorProfile] = []
     prepaid_ids: set[int] = set()
@@ -841,7 +852,14 @@ def extract_nation_projection_state(
     )
     global_state = first_value(indexed, "TIGlobalValuesState") or {}
     temperature = temperature_anomaly_components(global_state)
-    hostile_ids = {region_id for region_id in (ref_id(value) for value in nation.get("hostileClaims", [])) if region_id in regions}
+    hostile_claim_refs = _required_projection_list(
+        indexed,
+        nation,
+        "hostileClaims",
+        source="save-field",
+        rule_id=Rules.NATION_PRIORITY_GOVERNMENT_LEGITIMIZE.id,
+    )
+    hostile_ids = {region_id for region_id in (ref_id(value) for value in hostile_claim_refs) if region_id in regions}
     if not control_points:
         raise _projection_dependency_error(
             indexed,
@@ -980,7 +998,20 @@ def calculate_nation_projection(
     contexts = faction_effect_contexts(indexed, faction_id)
     research_factor = apply_effect_modifiers(contexts, catalogs.effects, "ControlPointResearch", 1.0)
     faction_priority_modifiers: dict[int, dict[str, float]] = {}
-    welfare_base = float((global_config.get("welfarePriorityInequalityChange") or {}).get("value"))
+    welfare_config = global_config.get("welfarePriorityInequalityChange")
+    welfare_base = _required_projection_number(
+        indexed,
+        {
+            "globalConfig.welfarePriorityInequalityChange.value": (
+                welfare_config.get("value")
+                if isinstance(welfare_config, dict)
+                else None
+            ),
+        },
+        "globalConfig.welfarePriorityInequalityChange.value",
+        source="catalog-field",
+        rule_id=Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id,
+    )
     for owner_id in owner_bonuses:
         owner_contexts = faction_effect_contexts(indexed, owner_id)
         faction_priority_modifiers[owner_id] = {
