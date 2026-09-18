@@ -1,4 +1,4 @@
-# Graph Report - C:\Users\techn\source\repos\FennexFox\TI_Parser  (2026-09-18)
+# Graph Report - TI_Parser  (2026-09-18)
 
 ## Corpus Check
 - 190 files · ~695,564 words
