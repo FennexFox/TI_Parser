@@ -38,7 +38,7 @@
 
 ## Progress
 
-- Planning complete; implementation in progress.
+- Implemented bounded bootstrap, capabilities and thin session API. Targeted analysis/CLI regression: 20 passed, 7 subtests.
 
 ## Decision log
 
@@ -46,5 +46,5 @@
 
 ## Outcomes / Retrospective
 
-- Pending implementation and verification; no completion claimed.
+- Identity stability, single load/index, catalog reuse across sections, deferred and partial outputs, safe output and inventory/CLI consistency verified. No dashboard/history or external integrations added.
 

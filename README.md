@@ -1,5 +1,56 @@
 # Terra Invicta Save Parser
 
+## Beta: standalone LLM analysis and simulation engine
+
+Start with [한국어 Quickstart](docs/QUICKSTART_KO.md) and the
+[ChatGPT execution guide](docs/CHATGPT_START.md). The ZIP needs Python only;
+no companion, installed game, API key, or third-party runtime package is required.
+Python 3.11–3.14 on Windows/Linux is the CI target, not a claim that every
+platform or ChatGPT account has been manually validated.
+
+```text
+python tools/ti_save_parser.py --version
+python tools/ti_save_parser.py capabilities
+python tools/ti_save_parser.py --save campaign.gz inspect-save
+python tools/ti_save_parser.py --save campaign.gz analyze --output bootstrap.json
+# Only after accepting unverified version/mod compatibility:
+python tools/ti_save_parser.py --save campaign.gz --allow-unverified topbar
+```
+
+`analyze` is bounded LLM bootstrap context: save/campaign/player identity,
+compatibility, core resource/research/CP context and `availableAnalyses`.
+Use specialized commands on demand. This beta does not add dashboards,
+history, previous-save diffs, alerts, companion integration or an MCP server.
+
+`saveIdentity` schema 1 uses `sha256-canonical-save-json-v1`: SHA-256 of the
+parsed save serialized with sorted keys, UTF-8 and compact JSON separators.
+Copies and differently compressed equivalent JSON have the same identity;
+changed saved content has a different fingerprint. Path and mtime are excluded.
+Campaign start and player resolution evidence remain explicit when unknown.
+
+All calculation commands (including legacy summary/export/cache) require
+verified compatibility or per-invocation `--allow-unverified`. The initial
+compatibility registry intentionally contains no verified tuples. Raw/type
+inspection and capabilities do not require calculation consent. Opt-in never
+bypasses missing dependencies, unsupported scenarios or catalog integrity.
+Existing successful result fields are retained, with compatibility metadata added.
+Named primary subjects accept a positional name or `--entity-id`, never both.
+Expected errors now return JSON/exit 2 instead of domain `SystemExit`; internal
+errors return exit 1. `analyze` returns a usable JSON report with exit 2 when
+calculations are deferred or incomplete. Its optional file output matches stdout.
+
+For Python integrations, add the bundled `tools/` directory to the import path
+and use `ti_parser_session.AnalysisSession`. `inspect()`, `analyze()`, and
+`calculate()` provide the thin application boundary. `calculation_scope()` yields
+the indexed save for existing domain `calculate_*` functions while sharing a
+validated catalog lifetime. Sessions are single-threaded and represent one
+immutable save/runtime snapshot; create another after either input changes.
+
+MIT applies to project code; see [game-derived data notice](docs/BETA_DATA_NOTICE.md)
+for excluded assets and the unresolved redistribution review. No external
+publication or ChatGPT acceptance is implied by a local test pass.
+
+
 Small local parser for Terra Invicta `.gz` saves. It reads the full save once,
 builds a compact indexed snapshot, and reuses a cache keyed by save path, size,
 modification time, and packaged runtime catalog bytes. Cache hits validate the
@@ -82,6 +133,7 @@ python .\tools\ti_save_parser.py types --limit 30
 python .\tools\ti_save_parser.py raw --type TIFactionState --template ResistCouncil --keys displayName,resources,baseIncomes_year,missionControlUsage
 ```
 
+The legacy examples below assume a verified tuple or explicit `--allow-unverified`.
 Use global options such as `--save <path>` and `--refresh-cache` before the
 subcommand.
 

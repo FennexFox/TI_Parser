@@ -10,7 +10,11 @@ from typing import Any
 
 from ti_parser_catalogs import runtime_catalog_scope, CatalogError
 from ti_parser_errors import UserInputError
+from ti_parser_nation_projection import ProjectionInputError
 from ti_parser_session import AnalysisSession
+from ti_parser_version import __version__
+from ti_parser_capabilities import capabilities, CALCULATION_COMMANDS
+from ti_parser_analysis import write_analysis
 from ti_parser_core import result_metadata_scope
 from ti_parser_core import ModuleCatalogError, LocationCatalogError, SolarPowerDataError
 
@@ -62,6 +66,7 @@ REQUIRED_SELECTORS = {"faction", "nation", "councilor", "nation-ui", "nation-pro
 
 def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     parser = InputParser(description="Parse Terra Invicta saves into compact summaries.")
+    parser.add_argument("--version", action="version", version=__version__)
     parser.set_defaults(top_nations=20)
     parser.add_argument("--allow-unverified", action="store_true", help="Explicitly consent to calculations on this unverified save for this invocation.")
     parser.add_argument("--save", help="Path to a .gz Terra Invicta save. Defaults to newest local save.")
@@ -71,6 +76,11 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     parser.add_argument("--compact", action="store_true", help="Print compact JSON.")
 
     subparsers = parser.add_subparsers(dest="command", required=False)
+    inventory = subparsers.add_parser("capabilities", help="List analysis capabilities without a save.")
+    inventory.add_argument("--compact", action="store_true", default=argparse.SUPPRESS)
+    analyze = subparsers.add_parser("analyze", help="Bounded LLM bootstrap context; query specialized commands as needed.")
+    analyze.add_argument("--output", help="Optional JSON report output, distinct from the save.")
+    analyze.add_argument("--compact", action="store_true", default=argparse.SUPPRESS)
     inspection = subparsers.add_parser("inspect-save", help="Inspect saved facts and compatibility without calculations.")
     inspection.add_argument("--compact", action="store_true", default=argparse.SUPPRESS)
 
@@ -292,11 +302,20 @@ def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
             return api.command_catalog_verify(args)
         if args.templates_dir:
             parser.error("--templates-dir is verification-only; use it with catalog-verify")
+        if command == "capabilities":
+            api.print_json(capabilities(), compact=args.compact)
+            return 0
         save_path = api.resolve_save_path(args.save)
         if command == "raw":
             api.command_raw(save_path, args)
             return 0
         session = AnalysisSession(save_path)
+        if command == "analyze":
+            report = session.analyze(allow_unverified=args.allow_unverified)
+            if args.output:
+                write_analysis(report, args.output, save_path)
+            api.print_json(report, compact=args.compact)
+            return 0 if report["status"] == "complete" else 2
         if command == "inspect-save":
             api.print_json(session.inspect(), compact=args.compact)
             return 0
@@ -304,6 +323,8 @@ def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
             counts = sorted(((api.short_type(k), len(v)) for k,v in session.indexed.gamestates.items()), key=lambda row:(-row[1],row[0]))
             api.print_json([{"type":k,"count":v} for k,v in (counts[:args.limit] if args.limit else counts)], compact=args.compact)
             return 0
+        if command not in CALCULATION_COMMANDS:
+            raise RuntimeError(f"Command has no compatibility policy: {command}")
         compatibility = session.require_calculation(args.allow_unverified)
         args._indexed = session.indexed
         with result_metadata_scope({"compatibility": compatibility}):
@@ -336,7 +357,7 @@ def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
         return 2
     except UserInputError:
         raise
-    except (OSError, ValueError, CatalogError, ModuleCatalogError, LocationCatalogError, SolarPowerDataError) as exc:
+    except (OSError, ProjectionInputError, CatalogError, ModuleCatalogError, LocationCatalogError, SolarPowerDataError) as exc:
         api.print_json({"status": "error", "error": {"code": "invalid-input", "message": str(exc)}}, compact=args.compact)
         return 2
     except Exception as exc:
