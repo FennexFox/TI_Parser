@@ -42,3 +42,12 @@
 - Save identity in application results remains authoritative; cache hashes are compressed-byte invalidation keys only.
 - Runtime-data replacement requires restarting the server.
 - Plans are implemented as reviewable commits; no push, publication, or installed host configuration is requested.
+
+## Final Verification
+
+- Adapter and session phases completed in commit `373e414`; optional packaging and CI in `f2e38bf`.
+- SDK-free checkout and fresh-export suites: 433 passed, 16 skipped, 75 subtests passed.
+- SDK-enabled protocol, subprocess boundary and extracted ZIP tests: 15 passed.
+- Beta archive verification passed using `-I -S`, outside the checkout, with game-input/network guards.
+- Unrelated external AGENTS.md changes were preserved and not staged.
+- No push, host configuration change, or external publication was performed.

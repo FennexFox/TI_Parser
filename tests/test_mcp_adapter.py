@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -320,11 +321,22 @@ def test_server_lock_serializes_concurrent_session_calls(fake_adapter, tmp_path)
     assert _FakeSession.maximum_active == 1
 
 
-def test_real_application_validation_keeps_save_context(tmp_path):
+def test_real_application_validation_keeps_save_context(tmp_path, monkeypatch):
     from tests.test_application_api import _save as real_save
 
     save = real_save(tmp_path)
+    def forbid_process(*_args, **_kwargs):
+        raise AssertionError("MCP analysis must call the application API directly")
+
+    monkeypatch.setattr(subprocess, "run", forbid_process)
+    monkeypatch.setattr(subprocess, "Popen", forbid_process)
     server = adapter.create_server()
+    inspected = anyio.run(_call, server, "inspect-save", {"save_path": str(save)})
+    calculated = anyio.run(
+        _call, server, "topbar", {"save_path": str(save), "allow_unverified": True}
+    )
+    assert calculated.structured_content["status"] == "complete"
+    assert inspected.structured_content["saveIdentity"] == calculated.structured_content["saveIdentity"]
     invalid_argument = anyio.run(
         _call,
         server,

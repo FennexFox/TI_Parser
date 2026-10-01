@@ -38,7 +38,7 @@ Reverting the optional adapter must also remove its packaging requirements and d
 
 ## Progress
 
-In progress.
+Complete.
 
 ## Decision log
 
@@ -46,4 +46,4 @@ Use the accepted issue #6 plan. SDK imports stay outside normal CLI paths. Runti
 
 ## Outcomes / Retrospective
 
-Pending verification.
+SDK-free full suite: 433 passed, 16 skipped, 75 subtests passed. SDK-enabled adapter and extracted-ZIP tests: 15 passed. Fresh Git export full suite and package-only guards passed. Committed beta ZIP build and isolated -I -S verification passed. Local verification used Windows/Python 3.14; Windows/Linux Python 3.11-3.14 coverage is configured in CI, not claimed as locally executed.
