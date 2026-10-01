@@ -38,7 +38,7 @@
 
 ## Progress
 
-- Planning complete; implementation in progress.
+- Implemented deterministic commit-only ZIP allowlist, version and manifest hashes, MIT code license and separate data notice. Builder tests: 5 passed.
 
 ## Decision log
 
@@ -46,5 +46,5 @@
 
 ## Outcomes / Retrospective
 
-- Pending implementation and verification; no completion claimed.
+- Builder tests cover deterministic bytes, selected commit vs dirty checkout, missing required assets and overwrite protection. Extracted ZIP acceptance follows in phase 5. External game-data redistribution conditions remain unresolved; no release is published.
 
