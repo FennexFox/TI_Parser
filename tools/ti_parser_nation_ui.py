@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ti_parser_errors import UserInputError
+
 import math
 from pathlib import Path
 from typing import Any
@@ -387,7 +389,7 @@ def calculate_nation_ui(
 ) -> dict[str, Any]:
     found = match_raw_state(indexed, "TINationState", nation_name)
     if not found:
-        raise SystemExit(f"Nation not found: {nation_name}")
+        raise UserInputError(f"Nation not found: {nation_name}")
     nation_id, nation = found
     faction_id, faction = find_faction_state(indexed, faction_name)
     runtime_catalogs = calculation_catalogs(indexed, "nation-ui")

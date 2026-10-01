@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ti_parser_errors import UserInputError
+
 import math
 from pathlib import Path
 from typing import Any
@@ -508,8 +510,8 @@ def ship_plan_select_design(existing_designs: list[dict[str, Any]], fragment: st
     if len(matches) == 1:
         return matches[0]
     if not matches:
-        raise SystemExit(f"No ship design matched: {fragment}")
-    raise SystemExit(f"Multiple ship designs matched {fragment!r}: {', '.join(str(row.get('display')) for row in matches)}")
+        raise UserInputError(f"No ship design matched: {fragment}")
+    raise UserInputError(f"Multiple ship designs matched {fragment!r}: {', '.join(str(row.get('display')) for row in matches)}")
 
 
 def calculate_ship_plan(

@@ -38,7 +38,7 @@
 
 ## Progress
 
-- Planning complete; implementation in progress.
+- Implemented; targeted beta CLI 4 passed and runtime regression 349 passed, 13 skipped, 75 subtests passed.
 
 ## Decision log
 
@@ -46,5 +46,5 @@
 
 ## Outcomes / Retrospective
 
-- Pending implementation and verification; no completion claimed.
+- Validated typed errors and selectors. Real local save inspection established empty {} collections are valid; nonempty non-list collections remain errors. No formulas changed.
 

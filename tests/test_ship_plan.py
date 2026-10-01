@@ -140,7 +140,7 @@ class ShipPlanTests(unittest.TestCase):
         ]
 
         self.assertEqual(ti.ship_plan_select_design(designs, "PKG Defiant")["template"], "playerShipTemplate1")
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(ValueError):
             ti.ship_plan_select_design(designs, "Defiant")
 
     def test_simulate_ship_design_reconstructs_non_combat_builder_values(self):

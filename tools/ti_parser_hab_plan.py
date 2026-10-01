@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ti_parser_errors import UserInputError
+
 from pathlib import Path
 from typing import Any
 
@@ -782,7 +784,7 @@ def calculate_hab_plan(
     if hab_name:
         found = match_raw_state(indexed, "TIHabState", hab_name)
         if not found or found[0] is None:
-            raise SystemExit(f"Hab not found: {hab_name}")
+            raise UserInputError(f"Hab not found: {hab_name}")
         habs = [(found[0], found[1])]
     else:
         habs = faction_hab_states(indexed, faction)

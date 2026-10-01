@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ti_parser_errors import UserInputError
+
 import math
 from datetime import datetime
 from typing import Any
@@ -961,7 +963,7 @@ def calculate_nation_projection(
 ) -> dict[str, Any]:
     found = match_raw_state(indexed, "TINationState", nation_name)
     if not found or found[0] is None:
-        raise SystemExit(f"Nation not found: {nation_name}")
+        raise UserInputError(f"Nation not found: {nation_name}")
     nation_id, nation = found
     faction_id, faction = find_faction_state(indexed, faction_name)
     catalogs = calculation_catalogs(indexed, "nation-projection")

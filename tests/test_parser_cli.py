@@ -77,12 +77,12 @@ class ParserCliTests(unittest.TestCase):
             self.assertEqual(json.loads(output)["status"], "partial")
             self.assertIsNone(verify.call_args.kwargs["save_path"])
             verify.reset_mock()
-            code, _, errors = self.run_cli([
+            code, output, errors = self.run_cli([
                 "--save", "missing.gz", "--templates-dir", "templates",
                 "catalog-verify", "--scenario", "ModernScenario",
             ])
             self.assertEqual(code, 2)
-            self.assertIn("No saves", errors)
+            self.assertIn("No saves", json.loads(output)["error"]["message"])
             verify.assert_not_called()
 
     def test_missing_topbar_effect_is_structured_dependency(self):
@@ -155,7 +155,7 @@ class ParserCliTests(unittest.TestCase):
                     patch.object(commands, "councilor_summary_maps", return_value=([summary], {10: summary})),
                     patch.object(commands, "nation_research_contribution_month") as contribution,
                 ):
-                    with self.assertRaisesRegex(SystemExit, expected):
+                    with self.assertRaisesRegex(ValueError, expected):
                         commands.command_advise(Path("fixture.gz"), None, args)
                 contribution.assert_not_called()
 

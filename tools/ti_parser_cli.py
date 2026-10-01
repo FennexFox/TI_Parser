@@ -8,7 +8,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from ti_parser_catalogs import runtime_catalog_scope
+from ti_parser_catalogs import runtime_catalog_scope, CatalogError
+from ti_parser_errors import UserInputError
+from ti_parser_core import ModuleCatalogError, LocationCatalogError, SolarPowerDataError
 
 
 RAW_COMMANDS = {
@@ -40,8 +42,24 @@ SNAPSHOT_COMMANDS = {
 }
 
 
+class InputParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise UserInputError(message, code="invalid-arguments")
+
+
+ENTITY_SELECTORS = {
+    "faction": "name", "nation": "name", "councilor": "name",
+    "org-plan": "faction", "research": "faction", "research-ui": "faction",
+    "research-plan": "faction", "topbar": "faction", "ship-plan": "faction",
+    "project-analysis": "faction", "ai-fleet-diagnostics": "faction",
+    "nation-ui": "name", "nation-projection": "name", "hab-ui": "name",
+    "hab-plan": "name", "nation-claims": "claimant", "advise": "councilor",
+}
+REQUIRED_SELECTORS = {"faction", "nation", "councilor", "nation-ui", "nation-projection", "hab-ui", "advise"}
+
+
 def build_parser(api: ModuleType) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Parse Terra Invicta saves into compact summaries.")
+    parser = InputParser(description="Parse Terra Invicta saves into compact summaries.")
     parser.set_defaults(top_nations=20)
     parser.add_argument("--save", help="Path to a .gz Terra Invicta save. Defaults to newest local save.")
     parser.add_argument("--templates-dir", help="Path to TerraInvicta_Data\\StreamingAssets\\Templates.")
@@ -226,18 +244,37 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     cache.set_defaults(cache_command=True)
     add_compact_flag(cache)
 
+    for command, field in ENTITY_SELECTORS.items():
+        child = subparsers.choices[command]
+        child.add_argument("--entity-id", type=int, help="Select the primary entity by ID instead of name.")
+        for action in child._actions:
+            if action.dest == field and not action.option_strings:
+                action.nargs = "?"
     return parser
 
 
 def main(api: ModuleType, argv: list[str] | None = None) -> int:
-    with runtime_catalog_scope():
-        return _run_command(api, argv)
+    try:
+        with runtime_catalog_scope():
+            return _run_command(api, argv)
+    except UserInputError as exc:
+        api.print_json({"status": "error", "error": exc.to_dict()})
+        return 2
 
 
 def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
     parser = build_parser(api)
     args = parser.parse_args(argv)
     command = args.command or "summary"
+    field = ENTITY_SELECTORS.get(command)
+    if field:
+        selected = getattr(args, field)
+        if args.entity_id is not None:
+            if selected is not None:
+                parser.error("Use a name or --entity-id, not both")
+            setattr(args, field, args.entity_id)
+        elif command in REQUIRED_SELECTORS and selected is None:
+            parser.error("A name or --entity-id is required")
     if command == "nation-projection" and args.days <= 0:
         parser.error("nation-projection --days must be positive")
 
@@ -289,7 +326,12 @@ def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
             compact=getattr(args, "compact", False),
         )
         return 2
-    except Exception as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    except UserInputError:
+        raise
+    except (OSError, ValueError, CatalogError, ModuleCatalogError, LocationCatalogError, SolarPowerDataError) as exc:
+        api.print_json({"status": "error", "error": {"code": "invalid-input", "message": str(exc)}}, compact=args.compact)
         return 2
+    except Exception as exc:
+        api.print_json({"status": "error", "error": {"code": "internal-error", "message": str(exc)}}, compact=args.compact)
+        return 1
     return 0

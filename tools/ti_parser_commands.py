@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ti_parser_errors import UserInputError
+
 import argparse
 import json
 from pathlib import Path
@@ -255,19 +257,19 @@ def command_advise(save_path: Path, templates_dir: Path | None, args: argparse.N
     summaries, councilor_by_id = councilor_summary_maps(indexed, trait_templates)
     councilor = match_named(summaries, args.councilor)
     if not councilor:
-        raise SystemExit(f"Councilor not found: {args.councilor}")
+        raise UserInputError(f"Councilor not found: {args.councilor}")
 
     councilor_id = councilor.get("id")
     councilor_state = state_value_by_id(indexed, councilor_id if isinstance(councilor_id, int) else None)
     councilor_faction_id = ref_id(councilor_state.get("faction")) if isinstance(councilor_state, dict) else None
     if councilor_faction_id != faction_id:
-        raise SystemExit(f"Councilor not available for faction: {args.councilor}")
+        raise UserInputError(f"Councilor not available for faction: {args.councilor}")
     if councilor.get("active") is not True or councilor.get("detained") is True:
-        raise SystemExit(f"Councilor unavailable: {args.councilor}")
+        raise UserInputError(f"Councilor unavailable: {args.councilor}")
 
     nation_match = match_raw_state(indexed, "TINationState", args.nation)
     if not nation_match:
-        raise SystemExit(f"Nation not found: {args.nation}")
+        raise UserInputError(f"Nation not found: {args.nation}")
     nation_id, nation = nation_match
 
     science = as_float((councilor.get("finalAttributes") or {}).get("Science"), 0.0)
@@ -392,12 +394,12 @@ def command_summary(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
         if isinstance(faction.get("player"), dict) and faction["player"].get("isAI") is False
     ]
     if len(metadata_candidates) > 1 or len(player_state_candidates) > 1:
-        raise SystemExit("Multiple human player faction candidates found in snapshot.")
+        raise UserInputError("Multiple human player faction candidates found in snapshot.")
     if metadata_candidates and player_state_candidates and metadata_candidates[0].get("id") != player_state_candidates[0].get("id"):
-        raise SystemExit("Snapshot player faction metadata conflicts with TIPlayerState.")
+        raise UserInputError("Snapshot player faction metadata conflicts with TIPlayerState.")
     player_faction = (player_state_candidates or metadata_candidates or [None])[0]
     if player_faction is None:
-        raise SystemExit("Human player faction could not be resolved in snapshot.")
+        raise UserInputError("Human player faction could not be resolved in snapshot.")
 
     top_nations = []
     if player_faction:
@@ -447,7 +449,7 @@ def command_summary(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
 def command_faction(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
     faction = match_named(snapshot["factions"], args.name)
     if not faction:
-        raise SystemExit(f"Faction not found: {args.name}")
+        raise UserInputError(f"Faction not found: {args.name}")
     result = dict(faction)
     result["controlledNations"] = result.get("controlledNations", [])[: args.limit]
     print_json(result, compact=args.compact)
@@ -456,28 +458,28 @@ def command_faction(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
 def command_nation(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
     nation = match_named(snapshot["nations"], args.name)
     if not nation:
-        raise SystemExit(f"Nation not found: {args.name}")
+        raise UserInputError(f"Nation not found: {args.name}")
     print_json(nation, compact=args.compact)
 
 
 def command_councilor(snapshot: dict[str, Any], args: argparse.Namespace) -> None:
     councilor = match_named(snapshot["councilors"], args.name)
     if not councilor:
-        raise SystemExit(f"Councilor not found: {args.name}")
+        raise UserInputError(f"Councilor not found: {args.name}")
     result = dict(councilor)
     if args.target_nation and args.current_location_context:
-        raise SystemExit("Use only one of --target-nation or --current-location-context.")
+        raise UserInputError("Use only one of --target-nation or --current-location-context.")
     context_nation = None
     context_label = None
     if args.target_nation:
         context_nation = match_named(snapshot["nations"], args.target_nation)
         if not context_nation:
-            raise SystemExit(f"Target nation not found: {args.target_nation}")
+            raise UserInputError(f"Target nation not found: {args.target_nation}")
         context_label = "targetNation"
     elif args.current_location_context:
         context_nation = councilor.get("locationNation") if isinstance(councilor.get("locationNation"), dict) else None
         if not context_nation:
-            raise SystemExit(f"Current location nation unavailable for councilor: {args.name}")
+            raise UserInputError(f"Current location nation unavailable for councilor: {args.name}")
         context_label = "currentLocation"
 
     if context_label:
