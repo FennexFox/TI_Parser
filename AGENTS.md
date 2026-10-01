@@ -24,6 +24,10 @@ implementation areas include:
   transactions, and fail-closed simulation.
 - `tools/ti_parser_projection_coverage.py`: execution-derived metric coverage.
 - `tools/ti_parser_catalogs.py`: packaged runtime catalog validation.
+- `tools/ti_parser_registry.py`: analysis metadata and caller argument contracts.
+- `tools/ti_parser_application.py`: shared CLI and machine analysis handlers.
+- `tools/ti_parser_session.py`: reusable save/index/catalog lifetime and machine result envelopes.
+- `tools/ti_parser_mcp.py`: optional local stdio transport over the session API.
 - `tools/ti_parser_cli.py`: CLI parsing and dispatch.
 - `tools/ti_save_parser.py`: public entrypoint and compatibility wrappers.
 - `tests/`: behavioral, provenance, runtime-boundary, and regression coverage.
@@ -124,24 +128,24 @@ When the runtime supports explicit child model and reasoning-effort selection:
   causes must be explored and checked, or a difficult but still well-scoped task
   benefits from deeper search, verification, and revision. Do not use max by
   default merely because a task involves coding.
-- **GPT-6 Sol, medium**: capability and context-integration escalation. Use
+- **GPT-6.1 Sol, medium**: capability and context-integration escalation. Use
   when the relevant scope is broad, several subsystems must be integrated,
   abstraction or API choices have significant downstream effects, or Luna
   repeatedly misses relevant context or produces structurally weak solutions.
   Prefer Sol over simply increasing Luna effort when the likely limitation is
   model capability or context breadth rather than insufficient deliberation.
-- **GPT-6 Sol, high**: difficult implementation and engineering escalation.
+- **GPT-6.1 Sol, high**: difficult implementation and engineering escalation.
   Use for stubborn cross-cutting debugging, complex refactors or migrations,
   subtle stateful/concurrent behavior, or other bounded technical work where Sol
   medium is insufficient. Keep final cross-source synthesis and repository-level
-  semantic decisions with the Astra coordinator.
+  semantic decisions with the GPT-6.1 Sol coordinator.
 - **GPT-6.1 Sol, medium**: root-level escalation for conflicting worker
   evidence, invalidated plans, parser/game-semantics disagreements, repeated
   failures that suggest the problem framing itself may be wrong, or
   architecture/simulation-semantics decisions requiring stronger global
   reasoning.
 - **GPT-6.1 Sol, high**: exceptional root escalation only for unresolved,
-  high-impact, structurally difficult problems where Astra medium has not been
+  high-impact, structurally difficult problems where Sol medium has not been
   sufficient.
 
 Model names are routing preferences, not repository invariants. If a requested
@@ -163,7 +167,7 @@ kind of uncertainty or failure:
   coordinator.
 - If evidence conflicts, assumptions collapse, or the remaining question is
   fundamentally about mechanics, architecture, provenance, or simulation
-  semantics, escalate the Astra root rather than merely increasing worker
+  semantics, escalate the GPT-6.1 Sol root rather than merely increasing worker
   effort.
 - After the difficult decision is resolved, return routine implementation,
   search, and verification to the cheapest worker that can perform them
@@ -194,7 +198,7 @@ kind of uncertainty or failure:
 
 ### Coordinator escalation triggers
 
-Raise the root from Astra low to medium when one or more of these occurs:
+Raise the root from GPT-6.1 Sol low to medium when one or more of these occurs:
 
 1. Independent worker results materially conflict.
 2. A core assumption in the original plan is disproved during execution.

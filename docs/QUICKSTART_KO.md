@@ -62,7 +62,9 @@ python .\tools\ti_save_parser.py nation-ui --help
 `saved fact`, 계산값, 가정, 불완전 상태를 구분해서 읽어야 합니다.
 
 Codex 또는 ChatGPT와 함께 사용하는 방법은 [CHATGPT_START.md](CHATGPT_START.md)를
-참고하세요.
+참고하세요. 로컬 MCP 호스트에서 stdio 어댑터를 선택적으로 실행하려면
+[로컬 MCP 설정](MCP_SETUP.md)을 보세요. MCP SDK는 어댑터 실행 환경에만 별도로
+설치하며, 일반 CLI 실행에는 필요하지 않습니다.
 
 ## 분석 엔진과 기계용 경계
 

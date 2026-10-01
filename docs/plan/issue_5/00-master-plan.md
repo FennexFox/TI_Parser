@@ -1,5 +1,7 @@
 # Reusable machine-facing application API
 
+This completed plan records the Python API work for issue #5. The current repository's optional MCP transport is a later addition tracked in [issue #6](../../../dev-docs/plan/issue_6/00-master-plan.md), with setup instructions in [MCP_SETUP.md](../../MCP_SETUP.md). The exclusions below remain the scope of issue #5.
+
 ## Issue Target And Scope Summary
 
 - Issue target: #5

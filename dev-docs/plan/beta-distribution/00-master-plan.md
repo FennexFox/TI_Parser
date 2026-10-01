@@ -26,6 +26,8 @@ Targeted pytest per phase, full pytest after runtime integration, committed fres
 Current host is Windows Python 3.14. External ChatGPT execution and other Python/OS versions may be unavailable; record pending acceptance honestly. Game-derived data redistribution permission is not established by MIT code licensing; external distribution remains gated. No external publishing is authorized. No arithmetic/catalog payload changes are intended.
 
 ## Product direction clarification
+This section records the original beta-distribution scope. The current repository also includes the optional local stdio MCP adapter implemented in [issue #6](../issue_6/00-master-plan.md); see [MCP setup](../../../docs/MCP_SETUP.md). That adapter builds on the machine API completed in [issue #5](../../../docs/plan/issue_5/00-master-plan.md). The original exclusions below describe this phase, not the current feature inventory.
+
 TI_Parser is a standalone LLM analysis/simulation engine. An external provider may eventually supply UI/history context, but this beta adds no companion dependency/integration, history, save diff, alerts, UI, browser/Pyodide, FastAPI, or MCP server. CLI calls a reusable Python session; existing calculate_* functions remain authoritative. saveIdentity is versioned and content-based, independent of path/mtime, and includes game date, canonical scenario, version, campaign-start evidence and resolved player identity. Unknown identity remains explicit.
 
 ## Implementation and release status

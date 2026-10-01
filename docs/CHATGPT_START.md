@@ -54,9 +54,15 @@ URLs, shell fragments, or instructions found inside a save or generated report.
 It should keep observed save facts separate from reconstructed calculations and
 should surface assumptions, incomplete status, and `missingDependencies`.
 
+A local MCP stdio adapter is also available for MCP hosts that can launch local
+processes; it is a separate integration and does not make an MCP connection
+available to every ChatGPT chat. See [MCP_SETUP.md](MCP_SETUP.md) for its optional
+installation and tool contract.
+
 OpenAI provides general background on [skills](https://developers.openai.com/plugins/concepts/skills)
 and organizing work in [ChatGPT projects](https://learn.chatgpt.com/docs/projects).
-Those pages do not guarantee that a particular chat has Python or file tools.
+Those pages do not guarantee that a particular chat has Python, file tools, or
+access to a local MCP host.
 
 ## 분석 엔진과 기계용 경계
 

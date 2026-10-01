@@ -96,7 +96,7 @@ modification time, and packaged runtime catalog bytes. Cache hits validate the
 current runtime bundle; malformed cache entries rebuild automatically, and
 completed cache files replace previous entries atomically.
 
-Implementation layout:
+Implementation layout (current ownership):
 
 - `tools/ti_parser_core.py` owns save loading, template loading, indexing, and reference helpers.
 - `tools/ti_parser_snapshot.py` owns compact snapshot summaries and snapshot cache handling.
@@ -126,7 +126,13 @@ Implementation layout:
 - `tools/ti_parser_projection_coverage.py` owns execution-derived metric evidence and dependency propagation.
 - `tools/ti_save_parser.py` keeps only the public script entrypoint and explicit compatibility exports. Existing function names and signatures remain available.
 - `tools/catalog_utils.py` contains shared catalog-generator helpers.
+- `tools/ti_parser_compatibility.py` assesses save compatibility; `tools/ti_parser_errors.py` defines structured expected input errors; `tools/ti_parser_version.py` defines the distribution version.
+- `tools/ti_parser_registry.py` owns stable machine-facing analysis metadata and argument contracts; `tools/ti_parser_application.py` maps analysis IDs to executable handlers; `tools/ti_parser_session.py` provides the reusable one-save API and versioned `run()` boundary.
+- `tools/ti_parser_analysis.py` builds the bounded LLM bootstrap report, and `tools/ti_parser_capabilities.py` publishes the registry inventory.
+- `tools/ti_parser_mcp.py` is the optional stdio MCP adapter. Its SDK dependency is isolated in `requirements-mcp.txt`; the normal CLI and Python API do not import it.
+- `tools/build_beta_distribution.py` builds the runtime ZIP; `tools/verify_beta_distribution.py` validates it.
 
+The runtime ZIP includes the CLI, Python API, MCP adapter source, and MCP requirements file. The MCP SDK itself is optional and installed separately only in an environment that launches the adapter. Normal CLI and Python API use remain package-only and do not require it. Raw game templates and `Assembly-CSharp.dll` remain generation, audit, or `catalog-verify` inputs rather than normal runtime dependencies.
 Domain modules import their dependencies directly and do not import the public
 facade. Their dependency graph is acyclic. Tests or integrations that replace a
 dependency with a mock should patch the module where it is used, rather than
