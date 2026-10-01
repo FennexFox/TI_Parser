@@ -4,7 +4,7 @@
 Implement the user-approved TI_Parser beta plan: ZIP execution in Codex and Python-capable ChatGPT, trustworthy selection/input, explicit compatibility consent, saved-fact inspection and basic analysis, MIT code license, reproducible distribution and CI.
 
 ## Strategy
-Preserve package-only mechanics and existing result fields; add typed failures, strict selectors, a separate raw inspection path, explicit compatibility metadata and consent, and an analysis orchestrator reusing domain functions. Do not refactor the projection engine or regenerate catalogs.
+Preserve package-only mechanics and existing result fields; add typed failures, strict selectors, a separate raw inspection path, stable saveIdentity, explicit compatibility metadata and consent, and a thin application/session boundary reusing domain functions. analyze is bounded LLM bootstrap context, not a comprehensive campaign report. capabilities inventories specialized analyses for future machine callers. Do not refactor the projection engine or regenerate catalogs.
 
 ## Phase Order
 1. Input and entity hardening (01-input.md).
@@ -24,3 +24,6 @@ Targeted pytest per phase, full pytest after runtime integration, committed fres
 
 ## Known Risks And Assumptions
 Current host is Windows Python 3.14. External ChatGPT execution and other Python/OS versions may be unavailable; record pending acceptance honestly. Game-derived data redistribution permission is not established by MIT code licensing; external distribution remains gated. No external publishing is authorized. No arithmetic/catalog payload changes are intended.
+
+## Product direction clarification
+TI_Parser is a standalone LLM analysis/simulation engine. An external provider may eventually supply UI/history context, but this beta adds no companion dependency/integration, history, save diff, alerts, UI, browser/Pyodide, FastAPI, or MCP server. CLI calls a reusable Python session; existing calculate_* functions remain authoritative. saveIdentity is versioned and content-based, independent of path/mtime, and includes game date, canonical scenario, version, campaign-start evidence and resolved player identity. Unknown identity remains explicit.

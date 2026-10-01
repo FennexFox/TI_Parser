@@ -49,3 +49,6 @@
 
 - Pending implementation and verification; no completion claimed.
 
+
+## Machine contract checks
+Verify saveIdentity stability across copies and changes when save contents change, unknown player/version handling, and capabilities inventory consistency.
