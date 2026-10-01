@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import ti_save_parser as ti
 import ti_parser_commands as commands
+import ti_parser_application as application
 import ti_parser_topbar as topbar
 from ti_parser_catalogs import RuntimeCatalogs
 from tests import test_package_only_runtime as fixtures
@@ -151,11 +152,11 @@ class ParserCliTests(unittest.TestCase):
                 with (
                     patch.object(commands, "load_save", return_value={}),
                     patch.object(commands, "build_index", return_value=indexed),
-                    patch.object(commands, "calculation_catalogs", return_value=SimpleNamespace(traits={}, effects={})),
-                    patch.object(commands, "find_faction_state", return_value=(1, {"templateName": "FactionOne"})),
-                    patch.object(commands, "faction_effect_contexts", return_value={}),
-                    patch.object(commands, "councilor_summary_maps", return_value=([summary], {10: summary})),
-                    patch.object(commands, "nation_research_contribution_month") as contribution,
+                    patch.object(application, "calculation_catalogs", return_value=SimpleNamespace(traits={}, effects={})),
+                    patch.object(application, "find_faction_state", return_value=(1, {"templateName": "FactionOne"})),
+                    patch.object(application, "faction_effect_contexts", return_value={}),
+                    patch.object(application, "councilor_summary_maps", return_value=([summary], {10: summary})),
+                    patch.object(application, "nation_research_contribution_month") as contribution,
                 ):
                     with self.assertRaisesRegex(ValueError, expected):
                         commands.command_advise(Path("fixture.gz"), None, args)
