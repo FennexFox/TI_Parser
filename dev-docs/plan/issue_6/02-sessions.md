@@ -38,12 +38,12 @@ Reverting the optional adapter must also remove its packaging requirements and d
 
 ## Progress
 
-In progress.
+Implementation and targeted verification complete.
 
 ## Decision log
 
-Use the accepted issue #6 plan. SDK imports stay outside normal CLI paths. Runtime catalog replacement requires restart.
+Use the accepted issue #6 plan. SDK imports stay outside normal CLI paths. Runtime catalog replacement requires restart. Phases 1 and 2 share one coherent implementation commit because dispatch and cache lifetime are implemented together; separate phase acceptance remains recorded.
 
 ## Outcomes / Retrospective
 
-Pending verification.
+SDK-enabled adapter + application API verification: 49 passed. In-process and real stdio smoke tests passed; missing SDK startup is stderr-only. Full committed-export verification follows in phase 3.
