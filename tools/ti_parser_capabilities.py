@@ -38,7 +38,7 @@ CALCULATION_COMMANDS = frozenset(row[0] for row in _ANALYSES if row[3])
 def capabilities():
     return {"schemaVersion": 1, "parserVersion": __version__, "analyses": [
         {"command": command, "purpose": purpose, "kind": kind,
-         "requiresVerifiedCompatibility": required, "allowsExplicitUnverifiedConsent": required,
+         "requiresVerifiedCompatibility": required, "allowsExplicitUnverifiedConsent": required or command == "analyze",
          "requiresSave": command not in {"capabilities", "catalog-verify"},
          "requiresSourceCheckout": command == "catalog-verify"}
         for command, purpose, kind, required in _ANALYSES],

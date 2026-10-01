@@ -29,6 +29,7 @@ def run_checked(command: Sequence[str], *, cwd: Path, label: str) -> dict[str, o
         encoding="utf-8",
         errors="replace",
         capture_output=True,
+        stdin=subprocess.DEVNULL,
         check=False,
     )
     if completed.returncode != 0:
@@ -66,7 +67,7 @@ def create_fresh_export(repository: Path, destination: Path) -> Path:
 def verify_export(export_root: Path, python: str) -> dict[str, object]:
     checks = [
         run_checked(
-            [python, "-m", "unittest", "discover", "-s", "tests", "-q"],
+            [python, "-m", "pytest", "-q"],
             cwd=export_root,
             label="fresh-export full test suite",
         ),

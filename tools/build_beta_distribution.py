@@ -52,7 +52,7 @@ def _run_git(repository: Path, arguments: Sequence[str]) -> bytes:
         [git, *arguments],
         cwd=repository,
         capture_output=True,
-            stdin=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
         check=False,
     )
     if completed.returncode != 0:
@@ -212,6 +212,9 @@ def build_beta_distribution(
         )
 
     selected = [path for path in all_paths if _is_distribution_path(path)]
+    omitted_catalogs = sorted(_required_catalog_paths(catalog_manifest) - set(selected))
+    if omitted_catalogs:
+        raise BetaDistributionError(f"Runtime catalogs excluded by allowlist: {', '.join(omitted_catalogs)}")
     files = {path: _read_blob(root, commit, path) for path in selected}
     version = _version_from_source(files["tools/ti_parser_version.py"])
     destination = (

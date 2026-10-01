@@ -27,3 +27,6 @@ Current host is Windows Python 3.14. External ChatGPT execution and other Python
 
 ## Product direction clarification
 TI_Parser is a standalone LLM analysis/simulation engine. An external provider may eventually supply UI/history context, but this beta adds no companion dependency/integration, history, save diff, alerts, UI, browser/Pyodide, FastAPI, or MCP server. CLI calls a reusable Python session; existing calculate_* functions remain authoritative. saveIdentity is versioned and content-based, independent of path/mtime, and includes game date, canonical scenario, version, campaign-start evidence and resolved player identity. Unknown identity remains explicit.
+
+## Implementation and release status
+All five implementation phases are implemented with phase commits. Local Windows Python 3.14 regression and standalone ZIP validation are being finalized in Phase 05. Release acceptance remains incomplete until actual ChatGPT execution, the remote OS/Python matrix, and game-derived data redistribution review are completed. The compatibility registry intentionally contains no unsubstantiated verified combinations. This is a local beta candidate, not an externally cleared release.

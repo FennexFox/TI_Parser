@@ -165,6 +165,12 @@ class BetaDistributionTests(unittest.TestCase):
             build_beta_distribution(self.root, self.root / "README.md")
         self.assertEqual((self.root / "README.md").read_bytes(), original)
 
+    def test_existing_catalog_outside_allowlist_fails(self) -> None:
+        self._write("data/catalog_manifest.json", json.dumps({"catalogs": {"future_compatibility.json": {}}}))
+        self._commit("reference excluded catalog")
+        with self.assertRaisesRegex(BetaDistributionError, "excluded by allowlist"):
+            build_beta_distribution(self.root, self.root / "excluded.zip")
+
 
 if __name__ == "__main__":
     unittest.main()

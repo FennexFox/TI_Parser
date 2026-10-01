@@ -88,6 +88,8 @@ def test_capabilities_matches_all_cli_commands_and_policies():
     commands = next(a.choices for a in parser._actions if isinstance(a,argparse._SubParsersAction))
     inventory = {row["command"]: row for row in capabilities()["analyses"]}
     assert set(inventory) == set(commands)
+    assert inventory["analyze"]["allowsExplicitUnverifiedConsent"] is True
+    assert inventory["inspect-save"]["allowsExplicitUnverifiedConsent"] is False
     assert {name for name,row in inventory.items() if row["requiresVerifiedCompatibility"]} == CALCULATION_COMMANDS
     with patch.object(ti,"resolve_save_path",side_effect=AssertionError("must not read save")), redirect_stdout(io.StringIO()):
         assert ti.main(["capabilities"]) == 0

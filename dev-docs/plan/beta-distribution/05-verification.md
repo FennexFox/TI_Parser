@@ -39,7 +39,8 @@
 
 ## Progress
 
-- Planning complete; implementation in progress.
+- Implemented Windows/Linux x Python 3.11-3.14 CI, pinned pytest development dependency, committed-export pytest collection and isolated ZIP verifier. Local integrated regression passed 392 tests (13 skipped, 75 subtests) before final review fixes; committed-export gate will record the final count.
+- ZIP validation checks independent distribution membership, hashes, six catalog scenarios, version/help/inventory, inspection, compatibility blocking, deferred bootstrap and opt-in bootstrap/topbar. Processes run outside the repository under -I -S with network/game-input audit guards and Korean/space paths.
 
 ## Decision log
 
@@ -47,7 +48,7 @@
 
 ## Outcomes / Retrospective
 
-- Pending implementation and verification; no completion claimed.
+- Local Codex execution is available; real Python-capable ChatGPT acceptance is not available in this session and remains pending. The remote eight-environment CI matrix has been configured but not executed here. Game-derived data redistribution conditions remain unconfirmed. No external publication or upload occurred.
 
 
 ## Machine contract checks
