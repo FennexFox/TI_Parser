@@ -57,9 +57,13 @@ from ti_parser_verify import verify_catalogs
 from ti_parser_world import calculate_world_ui
 
 
+def command_index(save_path, args):
+    indexed = getattr(args, "_indexed", None)
+    return indexed if indexed is not None else build_index(load_save(save_path))
+
+
 def command_org_plan(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_org_plan(
         indexed,
         templates_dir,
@@ -75,15 +79,13 @@ def command_org_plan(save_path: Path, templates_dir: Path | None, args: argparse
 
 
 def command_hab_ui(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_hab_ui(indexed, templates_dir, args.name)
     print_json(result, compact=args.compact)
 
 
 def command_hab_slots(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_hab_slots(
         indexed,
         templates_dir,
@@ -95,8 +97,7 @@ def command_hab_slots(save_path: Path, templates_dir: Path | None, args: argpars
 
 
 def command_hab_plan(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_hab_plan(
         indexed,
         templates_dir,
@@ -111,8 +112,7 @@ def command_hab_plan(save_path: Path, templates_dir: Path | None, args: argparse
 
 
 def command_project_analysis(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_project_analysis(
         indexed,
         templates_dir,
@@ -127,22 +127,19 @@ def command_project_analysis(save_path: Path, templates_dir: Path | None, args: 
 
 
 def command_research(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_research_breakdown(indexed, templates_dir, args.faction, include_details=args.details)
     print_json(result, compact=args.compact)
 
 
 def command_research_ui(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_research_ui(indexed, templates_dir, args.faction)
     print_json(result, compact=args.compact)
 
 
 def command_research_plan(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_research_plan(
         indexed,
         templates_dir,
@@ -155,8 +152,7 @@ def command_research_plan(save_path: Path, templates_dir: Path | None, args: arg
 
 
 def command_ship_plan(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_ship_plan(
         indexed,
         templates_dir,
@@ -178,8 +174,7 @@ def command_ship_plan(save_path: Path, templates_dir: Path | None, args: argpars
 
 
 def command_nation_claims(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     runtime_catalogs = calculation_catalogs(indexed, "nation-claims")
     result = calculate_nation_claims(
         indexed,
@@ -198,8 +193,7 @@ def command_nation_claims(save_path: Path, templates_dir: Path | None, args: arg
 
 
 def command_ai_fleet_diagnostics(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_ai_fleet_diagnostics(
         indexed,
         faction_name=args.faction,
@@ -226,8 +220,7 @@ def command_catalog_verify(args: argparse.Namespace) -> int:
 
 
 def command_topbar(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_topbar(
         indexed,
         templates_dir,
@@ -240,15 +233,13 @@ def command_topbar(save_path: Path, templates_dir: Path | None, args: argparse.N
 
 
 def command_world_ui(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_world_ui(indexed, templates_dir, args.faction)
     print_json(clean_numbers(result, 6), compact=args.compact)
 
 
 def command_advise(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     runtime_catalogs = calculation_catalogs(indexed, "advise")
     trait_templates = runtime_catalogs.traits
     effect_templates = runtime_catalogs.effects
@@ -343,15 +334,13 @@ def command_advise(save_path: Path, templates_dir: Path | None, args: argparse.N
 
 
 def command_nation_ui(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     result = calculate_nation_ui(indexed, templates_dir, args.name, args.faction)
     print_json(result, compact=args.compact)
 
 
 def command_nation_projection(save_path: Path, templates_dir: Path | None, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     plan_payload = None
     if args.plan_file:
         try:
@@ -529,8 +518,7 @@ def raw_entry_matches(entry: dict[str, Any], args: argparse.Namespace) -> bool:
 
 
 def command_raw(save_path: Path, args: argparse.Namespace) -> None:
-    data = load_save(save_path)
-    indexed = build_index(data)
+    indexed = command_index(save_path, args)
     entries = type_entries(indexed, args.type)
     keys = parse_key_list(args.keys)
     output = []

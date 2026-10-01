@@ -30,7 +30,7 @@ class ParserCliTests(unittest.TestCase):
     def run_cli(self, args):
         output, errors = io.StringIO(), io.StringIO()
         with redirect_stdout(output), redirect_stderr(errors):
-            code = ti.main(args)
+            code = ti.main(["--allow-unverified", *args])
         return code, output.getvalue(), errors.getvalue()
 
     def test_default_summary_matches_explicit_summary_and_honors_limit(self):
@@ -41,6 +41,7 @@ class ParserCliTests(unittest.TestCase):
         }
         with (
             patch.object(ti, "resolve_save_path", return_value=Path("fixture.gz")),
+            patch("ti_parser_cli.AnalysisSession", return_value=SimpleNamespace(indexed=None, require_calculation=lambda allow: {"status":"unverified", "unverifiedAllowed":allow})),
             patch.object(ti, "load_or_build_snapshot", return_value=(snapshot, Path("cache.json"), True)),
         ):
             default = self.run_cli([])
@@ -89,6 +90,7 @@ class ParserCliTests(unittest.TestCase):
         context = sorted(ti.TOPBAR_EFFECT_CONTEXTS)[0]
         with (
             patch.object(ti, "resolve_save_path", return_value=Path("fixture.gz")),
+            patch("ti_parser_cli.AnalysisSession", return_value=SimpleNamespace(indexed=None, require_calculation=lambda allow: {"status":"unverified", "unverifiedAllowed":allow})),
             patch.object(commands, "load_save", return_value={"gamestates": {}}),
             patch.object(topbar, "calculation_catalogs", return_value=SimpleNamespace(traits={}, effects={})),
             patch.object(topbar, "load_hab_module_catalog", return_value={}),

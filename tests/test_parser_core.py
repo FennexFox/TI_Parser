@@ -127,7 +127,7 @@ class ParserCoreTests(unittest.TestCase):
             stdout = StringIO()
             with redirect_stdout(stdout):
                 exit_code = ti.main(
-                    [
+                    ["--allow-unverified",
                         "--save",
                         str(save_path),
                         "raw",
@@ -163,6 +163,7 @@ class ParserCoreTests(unittest.TestCase):
                 [
                     sys.executable,
                     str(Path(__file__).resolve().parents[1] / "tools" / "ti_save_parser.py"),
+                    "--allow-unverified",
                     "--save",
                     str(save_path),
                     "raw",

@@ -38,7 +38,7 @@
 
 ## Progress
 
-- Planning complete; implementation in progress.
+- Implemented. Targeted compatibility/CLI/package/core tests: 35 passed, 9 subtests.
 
 ## Decision log
 
@@ -46,7 +46,7 @@
 
 ## Outcomes / Retrospective
 
-- Pending implementation and verification; no completion claimed.
+- Added pure inspection, versioned canonical-JSON save identity, exact runtime-byte compatibility registry, explicit calculation consent and isolated metadata scope. Empty registry intentionally verifies no unknown version. Raw/type inspection needs no catalog.
 
 
 ## Machine contract checks

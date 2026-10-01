@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "description": "Exact save-version, scenario, and packaged-runtime tuples backed by recorded verification evidence. Empty until such evidence is established.",
+  "entries": []
+}

@@ -10,6 +10,8 @@ from typing import Any
 
 from ti_parser_catalogs import runtime_catalog_scope, CatalogError
 from ti_parser_errors import UserInputError
+from ti_parser_session import AnalysisSession
+from ti_parser_core import result_metadata_scope
 from ti_parser_core import ModuleCatalogError, LocationCatalogError, SolarPowerDataError
 
 
@@ -61,6 +63,7 @@ REQUIRED_SELECTORS = {"faction", "nation", "councilor", "nation-ui", "nation-pro
 def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     parser = InputParser(description="Parse Terra Invicta saves into compact summaries.")
     parser.set_defaults(top_nations=20)
+    parser.add_argument("--allow-unverified", action="store_true", help="Explicitly consent to calculations on this unverified save for this invocation.")
     parser.add_argument("--save", help="Path to a .gz Terra Invicta save. Defaults to newest local save.")
     parser.add_argument("--templates-dir", help="Path to TerraInvicta_Data\\StreamingAssets\\Templates.")
     parser.add_argument("--cache-dir", default=api.DEFAULT_CACHE_DIR, help="Directory for compact parser cache.")
@@ -68,6 +71,8 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     parser.add_argument("--compact", action="store_true", help="Print compact JSON.")
 
     subparsers = parser.add_subparsers(dest="command", required=False)
+    inspection = subparsers.add_parser("inspect-save", help="Inspect saved facts and compatibility without calculations.")
+    inspection.add_argument("--compact", action="store_true", default=argparse.SUPPRESS)
 
     def add_compact_flag(subparser: argparse.ArgumentParser) -> None:
         subparser.add_argument("--compact", action="store_true", default=argparse.SUPPRESS, help="Print compact JSON.")
@@ -244,6 +249,8 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     cache.set_defaults(cache_command=True)
     add_compact_flag(cache)
 
+    for child in subparsers.choices.values():
+        child.add_argument("--allow-unverified", action="store_true", default=argparse.SUPPRESS)
     for command, field in ENTITY_SELECTORS.items():
         child = subparsers.choices[command]
         child.add_argument("--entity-id", type=int, help="Select the primary entity by ID instead of name.")
@@ -289,32 +296,33 @@ def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
         if command == "raw":
             api.command_raw(save_path, args)
             return 0
-        templates_dir = None
-        if command in RAW_COMMANDS:
-            getattr(api, RAW_COMMANDS[command])(save_path, templates_dir, args)
+        session = AnalysisSession(save_path)
+        if command == "inspect-save":
+            api.print_json(session.inspect(), compact=args.compact)
             return 0
-
-        snapshot, cache_path_value, cache_hit = api.load_or_build_snapshot(
-            save_path,
-            Path(args.cache_dir),
-            templates_dir,
-            refresh=args.refresh_cache,
-        )
-        if command in SNAPSHOT_COMMANDS:
-            getattr(api, SNAPSHOT_COMMANDS[command])(snapshot, args)
-        elif command == "cache":
-            api.print_json(
-                {
-                    "cache": str(cache_path_value),
-                    "cacheHit": cache_hit,
-                    "source": snapshot.get("source"),
-                    "templateSource": snapshot.get("templateSource"),
-                    "schemaVersion": snapshot.get("schemaVersion"),
-                },
-                compact=args.compact,
+        if command == "types":
+            counts = sorted(((api.short_type(k), len(v)) for k,v in session.indexed.gamestates.items()), key=lambda row:(-row[1],row[0]))
+            api.print_json([{"type":k,"count":v} for k,v in (counts[:args.limit] if args.limit else counts)], compact=args.compact)
+            return 0
+        compatibility = session.require_calculation(args.allow_unverified)
+        args._indexed = session.indexed
+        with result_metadata_scope({"compatibility": compatibility}):
+            templates_dir = None
+            if command in RAW_COMMANDS:
+                getattr(api, RAW_COMMANDS[command])(save_path, templates_dir, args)
+                return 0
+            snapshot, cache_path_value, cache_hit = api.load_or_build_snapshot(
+                save_path, Path(args.cache_dir), templates_dir, refresh=args.refresh_cache,
             )
-        else:
-            parser.error(f"Unknown command: {command}")
+            snapshot = {**snapshot, "compatibility": compatibility}
+            if command in SNAPSHOT_COMMANDS:
+                getattr(api, SNAPSHOT_COMMANDS[command])(snapshot, args)
+            elif command == "cache":
+                api.print_json({"cache": str(cache_path_value), "cacheHit": cache_hit,
+                    "source": snapshot.get("source"), "templateSource": snapshot.get("templateSource"),
+                    "schemaVersion": snapshot.get("schemaVersion")}, compact=args.compact)
+            else:
+                parser.error(f"Unknown command: {command}")
     except BrokenPipeError:
         return 1
     except api.CalculationDependencyError as exc:

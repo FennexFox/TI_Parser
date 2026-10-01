@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 import gzip
 import hashlib
 import json
@@ -94,7 +97,22 @@ def json_default(value: Any) -> Any:
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
+_RESULT_METADATA = ContextVar("ti_result_metadata", default=None)
+
+
+@contextmanager
+def result_metadata_scope(metadata):
+    token = _RESULT_METADATA.set(metadata)
+    try:
+        yield
+    finally:
+        _RESULT_METADATA.reset(token)
+
+
 def print_json(value: Any, *, compact: bool = False) -> None:
+    metadata = _RESULT_METADATA.get()
+    if metadata and isinstance(value, dict):
+        value = {**value, **metadata}
     if compact:
         print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=json_default))
     else:
