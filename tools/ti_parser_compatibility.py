@@ -263,12 +263,12 @@ def _raw_facts(indexed: IndexedState) -> dict[str, Any]:
 
 
 def save_identity(indexed: IndexedState) -> dict[str, Any]:
-    """Versioned canonical JSON content identity; independent of gzip/path/mtime."""
+    """Stable parsed-content identity; retains game NaN/Infinity tokens when hashing."""
     from ti_parser_core import find_faction_state
     from ti_parser_errors import EntityLookupError
     facts = _raw_facts(indexed)
     global_state = first_value(indexed, "TIGlobalValuesState") or {}
-    encoded = json.dumps(indexed.data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    encoded = json.dumps(indexed.data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=True).encode("utf-8")
     try:
         sid, faction = find_faction_state(indexed)
         player = {"status": "resolved", "id": sid, "template": faction.get("templateName"), "display": faction.get("displayName")}

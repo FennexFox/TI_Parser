@@ -1,13 +1,16 @@
 """Bounded LLM bootstrap; no history, dashboard or parallel mechanics."""
 from __future__ import annotations
 
+import math
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
-from ti_parser_core import CalculationDependencyError, find_faction_state, first_value
+from ti_parser_core import CalculationDependencyError, find_faction_state
 from ti_parser_errors import UserInputError
-from ti_parser_catalogs import CatalogError, runtime_catalog_scope
+from ti_parser_catalogs import CatalogError
+from ti_parser_version import __version__
 from ti_parser_core import ModuleCatalogError, LocationCatalogError, SolarPowerDataError
 from ti_parser_capabilities import capabilities
 
@@ -18,11 +21,12 @@ def shareable(value):
         return {k: shareable(v) for k,v in value.items() if k not in {"path", "dataDir", "cache", "cacheFingerprint", "templateSource"}}
     if isinstance(value, (list, tuple)):
         return [shareable(v) for v in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return {"status": "non-finite", "representation": "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")}
     if isinstance(value, Path):
         return value.name
     if isinstance(value, str):
         # Errors may embed paths; redact path tokens rather than exposing user directories.
-        import re
         value = re.sub(r"[A-Za-z]:[\\/][^\n,;\"']*", "<local-path>", value)
         value = re.sub(r"(?<![\w:])/(?:[^\s/]+/)+[^\s,;]*", "<local-path>", value)
     return value
@@ -30,16 +34,16 @@ def shareable(value):
 
 def bootstrap_context(session, *, allow_unverified=False):
     inspection = session.inspect()
-    report = {"schemaVersion": 1, "kind": "llm-bootstrap-context",
+    report = {"schemaVersion": 1, "parserVersion": __version__, "kind": "llm-bootstrap-context",
               "save": inspection["save"], "saveIdentity": inspection["saveIdentity"],
               "compatibility": inspection["compatibility"],
-              "savedFacts": inspection, "sections": {},
-              "availableAnalyses": [row for row in capabilities()["analyses"] if row["kind"] not in {"maintenance", "inventory"}]}
+              "savedFacts": {"modFlags": inspection["modFlags"]}, "sections": {},
+              "availableAnalyses": [row for row in capabilities()["analyses"] if row["kind"] not in {"maintenance", "inventory"} and row["command"] not in {"analyze", "inspect-save"}]}
     try:
         sid, faction = find_faction_state(session.indexed)
-        report["savedFacts"] = {**inspection, "playerFaction": {"id":sid,"template":faction.get("templateName"),"display":faction.get("displayName")},
+        report["savedFacts"] = {"modFlags": inspection["modFlags"], "playerFaction": {"id":sid,"template":faction.get("templateName"),"display":faction.get("displayName")},
             "resources": faction.get("resources"), "missionControlUsage": faction.get("missionControlUsage"),
-            "currentProjectProgress": faction.get("currentProjectProgress"), "researchWeights": faction.get("researchWeights")}
+            "currentProjectProgress": [row for row in (faction.get("currentProjectProgress") or []) if isinstance(row,dict) and row.get("slot") in (3,4,5)], "researchWeights": faction.get("researchWeights")}
     except UserInputError as exc:
         report["playerResolutionError"] = exc.to_dict()
     sections = report["sections"]
@@ -48,11 +52,20 @@ def bootstrap_context(session, *, allow_unverified=False):
         for name in ("topbar", "research-ui"):
             sections[name] = {"status":"deferred", "reason":"unverified-compatibility"}
         return shareable(report)
-    report["compatibility"] = session.require_calculation(allow_unverified)
+    try:
+        report["compatibility"] = session.require_calculation(allow_unverified)
+    except UserInputError as exc:
+        report["status"] = "incomplete"
+        for name in ("topbar", "research-ui"):
+            sections[name] = {"status": "incomplete", "error": exc.to_dict()}
+        return shareable(report)
     with session.calculation_scope(allow_unverified=allow_unverified):
         for name in ("topbar", "research-ui"):
             try:
                 result = session.calculate(name, allow_unverified=allow_unverified)
+                if name == "research-ui" and "projects" in result:
+                    result = {**result, "projects": {"active": result["projects"].get("active", []),
+                        "pausedOrStoredCount": len(result["projects"].get("pausedOrStored", []))}}
                 incomplete = result.get("status") in {"incomplete", "partial", "unsupported"} or result.get("complete") is False
                 sections[name] = {"status": "incomplete" if incomplete else "complete", "result": result,
                     "evidence": {"source":"existing-domain-calculator", "catalogFingerprint": session.compatibility["catalogFingerprint"]}}

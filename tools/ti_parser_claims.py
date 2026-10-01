@@ -13,6 +13,8 @@ the overall calculation incomplete instead of producing a plausible result.
 
 from __future__ import annotations
 
+from ti_parser_errors import UserInputError
+
 from copy import deepcopy
 from typing import Any, Mapping
 
@@ -194,9 +196,9 @@ def _requested_nation_id(indexed: IndexedState, name: str | None, label: str) ->
         return None
     found = match_raw_state(indexed, "TINationState", name)
     if found is None:
-        raise ValueError(f"{label} nation not found: {name}")
+        raise UserInputError(f"{label} nation not found: {name}")
     if found[0] is None:
-        raise ValueError(f"{label} nation has no state ID: {name}")
+        raise UserInputError(f"{label} nation has no state ID: {name}")
     return found[0]
 
 

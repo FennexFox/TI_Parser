@@ -30,6 +30,7 @@ def test_bootstrap_loads_once_and_preserves_identity(tmp_path):
     assert set(result["sections"]) == {"topbar", "research-ui"}
     assert "controlPointMaintenance" in result["sections"]["topbar"]["result"]
     assert result["availableAnalyses"]
+    assert not {"analyze", "inspect-save"} & {row["command"] for row in result["availableAnalyses"]}
     assert str(tmp_path) not in json.dumps(result)
     assert not any(k in result for k in ("nations", "habs", "fleets", "history"))
 
@@ -108,3 +109,30 @@ def test_bootstrap_reuses_catalog_bundle_across_sections(tmp_path):
     with patch.object(RuntimeCatalogs, "load", wraps=RuntimeCatalogs.load) as load:
         assert session.analyze(allow_unverified=True)["status"] == "complete"
     assert load.call_count == 1
+
+
+def test_identity_supports_game_infinity_without_collapsing_strings(tmp_path):
+    save = fixtures.PackageOnlyRuntimeTests()._save(tmp_path)
+    with gzip.open(save, "rt", encoding="utf-8") as handle:
+        data = json.load(handle)
+    data["gameLimit"] = float("inf")
+    with gzip.open(save, "wt", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    first = sessions.AnalysisSession(save).facts["saveIdentity"]
+    data["gameLimit"] = "Infinity"
+    with gzip.open(save, "wt", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    assert sessions.AnalysisSession(save).facts["saveIdentity"]["fingerprint"] != first["fingerprint"]
+
+
+def test_allow_does_not_bypass_broken_registry_and_keeps_report_shareable(tmp_path):
+    from ti_parser_compatibility import CompatibilityRegistryError
+    session = sessions.AnalysisSession(fixtures.PackageOnlyRuntimeTests()._save(tmp_path))
+    error = CompatibilityRegistryError("registry-invalid", f"Invalid registry: {tmp_path / 'registry.json'}", details={"path":str(tmp_path / 'registry.json')})
+    with patch.object(sessions, "assess_compatibility", side_effect=error), patch.object(sessions, "calculate_topbar") as calculate:
+        result = session.analyze(allow_unverified=True)
+    calculate.assert_not_called()
+    assert result["status"] == "incomplete"
+    assert "saveIdentity" in result
+    assert str(tmp_path) not in json.dumps(result)
+    assert result["sections"]["topbar"]["error"]["code"] == "registry-invalid"

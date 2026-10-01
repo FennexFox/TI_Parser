@@ -5,8 +5,6 @@ from functools import cached_property
 from pathlib import Path
 from contextlib import contextmanager
 from ti_parser_catalogs import runtime_catalog_scope
-from ti_parser_capabilities import capabilities
-from ti_parser_core import CalculationDependencyError, first_value, find_faction_state
 from ti_parser_topbar import calculate_topbar
 from ti_parser_research import calculate_research_ui
 from ti_parser_core import load_save, build_index

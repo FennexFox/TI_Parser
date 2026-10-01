@@ -47,4 +47,5 @@
 ## Outcomes / Retrospective
 
 - Validated typed errors and selectors. Real local save inspection established empty {} collections are valid; nonempty non-list collections remain errors. No formulas changed.
+- Integration review rejects unresolved/wrong-type human faction references and inconsistent metadata, and routes AI/claims selector failures through typed input errors. Final integrated suite: 392 passed, 13 skipped, 75 subtests passed on Windows Python 3.14.
 

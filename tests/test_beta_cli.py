@@ -67,3 +67,14 @@ def test_raw_inspection_identity_is_path_independent_and_catalog_free(tmp_path):
     assert first["saveIdentity"] == second["saveIdentity"]
     assert first["compatibility"]["status"] == "unverified"
     assert str(tmp_path) not in json.dumps(first)
+
+
+def test_ai_entity_id_selects_exact_faction(tmp_path):
+    from tests.test_package_only_runtime import PackageOnlyRuntimeTests
+    from ti_parser_core import load_save, build_index, type_entries, raw_state_id
+    save=PackageOnlyRuntimeTests()._ai_save(tmp_path)
+    index=build_index(load_save(save))
+    faction_id=next(raw_state_id(row) for row in type_entries(index,"TIFactionState") if row["Value"].get("templateName")=="AlienCouncil")
+    code,result=invoke(["--save",str(save),"--allow-unverified","ai-fleet-diagnostics","--entity-id",str(faction_id)])
+    assert code==0, result
+    assert result["derived"]["factionCount"]==1

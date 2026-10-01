@@ -47,4 +47,6 @@
 ## Outcomes / Retrospective
 
 - Identity stability, single load/index, catalog reuse across sections, deferred and partial outputs, safe output and inventory/CLI consistency verified. No dashboard/history or external integrations added.
+- Integration review: preserve non-finite game save tokens in identity hashing and represent them explicitly in shared output; keep active research bounded; exclude bootstrap/inspection from next-analysis routing. Broken compatibility registries retain an incomplete, sanitized bootstrap without running calculations.
+- Local real-save smoke: inspection succeeded, opt-in bootstrap returned topbar complete and research incomplete with a ship-utility dependency. This is evidence of fail-closed behavior, not verified game-version accuracy. No private save was committed.
 

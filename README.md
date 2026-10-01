@@ -24,6 +24,9 @@ history, previous-save diffs, alerts, companion integration or an MCP server.
 
 `saveIdentity` schema 1 uses `sha256-canonical-save-json-v1`: SHA-256 of the
 parsed save serialized with sorted keys, UTF-8 and compact JSON separators.
+The hash serialization preserves Python JSON NaN/Infinity tokens found in game
+saves; it is not an RFC canonical JSON format. Strings with those names remain
+distinct. Bootstrap output represents any non-finite values explicitly.
 Copies and differently compressed equivalent JSON have the same identity;
 changed saved content has a different fingerprint. Path and mtime are excluded.
 Campaign start and player resolution evidence remain explicit when unknown.

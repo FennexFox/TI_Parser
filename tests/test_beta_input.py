@@ -160,3 +160,27 @@ def test_find_faction_state_accepts_integer_and_uses_typed_errors():
     with pytest.raises(core.EntityLookupError) as unresolved:
         core.find_faction_state(indexed)
     assert unresolved.value.code == "player-faction-unresolved"
+
+
+def test_duplicate_exact_display_names_are_ambiguous():
+    index = core.build_index({"gamestates":{"TINationState":[row(1,displayName="Same"),row(2,displayName="Same")]}})
+    with pytest.raises(core.EntityLookupError) as caught:
+        core.match_raw_state(index,"TINationState","Same")
+    assert len(caught.value.candidates)==2
+
+
+def test_game_empty_object_collection_remains_valid():
+    index = core.build_index({"gamestates":{"FactionGoal_JoinFleet":{}}})
+    assert core.type_entries(index,"FactionGoal_JoinFleet")==[]
+
+
+@pytest.mark.parametrize("faction_ref", [None, ref(999), ref(20)])
+def test_broken_human_reference_does_not_fall_back_to_metadata(faction_ref):
+    data = {"gamestates": {
+        "TIFactionState":[row(10,templateName="Resistance")],
+        "TINationState":[row(20,templateName="USA")],
+        "TIPlayerState":[row(30,isAI=False,faction=faction_ref)],
+        "TIMetadataState":[row(40,playerFactionName="Resistance")],
+    }}
+    with pytest.raises(core.EntityLookupError):
+        core.find_faction_state(core.build_index(data))

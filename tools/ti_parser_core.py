@@ -800,9 +800,10 @@ def find_faction_state(indexed: IndexedState, name: str | None = None) -> tuple[
         if not isinstance(player, dict) or player.get("isAI") is not False:
             continue
         faction_id = ref_id(player.get("faction"))
-        faction = state_value_by_id(indexed, faction_id)
-        if faction_id is not None and isinstance(faction, dict):
-            player_candidates[faction_id] = faction
+        resolved = indexed.id_index.get(faction_id)
+        if resolved is None or resolved[1] != "TIFactionState":
+            raise EntityLookupError("Human player faction reference is unresolved or has the wrong type.", code="player-faction-unresolved")
+        player_candidates[faction_id] = resolved[2]
 
     metadata = first_value(indexed, "TIMetadataState") or {}
     player_faction_name = metadata.get("playerFactionName")
@@ -825,11 +826,11 @@ def find_faction_state(indexed: IndexedState, name: str | None = None) -> tuple[
         raise EntityLookupError(f"Metadata playerFactionName is ambiguous: {labels}")
     if player_candidates and metadata_candidates and player_candidates.keys() != metadata_candidates.keys():
         raise EntityLookupError("Human player faction metadata conflicts with TIPlayerState.")
+    if player_faction_name and not metadata_candidates:
+        raise EntityLookupError(f"Metadata player faction could not be resolved: {player_faction_name}")
     candidates = player_candidates or metadata_candidates
     if len(candidates) == 1:
         return next(iter(candidates.items()))
-    if player_faction_name and not metadata_candidates:
-        raise EntityLookupError(f"Metadata player faction could not be resolved: {player_faction_name}")
     raise EntityLookupError("Human player faction could not be resolved from save metadata/player state.", code="player-faction-unresolved")
 
 
