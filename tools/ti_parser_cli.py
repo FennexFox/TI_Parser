@@ -297,6 +297,8 @@ def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
 
     try:
         if command == "catalog-verify":
+            if not (Path(__file__).parent / "build_runtime_catalogs.py").is_file():
+                raise UserInputError("catalog-verify requires the source checkout and generator tools; it is not included in the runtime ZIP.", code="source-checkout-required")
             if not args.templates_dir:
                 parser.error("catalog-verify requires --templates-dir")
             return api.command_catalog_verify(args)

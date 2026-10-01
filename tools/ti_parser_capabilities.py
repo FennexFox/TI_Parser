@@ -10,6 +10,7 @@ def capabilities():
     return {"schemaVersion": 1, "parserVersion": __version__, "analyses": [
         {"command": command, "purpose": purpose, "kind": kind,
          "requiresVerifiedCompatibility": required, "allowsExplicitUnverifiedConsent": required,
-         "requiresSave": command not in {"capabilities", "catalog-verify"}}
+         "requiresSave": command not in {"capabilities", "catalog-verify"},
+         "requiresSourceCheckout": command == "catalog-verify"}
         for command, purpose, kind, required in _ANALYSES],
         "bootstrapPolicy": "analyze returns saved facts without consent; its calculated sections require verified compatibility or explicit consent"}

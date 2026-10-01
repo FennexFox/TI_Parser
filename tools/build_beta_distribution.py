@@ -33,6 +33,7 @@ REQUIRED_PATHS = frozenset(
         "docs/CHATGPT_START.md",
         "tools/ti_save_parser.py",
         "tools/ti_parser_version.py",
+        "tools/standalone_catalog_integrity.py",
         "data/catalog_manifest.json",
         ".agents/skills/ti-save-analysis/SKILL.md",
     }
@@ -106,7 +107,7 @@ def _is_distribution_path(path: str) -> bool:
         return pure_path.name in RUNTIME_DATA
     if pure_path.parent == PurePosixPath("tools"):
         return pure_path.suffix == ".py" and (
-            pure_path.name.startswith("ti_parser_") or pure_path.name == "ti_save_parser.py"
+            pure_path.name.startswith("ti_parser_") or pure_path.name in {"ti_save_parser.py", "standalone_catalog_integrity.py"}
         )
     return path.startswith(".agents/skills/ti-save-analysis/")
 

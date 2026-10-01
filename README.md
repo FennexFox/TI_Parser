@@ -34,6 +34,8 @@ compatibility registry intentionally contains no verified tuples. Raw/type
 inspection and capabilities do not require calculation consent. Opt-in never
 bypasses missing dependencies, unsupported scenarios or catalog integrity.
 Existing successful result fields are retained, with compatibility metadata added.
+`catalog-verify` and generator examples require the source checkout; their
+development helpers are intentionally absent from the runtime ZIP.
 Named primary subjects accept a positional name or `--entity-id`, never both.
 Expected errors now return JSON/exit 2 instead of domain `SystemExit`; internal
 errors return exit 1. `analyze` returns a usable JSON report with exit 2 when

@@ -71,6 +71,7 @@ class BetaDistributionTests(unittest.TestCase):
         self._write("tools/ti_parser_core.py", "VALUE = 'first'\n")
         self._write("tools/ti_parser_version.py", "__version__ = '0.1.0b1'\n")
         self._write("tools/build_beta_distribution.py", "# developer tool\n")
+        self._write("tools/standalone_catalog_integrity.py", "# runtime integrity helper\n")
         self._write("tools/catalog_utils.py", "# generator helper\n")
         self._write(
             "data/catalog_manifest.json",

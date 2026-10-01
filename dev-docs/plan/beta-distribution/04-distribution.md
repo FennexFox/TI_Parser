@@ -48,3 +48,6 @@
 
 - Builder tests cover deterministic bytes, selected commit vs dirty checkout, missing required assets and overwrite protection. Extracted ZIP acceptance follows in phase 5. External game-data redistribution conditions remain unresolved; no release is published.
 
+
+## Extracted-runtime correction
+The isolated ZIP run exposed standalone_catalog_integrity.py as a runtime dependency despite its non-ti_parser filename. It is now explicitly allowlisted and required. catalog-verify is source-checkout-only and reports a structured error from a runtime ZIP.
