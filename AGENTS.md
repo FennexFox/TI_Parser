@@ -105,42 +105,42 @@ collection, or materially improves quality.
 
 When the runtime supports explicit child model and reasoning-effort selection:
 
-- **GPT-6 Astra, low**: preferred root coordinator. Use for task decomposition,
+- **GPT-6.1 Sol, low**: preferred root coordinator. Use for task decomposition,
   deciding what evidence is needed, assigning workers, integrating worker
   results, and final checks. Keep the root focused on orchestration and global
   state rather than routine implementation.
-- **GPT-5.6 Luna, low**: repository search, symbol/usages lookup, extraction,
+- **GPT-6 Luna, low**: repository search, symbol/usages lookup, extraction,
   inventory work, repetitive read-heavy inspection, and simple log/test-output
   classification.
-- **GPT-5.6 Luna, medium**: bounded analysis that needs modest reasoning but has
+- **GPT-6 Luna, medium**: bounded analysis that needs modest reasoning but has
   a clear question and narrow evidence set. Also suitable for very small,
   mechanically specified code changes where implementation judgment is minimal.
-- **GPT-5.6 Luna, xhigh**: preferred default implementation worker. Use for
+- **GPT-6 Luna, xhigh**: preferred default implementation worker. Use for
   ordinary implementation, refactoring, test writing, and debugging when the
   task is reasonably well specified and the relevant code surface is bounded.
   Prefer this over Luna max for routine software-engineering work.
-- **GPT-5.6 Luna, max**: bounded reasoning escalation. Use when Luna xhigh has
+- **GPT-6 Luna, max**: bounded reasoning escalation. Use when Luna xhigh has
   produced an incomplete result, several plausible implementations or failure
   causes must be explored and checked, or a difficult but still well-scoped task
   benefits from deeper search, verification, and revision. Do not use max by
   default merely because a task involves coding.
-- **GPT-5.6 Sol, medium**: capability and context-integration escalation. Use
+- **GPT-6 Sol, medium**: capability and context-integration escalation. Use
   when the relevant scope is broad, several subsystems must be integrated,
   abstraction or API choices have significant downstream effects, or Luna
   repeatedly misses relevant context or produces structurally weak solutions.
   Prefer Sol over simply increasing Luna effort when the likely limitation is
   model capability or context breadth rather than insufficient deliberation.
-- **GPT-5.6 Sol, high**: difficult implementation and engineering escalation.
+- **GPT-6 Sol, high**: difficult implementation and engineering escalation.
   Use for stubborn cross-cutting debugging, complex refactors or migrations,
   subtle stateful/concurrent behavior, or other bounded technical work where Sol
   medium is insufficient. Keep final cross-source synthesis and repository-level
   semantic decisions with the Astra coordinator.
-- **GPT-6 Astra, medium**: root-level escalation for conflicting worker
+- **GPT-6.1 Sol, medium**: root-level escalation for conflicting worker
   evidence, invalidated plans, parser/game-semantics disagreements, repeated
   failures that suggest the problem framing itself may be wrong, or
   architecture/simulation-semantics decisions requiring stronger global
   reasoning.
-- **GPT-6 Astra, high**: exceptional root escalation only for unresolved,
+- **GPT-6.1 Sol, high**: exceptional root escalation only for unresolved,
   high-impact, structurally difficult problems where Astra medium has not been
   sufficient.
 
