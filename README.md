@@ -45,11 +45,42 @@ errors return exit 1. `analyze` returns a usable JSON report with exit 2 when
 calculations are deferred or incomplete. Its optional file output matches stdout.
 
 For Python integrations, add the bundled `tools/` directory to the import path
-and use `ti_parser_session.AnalysisSession`. `inspect()`, `analyze()`, and
-`calculate()` provide the thin application boundary. `calculation_scope()` yields
+and use `ti_parser_session.AnalysisSession`. `run()` provides the versioned
+machine boundary; `inspect()`, `analyze()`, and `calculate()` retain their existing
+payload/exception contracts. `calculation_scope()` yields
 the indexed save for existing domain `calculate_*` functions while sharing a
 validated catalog lifetime. Sessions are single-threaded and represent one
 immutable save/runtime snapshot; create another after either input changes.
+
+```python
+from pathlib import Path
+from ti_parser_session import AnalysisSession
+
+session = AnalysisSession(Path("campaign.gz"))
+inspection = session.run("inspect-save")
+# Explicit consent is required for an unverified version/mod/runtime tuple.
+research = session.run("research-plan", allow_unverified=True, top=8)
+resources = session.run("topbar", allow_unverified=True)
+```
+
+`run()` schema 1 includes `analysis`, `parserVersion`, `saveIdentity`,
+`compatibility`, and `status`, with `result`, `missingDependencies`, or `error`
+as applicable. Status is `complete`, `deferred` (compatibility consent required),
+`incomplete` (missing dependencies or partial/unsupported calculation), or `error`
+(invalid analysis/arguments/input). Partial results retain their full projection
+prefix, scope status and diagnostics. Unexpected programming exceptions propagate;
+save loading failures before session construction also remain exceptions.
+The CLI keeps its existing output shapes and exit codes.
+
+`capabilities` lists application argument names/defaults and `routingClass`.
+Primary routes are available through `run()` and `calculate()`; `inspect-save`
+and `analyze` are available through `run()`. Entity selectors accept a name or
+integer ID. Projection receives `plan_payload` as parsed JSON and `checkpoints`
+as a list of integer days, rather than a CLI file path or comma-separated string.
+Do not pass CLI output/cache/template options to the Python boundary.
+Sessions reuse their save index, lazy snapshot and validated catalog bundles
+across calls. Treat inputs and returned domain state as read-only; use separate
+sessions for different saves, changed runtime data, or concurrent work.
 
 MIT applies to project code; see [game-derived data notice](docs/BETA_DATA_NOTICE.md)
 for excluded assets and the unresolved redistribution review. No external

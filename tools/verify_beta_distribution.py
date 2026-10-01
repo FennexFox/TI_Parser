@@ -83,6 +83,20 @@ if sys.argv[2] == '__catalogs__':
         RuntimeCatalogs.load(scenario, root/'data')
     load_hab_module_catalog(); load_location_catalog()
     print(json.dumps({'scenarios': scenarios}))
+elif sys.argv[2] == '__application__':
+    import json
+    from ti_parser_session import AnalysisSession
+    session = AnalysisSession(pathlib.Path(sys.argv[3]))
+    facts = session.run('inspect-save')
+    deferred = session.run('topbar')
+    topbar = session.run('topbar', allow_unverified=True)
+    research = session.run('research-ui', allow_unverified=True)
+    invalid = session.run('unknown-analysis', allow_unverified=True)
+    assert facts['status'] == topbar['status'] == research['status'] == 'complete'
+    assert deferred['status'] == 'deferred' and invalid['status'] == 'error'
+    assert all(row['saveIdentity'] == facts['saveIdentity'] for row in (deferred, topbar, research, invalid))
+    assert topbar['compatibility'] == research['compatibility'] == invalid['compatibility']
+    print(json.dumps({'status': 'complete', 'saveIdentity': facts['saveIdentity']}))
 else:
     args = sys.argv[2:]
     sys.argv = [str(root/'tools/ti_save_parser.py'), *args]
@@ -129,6 +143,9 @@ def verify_archive(archive_path: Path):
         if json.loads(report_path.read_text(encoding="utf-8")) != report:
             raise ValueError("File and stdout report differ")
         run(["--save", str(save), "--allow-unverified", "topbar"])
+        application = run(["__application__", str(save)])
+        if application["saveIdentity"] != facts["saveIdentity"]:
+            raise ValueError("Application and CLI identity differ")
         return {"status":"complete", "sourceCommit":manifest["sourceCommit"], "version":version,
                 "checks":checks, "supportedScenarios":catalogs["scenarios"],
                 "isolation":"stdlib only (-I -S), outside checkout, network/game-input audit guards"}

@@ -105,7 +105,7 @@ def dispatch(analysis_id: str, source: Any, *, templates_dir: Path | None = None
 def handle_org_plan(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     focus: str = "balanced",
     top: int = 5,
     include_unassigned: bool = True,
@@ -138,7 +138,7 @@ def handle_hab_ui(
 def handle_hab_slots(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     include_all: bool = False,
     include_module_counts: bool = False,
 ) -> dict[str, Any]:
@@ -154,7 +154,7 @@ def handle_hab_slots(
 def handle_hab_plan(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     hab_name: str | int | None = None,
     upgrading_to_tier: int | None = None,
     include_all: bool = False,
@@ -176,7 +176,7 @@ def handle_hab_plan(
 def handle_project_analysis(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     top: int = 10,
     sort_axis: str = "research-sustainable",
     slot: int | None = None,
@@ -198,7 +198,7 @@ def handle_project_analysis(
 def handle_research(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     include_details: bool = False,
 ) -> dict[str, Any]:
     return calculate_research_breakdown(
@@ -212,7 +212,7 @@ def handle_research(
 def handle_research_ui(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     *,
     templates: Any | None = None,
     base_daily_cache: dict[int, float] | None = None,
@@ -229,7 +229,7 @@ def handle_research_ui(
 def handle_research_plan(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     top: int = 8,
     mode: str = "all",
     include_all_candidates: bool = False,
@@ -247,7 +247,7 @@ def handle_research_plan(
 def handle_ship_plan(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     role: str = "balanced",
     top: int = 8,
     include_obsolete: bool = False,
@@ -320,7 +320,7 @@ def handle_ai_fleet_diagnostics(
 def handle_topbar(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     include_details: bool = False,
     *,
     research_templates: Any | None = None,
@@ -343,7 +343,7 @@ def handle_topbar(
 def handle_world_ui(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
 ) -> dict[str, Any]:
     return clean_numbers(calculate_world_ui(indexed, templates_dir, faction_name), 6)
 
@@ -351,7 +351,7 @@ def handle_world_ui(
 def handle_advise(
     indexed: Any,
     templates_dir: Path | None = None,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     *,
     councilor_name: str | int,
     nation_name: str | int,
@@ -456,7 +456,7 @@ def handle_nation_ui(
     templates_dir: Path | None = None,
     *,
     nation_name: str | int,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
 ) -> dict[str, Any]:
     return calculate_nation_ui(indexed, templates_dir, nation_name, faction_name)
 
@@ -466,7 +466,7 @@ def handle_nation_projection(
     templates_dir: Path | None = None,
     *,
     nation_name: str | int,
-    faction_name: str | None = None,
+    faction_name: str | int | None = None,
     plan_payload: Any = None,
     days: int,
     checkpoints: list[int] | None = None,

@@ -7,11 +7,9 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from ti_parser_core import CalculationDependencyError, find_faction_state
+from ti_parser_core import find_faction_state
 from ti_parser_errors import UserInputError
-from ti_parser_catalogs import CatalogError
 from ti_parser_version import __version__
-from ti_parser_core import ModuleCatalogError, LocationCatalogError, SolarPowerDataError
 from ti_parser_capabilities import capabilities
 
 
@@ -38,7 +36,7 @@ def bootstrap_context(session, *, allow_unverified=False):
               "save": inspection["save"], "saveIdentity": inspection["saveIdentity"],
               "compatibility": inspection["compatibility"],
               "savedFacts": {"modFlags": inspection["modFlags"]}, "sections": {},
-              "availableAnalyses": [row for row in capabilities()["analyses"] if row["kind"] not in {"maintenance", "inventory"} and row["command"] not in {"analyze", "inspect-save"}]}
+              "availableAnalyses": [row for row in capabilities()["analyses"] if row["routingClass"] == "primary"]}
     try:
         sid, faction = find_faction_state(session.indexed)
         report["savedFacts"] = {"modFlags": inspection["modFlags"], "playerFaction": {"id":sid,"template":faction.get("templateName"),"display":faction.get("displayName")},
@@ -61,18 +59,19 @@ def bootstrap_context(session, *, allow_unverified=False):
         return shareable(report)
     with session.calculation_scope(allow_unverified=allow_unverified):
         for name in ("topbar", "research-ui"):
-            try:
-                result = session.calculate(name, allow_unverified=allow_unverified)
+            outcome = session.run(name, allow_unverified=allow_unverified)
+            section = {"status": "complete" if outcome["status"] == "complete" else "incomplete"}
+            if "result" in outcome:
+                result = outcome["result"]
                 if name == "research-ui" and "projects" in result:
                     result = {**result, "projects": {"active": result["projects"].get("active", []),
                         "pausedOrStoredCount": len(result["projects"].get("pausedOrStored", []))}}
-                incomplete = result.get("status") in {"incomplete", "partial", "unsupported"} or result.get("complete") is False
-                sections[name] = {"status": "incomplete" if incomplete else "complete", "result": result,
-                    "evidence": {"source":"existing-domain-calculator", "catalogFingerprint": session.compatibility["catalogFingerprint"]}}
-            except CalculationDependencyError as exc:
-                sections[name] = {"status":"incomplete", "missingDependencies":exc.missing_dependencies}
-            except (UserInputError, CatalogError, ModuleCatalogError, LocationCatalogError, SolarPowerDataError) as exc:
-                sections[name] = {"status":"incomplete", "error": exc.to_dict() if isinstance(exc,UserInputError) else {"code":"calculation-input-error","message":str(exc)}}
+                section.update({"result": result,
+                    "evidence": {"source":"existing-domain-calculator", "catalogFingerprint": session.compatibility["catalogFingerprint"]}})
+            for field in ("missingDependencies", "error"):
+                if field in outcome:
+                    section[field] = outcome[field]
+            sections[name] = section
     report["status"] = "complete" if all(row["status"] == "complete" for row in sections.values()) else "incomplete"
     return shareable(report)
 

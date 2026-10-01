@@ -36,3 +36,10 @@
 ## Known Risks And Assumptions
 
 - Sessions are single-threaded immutable save/runtime snapshots. Keep catalog integrity, fail-closed dependencies and projection authoritative prefixes. Existing CLI handlers and cache behavior must remain compatible.
+
+## Completion
+
+- All three phases implemented and committed. CLI JSON/exit compatibility, package-only catalog boundaries and authoritative-prefix projection evidence are retained.
+- Final committed-code fresh export (b3a9dcb): 432 passed, 13 skipped, 75 subtests; package-only gate: 6 passed; six supported scenarios validated.
+- Beta ZIP built from committed Git bytes and checked in a stdlib-only isolated process outside the checkout, including Python run() smoke checks.
+- Local implementation only; publishing, pushing and MCP transport are outside this issue.
