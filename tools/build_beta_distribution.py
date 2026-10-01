@@ -31,6 +31,9 @@ REQUIRED_PATHS = frozenset(
         "docs/QUICKSTART_KO.md",
         "docs/BETA_DATA_NOTICE.md",
         "docs/CHATGPT_START.md",
+        "docs/MCP_SETUP.md",
+        "requirements-mcp.txt",
+        "tools/ti_parser_mcp.py",
         "tools/ti_save_parser.py",
         "tools/ti_parser_version.py",
         "tools/standalone_catalog_integrity.py",
@@ -101,7 +104,10 @@ def _is_distribution_path(path: str) -> bool:
         "docs/QUICKSTART_KO.md",
         "docs/BETA_DATA_NOTICE.md",
         "docs/CHATGPT_START.md",
+        "docs/MCP_SETUP.md",
     }:
+        return True
+    if path == "requirements-mcp.txt":
         return True
     if pure_path.parent == PurePosixPath("data"):
         return pure_path.name in RUNTIME_DATA

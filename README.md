@@ -2,9 +2,10 @@
 
 ## Beta: standalone LLM analysis and simulation engine
 
-Start with [한국어 Quickstart](docs/QUICKSTART_KO.md) and the
-[ChatGPT execution guide](docs/CHATGPT_START.md). The ZIP needs Python only;
-no companion, installed game, API key, or third-party runtime package is required.
+Start with [한국어 Quickstart](docs/QUICKSTART_KO.md), the
+[ChatGPT execution guide](docs/CHATGPT_START.md), or the optional [local MCP
+stdio setup](docs/MCP_SETUP.md). The normal CLI ZIP needs Python only; no
+companion, installed game, API key, or third-party runtime package is required.
 Python 3.11–3.14 on Windows/Linux is the CI target, not a claim that every
 platform or ChatGPT account has been manually validated.
 
@@ -20,7 +21,9 @@ python tools/ti_save_parser.py --save campaign.gz --allow-unverified topbar
 `analyze` is bounded LLM bootstrap context: save/campaign/player identity,
 compatibility, core resource/research/CP context and `availableAnalyses`.
 Use specialized commands on demand. This beta does not add dashboards,
-history, previous-save diffs, alerts, companion integration or an MCP server.
+history, previous-save diffs, alerts, or companion integration. An optional
+local MCP stdio adapter is documented in [MCP_SETUP.md](docs/MCP_SETUP.md) and
+is not imported by the normal CLI.
 
 `saveIdentity` schema 1 uses `sha256-canonical-save-json-v1`: SHA-256 of the
 parsed save serialized with sorted keys, UTF-8 and compact JSON separators.

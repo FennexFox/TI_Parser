@@ -1,0 +1,3 @@
+# Optional local MCP stdio adapter dependency. The normal CLI and runtime ZIP
+# do not import this package unless tools/ti_parser_mcp.py is started.
+mcp==2.2.0
