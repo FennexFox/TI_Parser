@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import ti_save_parser as ti
 import ti_parser_session as sessions
+import ti_parser_application as application
 from ti_parser_errors import UserInputError
 from ti_parser_core import CalculationDependencyError, CalculationDependency
 from ti_parser_analysis import write_analysis
@@ -38,19 +39,19 @@ def test_bootstrap_loads_once_and_preserves_identity(tmp_path):
 def test_partial_dependency_failure_preserves_other_section(tmp_path):
     session = sessions.AnalysisSession(fixtures.PackageOnlyRuntimeTests()._research_save(tmp_path))
     error = CalculationDependencyError(CalculationDependency("test", "required", "research", None, "missing"))
-    with patch.object(sessions, "calculate_research_ui", side_effect=error):
+    with patch.object(application, "calculate_research_ui", side_effect=error):
         result = session.analyze(allow_unverified=True)
     assert result["status"] == "incomplete"
     assert result["sections"]["topbar"]["status"] == "complete"
     assert result["sections"]["research-ui"]["missingDependencies"]
-    with patch.object(sessions, "calculate_topbar", side_effect=RuntimeError("programming bug")):
+    with patch.object(application, "calculate_topbar", side_effect=RuntimeError("programming bug")):
         with pytest.raises(RuntimeError):
             session.analyze(allow_unverified=True)
 
 
 def test_calculator_incomplete_not_promoted(tmp_path):
     session = sessions.AnalysisSession(fixtures.PackageOnlyRuntimeTests()._research_save(tmp_path))
-    with patch.object(sessions, "calculate_topbar", return_value={"status":"incomplete"}):
+    with patch.object(application, "calculate_topbar", return_value={"status":"incomplete"}):
         result = session.analyze(allow_unverified=True)
     assert result["status"] == "incomplete"
 
@@ -131,7 +132,7 @@ def test_allow_does_not_bypass_broken_registry_and_keeps_report_shareable(tmp_pa
     from ti_parser_compatibility import CompatibilityRegistryError
     session = sessions.AnalysisSession(fixtures.PackageOnlyRuntimeTests()._save(tmp_path))
     error = CompatibilityRegistryError("registry-invalid", f"Invalid registry: {tmp_path / 'registry.json'}", details={"path":str(tmp_path / 'registry.json')})
-    with patch.object(sessions, "assess_compatibility", side_effect=error), patch.object(sessions, "calculate_topbar") as calculate:
+    with patch.object(sessions, "assess_compatibility", side_effect=error), patch.object(application, "calculate_topbar") as calculate:
         result = session.analyze(allow_unverified=True)
     calculate.assert_not_called()
     assert result["status"] == "incomplete"

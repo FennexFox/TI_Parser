@@ -38,12 +38,14 @@
 
 ## Progress
 
-- Not started.
+- Completed per-session catalog cache, lazy indexed snapshot and CLI index reuse. calculate() now uses shared dispatch.
 
 ## Decision log
 
 - Python API only for envelope; raw/types remain inspection routes outside primary recommendations.
+- run() envelope groundwork ships with session dispatch in this phase; phase 3 completes bootstrap integration, dedicated contracts, documentation and packaged verification.
+- Every calculation scope binds its own session cache, including interleaved A/B/A scopes, rather than relying on nesting depth.
 
 ## Outcomes / Retrospective
 
-- Not completed yet.
+- Targeted reuse/runtime checks passed: 55 tests and 16 subtests. Full integrated suite passed: 426 tests, 13 skipped, 75 subtests.

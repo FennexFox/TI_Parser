@@ -336,6 +336,7 @@ def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
                 return 0
             snapshot, cache_path_value, cache_hit = api.load_or_build_snapshot(
                 save_path, Path(args.cache_dir), templates_dir, refresh=args.refresh_cache,
+                indexed=session.indexed,
             )
             snapshot = {**snapshot, "compatibility": compatibility}
             if command in SNAPSHOT_COMMANDS:

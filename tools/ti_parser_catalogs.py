@@ -410,15 +410,17 @@ _catalog_scope: ContextVar[dict[tuple[str, str, tuple[str, ...]], RuntimeCatalog
 
 
 @contextmanager
-def runtime_catalog_scope() -> Iterator[None]:
-    """Reuse validated, scenario-selected inputs for one command invocation.
+def runtime_catalog_scope(*, cache=None) -> Iterator[None]:
+    """Reuse validated, scenario-selected inputs in the active execution scope.
 
     Callers treat these inputs as read-only. Leaving the scope discards every
-    loaded bundle, so the next command validates the current packaged bytes.
+    loaded bundle by default, so the next command validates current bytes.
+    An immutable AnalysisSession may supply its own cache across calls. The
+    context binding is still restored on exit, and sessions never share caches.
     Direct loads outside a scope retain their existing fresh-load behavior.
     """
 
-    token = _catalog_scope.set({})
+    token = _catalog_scope.set({} if cache is None else cache)
     try:
         yield
     finally:

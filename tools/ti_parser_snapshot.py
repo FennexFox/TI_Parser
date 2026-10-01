@@ -617,8 +617,10 @@ def build_snapshot(
     data: dict[str, Any],
     templates_dir: TemplateSource,
     config: SnapshotConfig,
+    *,
+    indexed: IndexedState | None = None,
 ) -> dict[str, Any]:
-    indexed = build_index(data)
+    indexed = build_index(data) if indexed is None else indexed
     scenario = scenario_template_name(indexed)
     if not scenario:
         raise CalculationDependencyError(
@@ -733,6 +735,8 @@ def load_or_build_snapshot(
     templates_dir: TemplateSource,
     config: SnapshotConfig,
     refresh: bool = False,
+    *,
+    indexed: IndexedState | None = None,
 ) -> tuple[dict[str, Any], Path, bool]:
     fingerprint = snapshot_fingerprint(save_path, templates_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -754,7 +758,7 @@ def load_or_build_snapshot(
             runtime_catalogs_for_snapshot(scenario)
             return cached, path, True
 
-    data = load_save(save_path)
-    snapshot = build_snapshot(save_path, data, templates_dir, config)
+    data = load_save(save_path) if indexed is None else indexed.data
+    snapshot = build_snapshot(save_path, data, templates_dir, config, indexed=indexed)
     write_snapshot_atomically(path, snapshot)
     return snapshot, path, False
