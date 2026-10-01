@@ -1,0 +1,50 @@
+# Phase 01: Prevent ambiguous selections and silent malformed input.
+
+## Goal
+
+- Prevent ambiguous selections and silent malformed input.
+
+## Scope
+
+- Core/errors, CLI, command/domain error boundaries, selector and input tests.
+
+## Non-goals
+
+- No game formula changes, catalog regeneration, projection restructuring or external publication.
+
+## Affected files
+
+- Core/errors, CLI, command/domain error boundaries, selector and input tests.
+
+## Implementation steps
+
+- Add typed expected errors; unique exact/partial resolution and integer ID selectors; validate save/index structure; JSON error boundary and exit codes.
+
+## Acceptance criteria
+
+- Ambiguous or corrupt input never silently produces a result; normal calculations stay unchanged.
+
+## Validation commands
+
+- python -m pytest tests/test_beta_input.py tests/test_beta_cli.py -q
+
+## Manual smoke tests
+
+- Help and missing-save error contracts.
+
+## Rollback risks
+
+- Lookup/exception contracts change intentionally; revert phase as one unit.
+
+## Progress
+
+- Planning complete; implementation in progress.
+
+## Decision log
+
+- Use user-approved beta contract; root integrates independent worker changes.
+
+## Outcomes / Retrospective
+
+- Pending implementation and verification; no completion claimed.
+
