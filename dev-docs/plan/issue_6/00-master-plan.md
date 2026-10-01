@@ -9,7 +9,7 @@
 
 ## Strategy
 
-- Generate typed tools from the registry and handler annotations; preserve application envelopes.
+- Generate typed tools from the canonical registry input schema; preserve application envelopes and declare application-owned output schemas.
 - Reuse at most two sessions, checking compressed-save SHA-256 on every call and serializing session use.
 - Package the optional entrypoint, dependency metadata and setup documentation while keeping SDK-free CLI validation separate.
 
@@ -18,12 +18,16 @@
 1. [Registry-derived MCP tools](01-adapter.md)
 2. [Session lifecycle and evidence preservation](02-sessions.md)
 3. [Optional distribution and verification](03-distribution.md)
+4. [Canonical input contract](04-input-contract.md)
+5. [Machine output contract](05-output-contract.md)
+6. [Schema regression and distribution verification](06-schema-verification.md)
 
 ## Phase Dependencies
 
 - Phase 1 has no phase dependency beyond resolved issue context.
 - Phase 2 depends on completion and validation of phase 1.
 - Phase 3 depends on completion and validation of phase 2.
+- Phases 4 and 5 extend the delivered adapter following the 2026-10-01 issue scope update; phase 6 verifies both.
 
 ## Source Of Truth Decisions
 
@@ -44,6 +48,8 @@
 - Plans are implemented as reviewable commits; no push, publication, or installed host configuration is requested.
 
 ## Final Verification
+
+The following records describe the original delivery. Issue #6 now additionally requires phases 4–6: canonical registry/application input-schema ownership (including choices) and declared MCP output schemas. See [scope update](https://github.com/FennexFox/TI_Parser/issues/6#issuecomment-5942071813).
 
 - Adapter and session phases completed in commit `373e414`; optional packaging and CI in `f2e38bf`.
 - SDK-free checkout and fresh-export suites: 433 passed, 16 skipped, 75 subtests passed.
