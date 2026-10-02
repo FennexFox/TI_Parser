@@ -56,6 +56,8 @@ static candidates and unclassified visibility remain explicit blockers.
 
 ## Decision log
 
+Canonical audit checkpoints are `[0, 180]`, matching the original initial/180-day
+comparison. `[30, 90, 180]` is not the approved canonical audit shape.
 A/B pips are audit fixtures only; no advisors does not imply no councilor reads.
 
 Observed preparation includes councilor_summary_maps, projection_advisor_profiles

@@ -117,6 +117,7 @@ def test_audit_runs_both_180_day_trials_with_real_catalogs_and_exact_trace_parit
 
     assert exit_code == 2
     assert report["experiment"]["days"] == 180
+    assert report["experiment"]["checkpoints"] == [0, 180]
     assert report["experiment"]["advisorCount"] == 0
     assert report["experiment"]["details"] is False
     assert report["experiment"]["diagnostics"] is False

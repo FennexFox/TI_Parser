@@ -39,7 +39,7 @@ from ti_parser_catalogs import RuntimeCatalogs, canonical_json_bytes, file_sha25
 
 SCENARIO = "ModernScenario"
 DAYS = 180
-CHECKPOINTS = [30, 90, 180]
+CHECKPOINTS = [0, 180]
 BLOCKED_OUTPUT_PARTS = {".ti_cache", ".pytest_cache", ".ruff_cache", "__pycache__", "graphify-out"}
 STATIC_CALL_CHECKLIST = (
     ("ti_parser_projection_adapter", "calculate_nation_projection", "adapter preparation"),

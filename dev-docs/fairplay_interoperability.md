@@ -50,7 +50,10 @@ assumptions must remain separate from that evidence.
 
 The bounded fixture is ModernScenario, a fully player-owned nation, 180 days,
 single-segment Knowledge/Welfare 3:1 and 1:3 plans, explicitly empty advisors,
-and no diagnostic output. These pips are acceptance fixtures. They are not a
+and no diagnostic output. The canonical audit checkpoints are `[0, 180]`: the
+initial state and the 180-day result. Intermediate checkpoints `[30, 90, 180]`
+are outside this canonical execution shape and require a separate audit.
+These pips are acceptance fixtures. They are not a
 production contract or permission to classify the whole route as own-subject.
 
 The developer-only `tools/audit_projection_reads.py` records source paths and
