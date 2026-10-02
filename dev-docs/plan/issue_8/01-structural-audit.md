@@ -14,7 +14,7 @@ Visibility approval, catalog regeneration, broad mechanics refactors.
 
 ## Affected files
 
-tools/audit_projection_reads.py; tests/test_projection_read_audit.py; the maintained interoperability audit.
+tools/audit_projection_reads.py; tools/projection_audit_dependencies.py; tests/test_projection_read_audit.py; the maintained interoperability audit.
 
 ## Implementation steps
 
@@ -47,8 +47,12 @@ intact and no raw-container mutations are recorded.
 
 The explicit DLL audit returns exit 2: structural completeness is incomplete
 and the build comparison is mismatch. Catalog decode/manifest validation,
-plain index-container accesses and scalar normalization mappings remain
-unresolved. Every read remains unclassified rather than being declared visible.
+plain index-container accesses and unexplained normalization paths remain
+unresolved. Five bounded source-to-derived chains now have static mappings;
+these establish structural roles only. Each candidate records source location
+and fingerprint, consumer, destination, evidence layer, visibility, build
+applicability and blocking status. Dynamic/static discrepancies, unobserved
+static candidates and unclassified visibility remain explicit blockers.
 
 ## Decision log
 

@@ -69,12 +69,12 @@ cross-faction effects. Any scoped optimization requires separate parity tests
 and does not establish game visibility.
 
 The controlled six-CP fixture completes both 180-day plans with exact
-baseline/traced result, coverage and status parity. The bounded trace observes
-496 aggregated read rows across save/catalog payloads and preparation/execution.
+baseline/traced result, coverage and status parity. The bounded trace records
+save/catalog payload reads across preparation and execution.
 Empty advisors still execute `councilor_summary_maps`,
 `projection_advisor_profiles` and `calculate_topbar`; no preparation was removed.
-Catalog decoding/manifest checks, plain index-container reads and normalized
-scalar mappings are explicitly unresolved, so structural status is `incomplete`.
+Catalog decoding/manifest checks, plain index-container reads and remaining
+normalized scalar mappings are explicitly unresolved, so structural status is `incomplete`.
 All raw read visibility classifications remain unresolved. Reproduce the
 offline report from a source checkout with an explicit output path:
 
@@ -83,8 +83,47 @@ python tools/audit_projection_reads.py --output C:\path\to\audit.json --assembly
 ```
 
 Exit 2 is the current fail-closed result, even though fixture calculation
-parity passes. The JSON separates structural status from assembly hash
-comparison; matching hashes alone would still not establish UI visibility.
+parity passes. The report separates `structuralStatus`,
+`buildSourceAuthorityStatus`, `visibilityStatus`, and `policyEligibility`.
+The historical `authorityStatus.assemblyHashComparison` remains a build hash
+observation, not an approval. Exit 0 requires explicit acceptance of every
+eligibility gate; absent assembly/source hashes, mismatch, unresolved build
+applicability or unresolved visibility cannot pass. Matching hashes alone
+would still not establish UI visibility.
+
+### Source-to-derived dependency closure
+
+The developer-only `tools/projection_audit_dependencies.py` inventories
+source locations and hashes in observed parser consumers. The report records
+source pattern, runtime consumer and ordered call path, destination/role,
+evidence layer, visibility category, build applicability and blocking status.
+Parser AST wiring establishes structural mappings only; game visibility
+requires separately applicable DLL/UI/template evidence.
+
+| Source in `extract_nation_projection_state` | Verified parser destination | Visibility |
+| --- | --- | --- |
+| `controlPointPriorities` | `ControlPointProjectionState.pips` | Unresolved |
+| `diversityBonus` | `ControlPointProjectionState.diversity_bonus_cache` | Unresolved |
+| `_accumulatedInvestmentPoints` | `NationProjectionState.progress` | Unresolved |
+| `publicOpinion` | `NationProjectionState.public_opinion` | Unresolved |
+| `resourceMarketValues` | `NationProjectionState.world_context.resourceMarketValues` | Unresolved |
+
+These assignment/constructor chains are mapped; descendants, helper internals
+and other consumers are not implicitly covered. Dynamic reads are explicitly
+reconciled with static candidates. Unmapped reads, unobserved static candidates,
+ambiguous consumers or unexplained materialization boundaries keep closure
+incomplete. New or unclassified dependencies invalidate completeness.
+Regions, faction effects, councilor/faction preparation, catalog source loading,
+index containers, output and coverage remain in the blocking inventory rather
+than being silently ignored.
+
+Accepted visibility evidence must cover the exact required dependency IDs and
+scope fingerprint, bind each record to the supplied and packaged source hashes,
+and carry explicit evidence references. A boolean claiming all dependencies
+are classified cannot hide missing, duplicate, extra or foreign-build records.
+The current CLI supplies no accepted evidence packet and offers no approval
+flag. Its live visibility records remain unresolved; unit acceptance packets
+exercise the decision contract and are not game evidence.
 
 The installed DLL observed during planning has SHA-256
 `4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350`.
@@ -149,6 +188,24 @@ fields after execution is insufficient.
 | Excluded route or hidden alias | TI Parser fair-play | Generic denial before handler execution; no analysis payload. |
 
 ## Save identity and peer matching
+
+Save identity and subject identity are separate. `inspect-save` and
+reinspection remain save-only. The private application subject operation
+resolves the strict player and selected nation, verifies every declared CP's
+count/type/nation/owner, computes through `AnalysisSession.run`, and issues an
+opaque process-local receipt sealing the exact result object, its full content,
+resolved nation and save identity. `validate_advice_generation` requires this
+receipt and matches its nation against both response-bound Companion contexts.
+Caller JSON IDs, copied/changed results and receipts for another result reject.
+
+This receipt proves source/subject correlation, not approved mechanics or
+visibility. Its issuance tests use a real synthetic save session and packaged
+projection; it is not a fabricated inspection envelope. The existing
+`run_profile` admission owner still denies fair-play projection, including
+when policy metadata or `allow_unverified` is changed. No new MCP-only policy
+or tool is introduced. Receipt validation occurs within the issuer process;
+it is not a serialized attestation protocol for external clients. Future
+guarded admission and transport must preserve this application boundary.
 
 Read Companion's response-bound context identity, then TI `inspect-save`, and
 compare the public `saveIdentity`.
@@ -215,7 +272,7 @@ launch command is invented here.
 | --- | --- | --- |
 | Default profile preserves route behavior | Regression-tested | Omitted profile and explicit `default` retain existing behavior. |
 | Fair-play allowlist and pre-handler denial | Regression-tested | Only identity inspection is exposed; projection and other routes are denied before save reads. Capabilities identify the pending disabled guard. |
-| Exact/provisional matching and generation checks | Regression-tested | Response-bound peer target and independent TI target bindings, fingerprints and reobservations must agree. Weak peer identity remains provisional. Current TI results lack target bindings, so full advice acceptance rejects them. |
+| Exact/provisional matching and generation checks | Regression-tested | Save-only inspection/reinspection fingerprints and the application-issued projection subject receipt must agree with bound peer targets. Weak peer identity remains provisional; no public guarded projection/receipt is currently available. |
 | Structural read completeness | Open | A/B result/status/coverage parity alone does not establish complete tracing. Materialized values, catalog loading and static dependency closure require explicit mappings. |
 | Authoritative visibility/correctness | Blocked | Installed/catalog DLL hashes differ; matching-build or validated cross-build evidence is required. No catalog migration is performed. |
 | Mock Companion plus TI stdio | Protocol-tested | Synthetic fixture-only connection, discovery, policy denial and correlation; not a visibility oracle. |

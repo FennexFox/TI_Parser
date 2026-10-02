@@ -41,3 +41,17 @@ remains blocked by the build mismatch, so guarded prediction is disabled.
 Actual Companion/TI/Codex prediction acceptance remains open. See phase files
 for evidence and the [routing record](routing-evidence.json) for synthetic
 client observations; this plan is retained while acceptance gates are unresolved.
+
+## TI Parser Follow-up Order
+
+1. Replace negative assembly checks with separate structural, source-authority,
+   visibility and overall eligibility states. Structural completion never
+   grants authority; missing evidence must reject overall approval.
+2. Keep inspections save-only and bind a selected nation through a trusted
+   application operation. Caller-supplied JSON IDs cannot attest a subject.
+3. Close known source-to-derived mappings and explicitly reconcile static and
+   dynamic dependencies. Classify visibility only from applicable authority
+   evidence; new reads, unexplained escapes and discrepancies remain blocking.
+4. Preserve current disabled policy, mock/routing evidence and actual Companion
+   acceptance gate. This follow-up does not modify the Companion repository,
+   regenerate catalogs or migrate mechanics.

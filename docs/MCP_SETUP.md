@@ -159,6 +159,12 @@ always a rejection, never a reason to fall back to weak fields.
 
 The current fair-play surface exposes no projection and no bound selected
 nation ID. Consequently the successful prediction sequence cannot yet finish.
+Save identity inspection remains separate from subject identity. The application
+now has a private, process-local receipt contract: the TI operation resolves
+the fully owned nation and binds its exact computed result to that save
+generation. JSON IDs supplied by a caller or model cannot issue this receipt.
+Inspections remain save-only; reinspection still detects a generation change.
+This internal contract adds no MCP tool and grants no policy approval.
 `allow_unverified` grants no visibility or policy approval. The future
 `fair-play-projection-v1` guard will describe the approved execution shape
 separately from the registry's own-subject classification. The Knowledge/Welfare

@@ -134,18 +134,34 @@ for operator steps.
 
 `validate_advice_generation(context_envelope, ti_inspection_envelope,
 projection_envelope, ti_reinspect_envelope,
-companion_reobserved_context_envelope, *, pinned)` checks a complete advice
+companion_reobserved_context_envelope, *, pinned, subject_binding=None)` checks a complete advice
 observation batch. It is a Python correlation helper, not a policy approval or
 MCP tool. Peer envelopes require `status="complete"`, `saveIdentity`,
 `selectedNationId`, and `result.nation.id` equal to that selected ID. Identities
 must describe the snapshot that produced each result, not a later lookup.
 
 TI envelopes use schema version 1, the expected analysis, and their response
-`saveIdentity`; normalized inspection, projection, and reinspection results
-must each attest `result.selectedNationId`. Inspections also retain their
-matching `result.saveIdentity`. All three TI fingerprints must be supported
-and identical. The current public TI results do not provide these selected
-nation bindings and are rejected; callers must not insert a guessed ID.
+`saveIdentity`. Inspection and reinspection remain save-only and retain their
+matching `result.saveIdentity`; they need no selected nation field. All three
+TI fingerprints must be supported and identical.
+
+The helper additionally requires `subject_binding=receipt`, an opaque,
+process-local receipt issued by the trusted application operation. The
+operation resolves the strict player and selected nation, verifies every CP's
+type, nation, count and player ownership, executes the existing session
+projection, and seals that exact result object, its complete content and its
+save identity. A JSON `selectedNationId`, guessed ID, copied or altered result,
+or receipt from another result cannot supply attestation. The receipt's nation
+must match both Companion observations. This is subject/correlation evidence;
+it grants no visibility, mechanics or fair-play approval.
+
+Issuance is currently a private application contract tested with real sessions
+and packaged calculations. It is not a serialized MCP token or a new public
+tool. Fair-play admission remains owned by `run_profile`, which still denies
+projection before any subject or save preparation. Current public MCP tools
+cannot finish the successful advice sequence. A future approved adapter must
+issue and validate the receipt within the application boundary; callers must
+not add guessed IDs to inspection responses.
 
 A future approved adapter's complete projection needs usable plans and
 comparison data. An incomplete result must retain its authoritative prefix;

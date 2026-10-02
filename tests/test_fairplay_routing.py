@@ -52,4 +52,5 @@ def test_developer_probes_are_excluded_from_runtime_zip():
     from build_beta_distribution import _is_distribution_path
 
     assert not _is_distribution_path("tools/audit_projection_reads.py")
+    assert not _is_distribution_path("tools/projection_audit_dependencies.py")
     assert not _is_distribution_path("tools/run_fairplay_routing.py")

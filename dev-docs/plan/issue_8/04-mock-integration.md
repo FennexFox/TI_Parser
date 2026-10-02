@@ -41,8 +41,14 @@ Weak identities can collide; reobservation is not exact proof. Synthetic fixture
 
 Implemented the synthetic response-bound Companion server and two real stdio
 client probes. Added the application generation helper with independent
-inspection/projection/reinspection nation bindings and discard-on-mismatch
-tests. Current public TI results cannot satisfy the future bound-target contract.
+save-generation and discard-on-mismatch tests. Save-only inspections no longer
+need invented nation fields. A private application operation issues an opaque,
+process-local receipt after strict player/CP ownership resolution and actual
+projection execution. It seals the exact envelope, resolved country and save
+identity; guessed IDs, copied or altered results cannot attest the subject.
+Real AnalysisSession contract tests cover exact/provisional correlation and
+save replacement. This is a correlation primitive, not a new MCP tool or
+fair-play approval; the public guarded projection remains disabled.
 
 Real Codex CLI runs used isolated per-run configuration and six canonical
 prompts. Initial approval/routing failures were separated from calculation

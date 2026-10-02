@@ -38,7 +38,11 @@ No runtime installed-game discovery or inference from the current parser.
 
 ## Progress
 
-Blocked on matching/cross-build evidence.
+Blocked on matching/cross-build evidence. Structural completeness, build/source
+authority, visibility and overall policy eligibility are separate report gates.
+Exit 0 requires explicit acceptance of every gate; missing evidence, mismatch
+and hash equality alone cannot approve. Regression tests exercise those cases
+and require visibility evidence to cover the exact dependency IDs and scope.
 
 The explicit offline assembly comparison confirmed the known mismatch. Full
 hashes are maintained in the interoperability audit; normal runtime performed

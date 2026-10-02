@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import gzip
+from copy import deepcopy
 from pathlib import Path
 import sys
 from unittest.mock import Mock
@@ -20,6 +22,8 @@ from ti_parser_fairplay import (
     sanitize_profile_error,
     validate_advice_generation,
     validate_profile,
+    _run_subject_bound_projection,
+    _run_guarded_projection,
 )
 from ti_parser_registry import ANALYSES
 
@@ -69,32 +73,59 @@ def _parser_observation(analysis, identity, *, status="complete", result=None):
     }
 
 
+@pytest.fixture(autouse=True)
+def generation_session(tmp_path):
+    """Real index, inspection and packaged-catalog projection for binding tests."""
+    from tests.fixtures.fairplay_projection import make_save_data
+    from ti_parser_session import AnalysisSession
+    global _GENERATION_SESSION
+    data = make_save_data()
+    data["gamestates"]["TIGlobalValuesState"][0]["Value"].update(
+        realWorldCampaignStart=2024, latestSaveVersion="0.4.35",
+        campaignStartVersion="0.4.35",
+    )
+    path = tmp_path / "subject.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as output:
+        json.dump(data, output)
+    _GENERATION_SESSION = AnalysisSession(path)
+    return _GENERATION_SESSION
+
+
 def _generation_observations(
-    *,
-    context=None,
-    inspection_identity=None,
-    projection_identity=None,
-    reinspect_identity=None,
-    reobserved_context=None,
-    projection_status="complete",
-    projection_result=None,
+    *, context=None, inspection_identity=None, projection_identity=None,
+    reinspect_identity=None, reobserved_context=None,
+    projection_status="complete", projection_result=None,
 ):
-    inspection_identity = _identity() if inspection_identity is None else inspection_identity
-    projection_identity = _identity() if projection_identity is None else projection_identity
-    reinspect_identity = _identity() if reinspect_identity is None else reinspect_identity
-    if context is None:
-        context = _peer_context()
-    if reobserved_context is None:
-        reobserved_context = _peer_context()
+    # Issuance is private trusted application work, not fair-play admission.
+    # The happy path uses the actual adapter and packaged catalogs. Explicit
+    # incomplete/error shapes below model the domain boundary independently.
+    session = _GENERATION_SESSION
+    inspection = run_profile(session, "inspect-save", profile="fair-play")
+    reinspect = run_profile(session, "inspect-save", profile="fair-play")
+    kwargs = dict(nation_name="USA", days=1, allow_unverified=True)
+    if projection_status != "complete" or projection_result is not None:
+        from unittest.mock import patch
+        modeled = deepcopy(projection_result) if projection_result is not None else {
+            "initialState": {"nation": {}}, "plans": [{"status": projection_status}], "comparison": {},
+        }
+        with patch("ti_parser_application.calculate_nation_projection", return_value=modeled):
+            projection, binding = _run_subject_bound_projection(session, **kwargs)
+        if projection_status == "deferred":
+            projection["status"] = "deferred"
+    else:
+        projection, binding = _run_subject_bound_projection(session, **kwargs)
+        assert projection["status"] == "complete"
+    identity = inspection["saveIdentity"]
+    for envelope, override in ((inspection, inspection_identity), (projection, projection_identity), (reinspect, reinspect_identity)):
+        if override is not None:
+            envelope["saveIdentity"] = override
+            if "saveIdentity" in envelope["result"]:
+                envelope["result"]["saveIdentity"] = override
     return (
-        context,
-        _parser_observation("inspect-save", inspection_identity),
-        _parser_observation(
-            "nation-projection", projection_identity, status=projection_status,
-            result=projection_result,
-        ),
-        _parser_observation("inspect-save", reinspect_identity),
-        reobserved_context,
+        _peer_context(identity, selected_nation_id=20) if context is None else context,
+        inspection, projection, reinspect,
+        _peer_context(identity, selected_nation_id=20) if reobserved_context is None else reobserved_context,
+        binding,
     )
 
 
@@ -306,7 +337,7 @@ def test_compare_save_context_requires_supported_identity_schema_for_exact_statu
 def test_validate_advice_generation_accepts_only_fully_correlated_sequence():
     observations = _generation_observations()
 
-    result = validate_advice_generation(*observations, pinned=False)
+    result = validate_advice_generation(*observations[:5], pinned=False, subject_binding=observations[5])
 
     assert result == {
         "status": "exact",
@@ -327,8 +358,9 @@ def test_validate_advice_generation_accepts_only_fully_correlated_sequence():
 def test_validate_advice_generation_rejects_save_changes_at_each_observation(
     changed_observation, reason
 ):
-    changed_identity = _identity(fingerprint={"algorithm": _ALGORITHM, "value": "b" * 64})
     observations = list(_generation_observations())
+    changed_identity = deepcopy(observations[1]["saveIdentity"])
+    changed_identity["fingerprint"]["value"] = "b" * 64
     index_by_name = {
         "context": 0,
         "inspect": 1,
@@ -338,15 +370,15 @@ def test_validate_advice_generation_rejects_save_changes_at_each_observation(
     }
     index = index_by_name[changed_observation]
     if index in {0, 4}:
-        observations[index] = _peer_context(changed_identity)
+        observations[index] = _peer_context(changed_identity, selected_nation_id=20)
     else:
         analysis = "nation-projection" if index == 2 else "inspect-save"
         result = observations[index]["result"]
         if analysis == "inspect-save":
-            result = {"saveIdentity": changed_identity, "selectedNationId": 48}
+            result = {"saveIdentity": changed_identity}
         observations[index] = _parser_observation(analysis, changed_identity, result=result)
 
-    result = validate_advice_generation(*observations, pinned=True)
+    result = validate_advice_generation(*observations[:5], pinned=True, subject_binding=observations[5])
 
     assert result["status"] == "rejected"
     assert result["reason"] == reason
@@ -366,7 +398,7 @@ def test_validate_advice_generation_rejects_missing_observations(index, expected
     observations = list(_generation_observations())
     observations[index] = None
 
-    result = validate_advice_generation(*observations, pinned=True)
+    result = validate_advice_generation(*observations[:5], pinned=True, subject_binding=observations[5])
 
     assert result == {"status": "rejected", "reason": expected_reason}
 
@@ -381,62 +413,53 @@ def test_validate_advice_generation_rejects_missing_observations(index, expected
 def test_validate_advice_generation_requires_peer_selected_nation_binding(context, expected_reason):
     observations = list(_generation_observations(context=context))
 
-    result = validate_advice_generation(*observations, pinned=True)
+    result = validate_advice_generation(*observations[:5], pinned=True, subject_binding=observations[5])
 
     assert result == {"status": "rejected", "reason": expected_reason}
 
 
-def test_validate_advice_generation_does_not_infer_nation_from_inspection_or_raw_projection():
+def test_validate_advice_generation_requires_application_receipt():
+    observations = _generation_observations()
+    for guessed in (None, {"selectedNationId": 20}, {"nation": {"id": 20}}):
+        assert validate_advice_generation(*observations[:5], pinned=True, subject_binding=guessed) == {
+            "status": "rejected", "reason": "projection-subject-binding-missing-or-invalid",
+        }
+
+
+def test_validate_advice_generation_inspections_are_save_only():
+    observations = _generation_observations()
+    assert all("selectedNationId" not in observations[index]["result"] for index in (1, 3))
+    assert validate_advice_generation(*observations[:5], pinned=False, subject_binding=observations[5])["status"] == "exact"
+
+
+@pytest.mark.parametrize("mutation", ["contents", "copy", "foreign"])
+def test_validate_advice_generation_rejects_changed_or_foreign_result(mutation):
     observations = list(_generation_observations())
-    projection = observations[2]
-    projection["result"].pop("selectedNationId")
-    projection["selectedNationId"] = 48
-    projection["result"]["initialState"]["nation"]["id"] = 48
-
-    result = validate_advice_generation(*observations, pinned=True)
-
-    assert result == {
-        "status": "rejected",
-        "reason": "projection-selected-nation-id-missing",
-    }
-
-
-@pytest.mark.parametrize("index", [1, 3])
-def test_validate_advice_generation_requires_inspection_nation_binding(index):
-    observations = list(_generation_observations())
-    observations[index]["result"].pop("selectedNationId")
-
-    result = validate_advice_generation(*observations, pinned=True)
-
-    assert result == {
-        "status": "rejected",
-        "reason": "inspect-save-selected-nation-id-missing",
-    }
-
-
-@pytest.mark.parametrize("index", [1, 3])
-def test_validate_advice_generation_rejects_inspection_nation_mismatch(index):
-    observations = list(_generation_observations())
-    observations[index]["result"]["selectedNationId"] = 49
-
-    result = validate_advice_generation(*observations, pinned=True)
-
-    assert result == {
-        "status": "rejected",
-        "reason": "selected-nation-id-mismatch",
+    if mutation == "contents":
+        observations[2]["result"]["selectedNationId"] = 9999
+        reason = "projection-subject-binding-result-changed"
+    elif mutation == "copy":
+        observations[2] = deepcopy(observations[2])
+        reason = "projection-subject-binding-result-mismatch"
+    else:
+        observations[5] = _generation_observations()[5]
+        reason = "projection-subject-binding-result-mismatch"
+    assert validate_advice_generation(*observations[:5], pinned=True, subject_binding=observations[5]) == {
+        "status": "rejected", "reason": reason,
     }
 
 
 def test_validate_advice_generation_peer_fingerprint_gap_is_pinned_provisional_only():
     unsupported = {"algorithm": "peer-unknown", "value": "same-date-hidden-change"}
-    peer_identity = _identity(fingerprint=unsupported)
+    peer_identity = deepcopy(_GENERATION_SESSION.facts["saveIdentity"])
+    peer_identity["fingerprint"] = unsupported
     observations = _generation_observations(
-        context=_peer_context(peer_identity),
-        reobserved_context=_peer_context(_identity(fingerprint=unsupported)),
+        context=_peer_context(peer_identity, selected_nation_id=20),
+        reobserved_context=_peer_context(deepcopy(peer_identity), selected_nation_id=20),
     )
 
-    provisional = validate_advice_generation(*observations, pinned=True)
-    unpinned = validate_advice_generation(*observations, pinned=False)
+    provisional = validate_advice_generation(*observations[:5], pinned=True, subject_binding=observations[5])
+    unpinned = validate_advice_generation(*observations[:5], pinned=False, subject_binding=observations[5])
 
     assert provisional == {
         "status": "provisional",
@@ -451,7 +474,7 @@ def test_validate_advice_generation_peer_fingerprint_gap_is_pinned_provisional_o
 
 def test_validate_advice_generation_accepts_incomplete_authoritative_prefix_as_incomplete():
     incomplete_result = {
-        "selectedNationId": 48,
+        "selectedNationId": 20,
         "initialState": {"nation": {"populationMillions": 50}},
         "plans": [{
             "name": "baseline",
@@ -464,7 +487,7 @@ def test_validate_advice_generation_accepts_incomplete_authoritative_prefix_as_i
         projection_status="incomplete", projection_result=incomplete_result
     )
 
-    result = validate_advice_generation(*observations, pinned=False)
+    result = validate_advice_generation(*observations[:5], pinned=False, subject_binding=observations[5])
 
     assert result == {
         "status": "exact",
@@ -499,7 +522,7 @@ def test_validate_advice_generation_rejects_unusable_projection_outcomes(
     if status == "incomplete" and projection_result is None:
         observations[2]["result"] = None
 
-    result = validate_advice_generation(*observations, pinned=True)
+    result = validate_advice_generation(*observations[:5], pinned=True, subject_binding=observations[5])
 
     assert result == {"status": "rejected", "reason": expected_reason}
 
@@ -510,9 +533,109 @@ def test_validate_advice_generation_rejects_response_bound_identity_mismatch():
         fingerprint={"algorithm": _ALGORITHM, "value": "b" * 64}
     )
 
-    result = validate_advice_generation(*observations, pinned=True)
+    result = validate_advice_generation(*observations[:5], pinned=True, subject_binding=observations[5])
 
     assert result == {
         "status": "rejected",
         "reason": "inspect-save-response-save-identity-mismatch",
+    }
+
+
+@pytest.mark.parametrize("allow_unverified", [False, True])
+def test_pending_guard_denies_before_any_session_work(allow_unverified):
+    session = Mock()
+    with pytest.raises(UserInputError) as exc:
+        _run_guarded_projection(session, nation_name="USA", days=1, allow_unverified=allow_unverified)
+    assert exc.value.code == "fairplay-analysis-denied"
+    assert session.mock_calls == []
+
+
+@pytest.mark.parametrize("mutation", ["missing-cp", "wrong-type", "unowned", "missing-owner", "wrong-owner-type", "empty-cps", "count-mismatch", "duplicate-cp", "foreign-cp", "ambiguous-player", "arbitrary-id"])
+def test_subject_operation_rejects_unresolved_or_unowned_save_subject(generation_session, mutation, monkeypatch):
+    from ti_parser_core import build_index
+    data = deepcopy(generation_session.indexed.data)
+    states = data["gamestates"]
+    nation = states["TINationState"][0]["Value"]
+    cp = states["TIControlPointState"][0]["Value"]
+    selector = "USA"
+    if mutation == "missing-cp":
+        states["TIControlPointState"].pop(0)
+    elif mutation == "wrong-type":
+        states["TIRegionState"].append(states["TIControlPointState"].pop(0))
+    elif mutation == "unowned":
+        states["TIFactionState"].append({"Key": {"value": 99}, "Value": {"ID": {"value": 99}, "templateName": "Other"}})
+        cp["faction"] = {"value": 99}
+    elif mutation == "missing-owner":
+        cp["faction"] = {"value": 999}
+    elif mutation == "wrong-owner-type":
+        cp["faction"] = {"value": 100}
+    elif mutation == "empty-cps":
+        nation["controlPoints"] = []
+    elif mutation == "count-mismatch":
+        nation["numControlPoints"] = 7
+    elif mutation == "duplicate-cp":
+        nation["controlPoints"][1] = nation["controlPoints"][0]
+    elif mutation == "foreign-cp":
+        cp["nation"] = {"value": 999}
+    elif mutation == "ambiguous-player":
+        states["TIPlayerState"].append({"Key": {"value": 888}, "Value": {"isAI": False, "faction": {"value": 999}}})
+    else:
+        selector = 999999
+    generation_session.indexed = build_index(data)
+    run = Mock(side_effect=AssertionError("must not calculate unresolved subject"))
+    monkeypatch.setattr(generation_session, "run", run)
+    with pytest.raises(UserInputError):
+        _run_subject_bound_projection(generation_session, nation_name=selector, days=1, allow_unverified=True)
+    assert run.mock_calls == []
+
+
+@pytest.mark.parametrize("index", [0, 4])
+def test_subject_context_nation_must_match_resolved_projection(index):
+    observations = list(_generation_observations())
+    observations[index] = _peer_context(observations[1]["saveIdentity"], selected_nation_id=999)
+    assert validate_advice_generation(*observations[:5], pinned=True, subject_binding=observations[5]) == {
+        "status": "rejected", "reason": "selected-nation-id-mismatch",
+    }
+
+
+def test_subject_binding_cannot_be_reused_for_another_session(generation_session):
+    from ti_parser_session import AnalysisSession
+    observations = list(_generation_observations())
+    other = AnalysisSession(generation_session.save_path)
+    observations[2], _ = _run_subject_bound_projection(other, nation_name="USA", days=1, allow_unverified=True)
+    assert validate_advice_generation(*observations[:5], pinned=False, subject_binding=observations[5]) == {
+        "status": "rejected", "reason": "projection-subject-binding-result-mismatch",
+    }
+
+
+def test_policy_metadata_alone_cannot_activate_guard(monkeypatch):
+    from ti_parser_fairplay import FAIRPLAY_ADVICE_GENERATION_POLICY
+    monkeypatch.setitem(FAIRPLAY_ADVICE_GENERATION_POLICY, "enabled", True)
+    monkeypatch.setitem(FAIRPLAY_ADVICE_GENERATION_POLICY, "status", "accepted")
+    monkeypatch.setitem(FAIRPLAY_ADVICE_GENERATION_POLICY, "authorityHashStatus", "verified")
+    session = Mock()
+    with pytest.raises(UserInputError) as exc:
+        _run_guarded_projection(session, nation_name="USA", days=1, allow_unverified=True)
+    assert exc.value.code == "fairplay-analysis-denied"
+    assert session.mock_calls == []
+
+
+@pytest.mark.parametrize("index", [2, 3])
+def test_real_save_change_before_or_after_projection_is_rejected(generation_session, index):
+    from ti_parser_session import AnalysisSession
+    observations = list(_generation_observations())
+    data = deepcopy(generation_session.indexed.data)
+    data["gamestates"]["TINationState"][0]["Value"]["GDP"] += 1
+    with gzip.open(generation_session.save_path, "wt", encoding="utf-8") as output:
+        json.dump(data, output)
+    changed = AnalysisSession(generation_session.save_path)
+    if index == 2:
+        observations[2], observations[5] = _run_subject_bound_projection(
+            changed, nation_name="USA", days=1, allow_unverified=True,
+        )
+    else:
+        observations[3] = run_profile(changed, "inspect-save", profile="fair-play")
+    assert observations[index]["saveIdentity"]["gameDate"] == observations[1]["saveIdentity"]["gameDate"]
+    assert validate_advice_generation(*observations[:5], pinned=True, subject_binding=observations[5]) == {
+        "status": "rejected", "reason": "parser-fingerprint-changed",
     }

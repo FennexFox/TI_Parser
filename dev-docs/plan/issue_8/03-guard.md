@@ -44,7 +44,9 @@ Not activated: prerequisite evidence is absent.
 Registry metadata references `fair-play-projection-v1` separately from the
 unchanged visibility-dependent classification. Application/MCP capabilities
 identify it as pending and disabled; profile schemas remain application-owned.
-No input domain or successful guarded execution is approved.
+No input domain or successful guarded execution is approved. The private
+guarded entrypoint delegates to the existing profile admission path; changing
+policy metadata alone cannot enable execution.
 
 ## Decision log
 

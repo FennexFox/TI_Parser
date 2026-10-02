@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import re
 import math
+import hashlib
+import json
+from weakref import WeakKeyDictionary
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
@@ -392,6 +395,88 @@ def _fairplay_error_schema() -> dict[str, Any]:
     }
 
 
+class _ProjectionSubjectBinding:
+    """Opaque in-process receipt; caller JSON cannot manufacture issuance."""
+
+    __slots__ = ("__weakref__",)
+
+
+_SUBJECT_BINDINGS: WeakKeyDictionary = WeakKeyDictionary()
+
+
+def _envelope_digest(envelope: Mapping[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(
+        envelope, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+        allow_nan=True,
+    ).encode("utf-8")).hexdigest()
+
+
+def _resolve_owned_subject(session: Any, nation_name: str | int) -> tuple[int, dict[str, Any]]:
+    """Resolve every declared CP; permissive income helpers cannot attest this."""
+    from ti_parser_core import find_faction_state, match_raw_state
+    from ti_parser_compatibility import save_identity
+
+    player_id, _ = find_faction_state(session.indexed)
+    identity = _sanitize_identity(save_identity(session.indexed))
+    if identity is None or identity["playerFaction"]["id"] != player_id:
+        raise UserInputError("Subject player is unresolved", code="fairplay-subject-unresolved")
+    found = match_raw_state(session.indexed, "TINationState", nation_name)
+    if found is None or type(found[0]) is not int:
+        raise UserInputError("Subject nation is unresolved", code="fairplay-subject-unresolved")
+    nation_id, nation = found
+    refs = nation.get("controlPoints")
+    if (not isinstance(refs, list) or not refs
+            or type(nation.get("numControlPoints")) is not int
+            or nation["numControlPoints"] != len(refs)):
+        raise UserInputError("Subject ownership is unresolved", code="fairplay-subject-unresolved")
+    seen = set()
+    for reference in refs:
+        cp_id = _normalize_id(reference)
+        cp = session.indexed.id_index.get(cp_id) if type(cp_id) is int else None
+        if (cp is None or cp[1] != "TIControlPointState" or cp_id in seen
+                or not _same_value(_normalize_id(cp[2].get("nation")), nation_id)):
+            raise UserInputError("Subject CP is unresolved", code="fairplay-subject-unresolved")
+        seen.add(cp_id)
+        owner = _normalize_id(cp[2].get("faction"))
+        owner_state = session.indexed.id_index.get(owner) if type(owner) is int else None
+        if owner_state is None or owner_state[1] != "TIFactionState" or owner != player_id:
+            raise UserInputError("Subject is not wholly player owned", code="fairplay-subject-unresolved")
+    return nation_id, identity
+
+
+def _run_subject_bound_projection(session: Any, *, nation_name: str | int, **kwargs: Any):
+    """Trusted application operation, private until guard acceptance.
+
+    Never accept a caller-supplied result to attest. Compute through the existing
+    session, then bind this particular result object and its complete content.
+    This lower-level operation does not grant fair-play admission.
+    """
+    from ti_parser_session import AnalysisSession
+
+    if type(session) is not AnalysisSession:
+        raise UserInputError("Trusted analysis session required", code="fairplay-subject-unresolved")
+    nation_id, identity = _resolve_owned_subject(session, nation_name)
+    if kwargs.get("faction_name") is not None:
+        raise UserInputError("Subject uses the strict player", code="fairplay-subject-unresolved")
+    envelope = session.run("nation-projection", nation_name=nation_name, **kwargs)
+    current_id, current_identity = _resolve_owned_subject(session, nation_name)
+    binding = _ProjectionSubjectBinding()
+    if (current_id == nation_id and _same_identity_value(current_identity, identity)
+            and _same_identity_value(_sanitize_identity(envelope.get("saveIdentity")), identity)):
+        _SUBJECT_BINDINGS[binding] = (envelope, _envelope_digest(envelope), nation_id, identity)
+    return envelope, binding
+
+
+def _run_guarded_projection(session: Any, **kwargs: Any):
+    """Use the existing admission owner; metadata cannot activate projection.
+
+    This remains denied until an audited visibility/execution guard is actually
+    implemented in the profile boundary. The private subject operation above
+    supplies correlation evidence only.
+    """
+    return run_profile(session, "nation-projection", profile=FAIR_PLAY_PROFILE, **kwargs)
+
+
 def validate_advice_generation(
     context_envelope: Mapping[str, Any] | None,
     ti_inspection_envelope: Mapping[str, Any] | None,
@@ -400,16 +485,17 @@ def validate_advice_generation(
     companion_reobserved_context_envelope: Mapping[str, Any] | None,
     *,
     pinned: bool,
+    subject_binding: Any = None,
 ) -> dict[str, str]:
     """Accept only a context-bound, reobserved projection generation.
 
     The two peer context envelopes contain saveIdentity, selectedNationId, and
     result.nation.id, which binds the selected id. Parser envelopes use the
-    standard analysis, status, saveIdentity, and result fields. Approved
-    normalized inspect and projection adapters must each place their attested
-    selected id in result.selectedNationId. The current public inspect and
-    projection responses do not supply those bindings, so they are rejected
-    until approved adapters do.
+    standard analysis, status, saveIdentity, and result fields. Inspections are
+    save-only. Nation binding requires an opaque receipt from the trusted
+    application operation that resolved the strict player and every owned CP
+    and computed this exact projection. Caller JSON IDs are not attestations.
+    Receipts are process-local and cannot be serialized for transport.
 
     Exact generation correlation requires the supported parser fingerprint to
     remain stable across inspect, projection, and reinspect. If either peer
@@ -448,20 +534,6 @@ def validate_advice_generation(
         return reinspect
 
     projection_result = projection["result"]
-    selected_nation_id = _normalize_id(projection_result.get("selectedNationId"))
-    if selected_nation_id is _MISSING:
-        return _rejected("projection-selected-nation-id-missing")
-    inspection_nation_id = _normalize_id(inspection["result"].get("selectedNationId"))
-    if inspection_nation_id is _MISSING:
-        return _rejected("inspect-save-selected-nation-id-missing")
-    reinspect_nation_id = _normalize_id(reinspect["result"].get("selectedNationId"))
-    if reinspect_nation_id is _MISSING:
-        return _rejected("inspect-save-selected-nation-id-missing")
-    if not _same_value(inspection_nation_id, selected_nation_id):
-        return _rejected("selected-nation-id-mismatch")
-    if not _same_value(reinspect_nation_id, selected_nation_id):
-        return _rejected("selected-nation-id-mismatch")
-
     projection_reason = _usable_projection_result(projection["status"], projection_result)
     if projection_reason is not None:
         return _rejected(projection_reason)
@@ -473,6 +545,27 @@ def validate_advice_generation(
         return _rejected("parser-fingerprint-changed")
     if reinspect["fingerprint"] != inspection["fingerprint"]:
         return _rejected("parser-fingerprint-changed")
+
+    receipt = (_SUBJECT_BINDINGS.get(subject_binding)
+               if type(subject_binding) is _ProjectionSubjectBinding else None)
+    if receipt is None:
+        return _rejected("projection-subject-binding-missing-or-invalid")
+    issued_envelope, issued_digest, selected_nation_id, issued_identity = receipt
+    if issued_envelope is not projection_envelope:
+        return _rejected("projection-subject-binding-result-mismatch")
+    try:
+        current_digest = _envelope_digest(projection_envelope)
+    except (TypeError, ValueError, RecursionError):
+        return _rejected("projection-subject-binding-result-changed")
+    if current_digest != issued_digest:
+        return _rejected("projection-subject-binding-result-changed")
+    if not _same_identity_value(issued_identity, _sanitize_identity(projection["identity"])):
+        return _rejected("projection-subject-binding-identity-mismatch")
+    if "selectedNationId" in projection_result and not _same_value(
+        _normalize_id(projection_result["selectedNationId"]), selected_nation_id
+    ):
+        return _rejected("selected-nation-id-mismatch")
+    inspection_nation_id = reinspect_nation_id = selected_nation_id
 
     parser_identity = inspection["identity"]
     projection_identity = projection["identity"]

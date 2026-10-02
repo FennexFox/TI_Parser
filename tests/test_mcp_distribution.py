@@ -108,6 +108,7 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
     assert (extracted / "tools" / "ti_parser_schema.py").is_file()
     assert not (extracted / "tests").exists()
     assert not (extracted / "tools" / "audit_projection_reads.py").exists()
+    assert not (extracted / "tools" / "projection_audit_dependencies.py").exists()
     assert not (extracted / "tools" / "run_fairplay_routing.py").exists()
     if _tracked_in_head("tools/ti_parser_fairplay.py"):
         assert (extracted / "tools" / "ti_parser_fairplay.py").is_file()
