@@ -18,6 +18,7 @@ from typing import Any, Mapping
 from ti_parser_capabilities import capabilities as application_capabilities
 from ti_parser_errors import UserInputError
 from ti_parser_registry import ANALYSES, get_analysis, get_input_schema, validate_argument_shape
+from ti_parser_schema import get_analysis_output_schema, get_capabilities_output_schema
 from ti_parser_session import AnalysisSession
 from ti_parser_version import __version__
 
@@ -211,6 +212,7 @@ def create_server() -> Any:
             name=entry.command,
             description=_tool_description(entry),
             input_schema=schemas[entry.command],
+            output_schema=get_analysis_output_schema(),
         )
         for entry in entries
     ]
@@ -219,6 +221,7 @@ def create_server() -> Any:
             name="capabilities",
             description="Return MCP-visible analysis metadata without opening a save.",
             input_schema=_capability_schema(),
+            output_schema=get_capabilities_output_schema(),
         )
     )
 

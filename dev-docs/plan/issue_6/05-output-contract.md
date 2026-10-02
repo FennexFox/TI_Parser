@@ -20,8 +20,8 @@ Initialize/list/call with an SDK client, including a missing save and save-free 
 ## Rollback risks
 Remove schema declarations with their helper; do not alter application envelope bytes or status policy.
 ## Progress
-Implementation started.
+Implementation and targeted verification complete.
 ## Decision log
 Output schemas permit arbitrary domain JSON and existing evidence extensions; no fabricated saveIdentity on pre-session errors.
 ## Outcomes / Retrospective
-Pending validation.
+SDK-free structural checks: 3 passed. SDK-enabled protocol tests: 14 passed, including explicit validation of tool errors, real unresolved-player and compatibility-registry failure paths, missing dependencies and unchanged partial projection evidence. SDK initialization/list/call smoke confirmed 22 output schemas, save-free capabilities and structured missing-save errors. Base application capabilities also validates against its schema. Extracted ZIP verification follows after this phase is committed because the archive intentionally uses HEAD.

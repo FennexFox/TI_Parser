@@ -97,11 +97,14 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
     # not a valid release artifact until the adapter changes are committed.
     if not _tracked_in_head("tools/ti_parser_mcp.py"):
         pytest.skip("MCP adapter is not present in the committed HEAD")
+    if not _tracked_in_head("tools/ti_parser_schema.py"):
+        pytest.skip("Output-schema helper is not present in the committed HEAD")
 
     archive = tmp_path / "ti-parser-mcp.zip"
     build_beta_distribution(REPOSITORY_ROOT, archive, ref="HEAD")
     extracted = tmp_path / "extracted"
     extract_verified(archive, extracted)
+    assert (extracted / "tools" / "ti_parser_schema.py").is_file()
 
     save = tmp_path / "외부 세이브 경로" / "campaign copy.gz"
     _synthetic_save(save)
@@ -110,6 +113,7 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
     async def exercise_client() -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
+        from jsonschema import Draft202012Validator, validate
 
         server = StdioServerParameters(
             command=sys.executable,
@@ -122,22 +126,42 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
                     initialized = await session.initialize()
                     assert initialized.server_info.name
                     listed = await session.list_tools()
-                    tool_names = {tool.name for tool in listed.tools}
+                    tools_by_name = {tool.name: tool for tool in listed.tools}
+                    tool_names = set(tools_by_name)
                     assert "capabilities" in tool_names
+                    for tool in listed.tools:
+                        assert tool.output_schema is not None
+                        Draft202012Validator.check_schema(tool.input_schema)
+                        Draft202012Validator.check_schema(tool.output_schema)
 
                     inspected_result = await session.call_tool("inspect-save", {"save_path": str(save)})
                     assert not inspected_result.is_error
                     inspected = _envelope(inspected_result)
+                    validate(inspected, tools_by_name["inspect-save"].output_schema)
 
                     deferred_result = await session.call_tool("topbar", {"save_path": str(save)})
                     assert not deferred_result.is_error
                     deferred = _envelope(deferred_result)
+                    validate(deferred, tools_by_name["topbar"].output_schema)
 
                     allowed_result = await session.call_tool(
                         "topbar", {"save_path": str(save), "allow_unverified": True}
                     )
                     assert not allowed_result.is_error
                     allowed = _envelope(allowed_result)
+                    validate(allowed, tools_by_name["topbar"].output_schema)
+
+                    capabilities_result = await session.call_tool("capabilities", {})
+                    assert not capabilities_result.is_error
+                    validate(_envelope(capabilities_result), tools_by_name["capabilities"].output_schema)
+
+                    missing_result = await session.call_tool(
+                        "topbar", {"save_path": str(tmp_path / "missing-save.gz")}
+                    )
+                    assert missing_result.is_error
+                    missing_payload = _envelope(missing_result)
+                    assert "saveIdentity" not in missing_payload
+                    validate(missing_payload, tools_by_name["topbar"].output_schema)
                     return inspected, deferred, allowed
 
     inspected, deferred, allowed = asyncio.run(exercise_client())
