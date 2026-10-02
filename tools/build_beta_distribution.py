@@ -32,6 +32,9 @@ REQUIRED_PATHS = frozenset(
         "docs/BETA_DATA_NOTICE.md",
         "docs/CHATGPT_START.md",
         "docs/MCP_SETUP.md",
+        "docs/README.md",
+        "docs/COMMANDS.md",
+        "docs/API.md",
         "requirements-mcp.txt",
         "tools/ti_parser_mcp.py",
         "tools/ti_parser_schema.py",
@@ -106,6 +109,9 @@ def _is_distribution_path(path: str) -> bool:
         "docs/BETA_DATA_NOTICE.md",
         "docs/CHATGPT_START.md",
         "docs/MCP_SETUP.md",
+        "docs/README.md",
+        "docs/COMMANDS.md",
+        "docs/API.md",
     }:
         return True
     if path == "requirements-mcp.txt":

@@ -61,7 +61,7 @@ implementation areas include:
   changing code: save extraction, catalog/input resolution, parser mechanics,
   scenario assumptions, and the game's authoritative behavior.
 
-See `docs/nation_projection_mechanics_audit.md` when changing projection
+See `dev-docs/nation_projection_mechanics_audit.md` when changing projection
 semantics, stochastic treatment, coverage, or provenance boundaries.
 
 ## Change discipline

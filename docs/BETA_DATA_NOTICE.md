@@ -16,6 +16,6 @@ establish permission. The local builder and verification tools do not publish
 anything. Record the evidence for this release gate separately; it is pending.
 
 Sources and audit evidence: generated catalog envelopes record template hashes;
-`docs/nation_projection_mechanics_audit.md` in the source repository records DLL
+`dev-docs/nation_projection_mechanics_audit.md` in the source repository records DLL
 mechanics provenance. Normal runtime never reads the installed game. No original
 game DLL or private save is included in the beta allowlist.

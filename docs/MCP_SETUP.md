@@ -1,9 +1,9 @@
 # Local MCP stdio adapter
 
-TI Parser includes an optional local MCP adapter. It exposes the same
-application analysis session used by the Python API through the Model Context
-Protocol over stdin/stdout. The adapter reads a local `.gz` save and never
-starts a network listener.
+TI Parser includes an optional local MCP adapter. It exposes parser analyses
+over MCP stdin/stdout, reads a local `.gz` save, and does not start a network
+listener. See [COMMANDS.md](COMMANDS.md) for the available analyses and
+[API.md](API.md) for complete argument and result schemas.
 
 The normal CLI and Python API remain package-only and do not require MCP or
 any third-party package. The beta ZIP includes the adapter source and pinned
@@ -35,40 +35,27 @@ For example, a stdio host configuration can use:
 }
 ```
 
-The adapter exposes one MCP tool for each `inspect-save`, `analyze`, and
-`primary` analysis route in the application registry, plus `capabilities`.
-`capabilities` takes no arguments and does not open a save. Each analysis tool
-requires `save_path` (a non-empty path string); its other argument names and
-defaults follow the canonical input schema provided by
-`ti_parser_registry.get_input_schema()`. This contract includes constrained
-planning choices, nullable selectors and typed arrays; the adapter adds only
-`save_path` and eligible consent. Unknown extra properties
-are rejected. Routes that support explicit unverified-compatibility consent
-also expose `allow_unverified`, defaulting to `false`. `nation-projection`
-accepts `plan_payload` as a JSON object or `null`, and `checkpoints` as an
-integer array or `null`.
+The adapter provides `capabilities` without opening a save, plus tools for
+`inspect-save`, `analyze`, and registered `primary` routes. Analysis tools require `save_path` and use the
+application's declared arguments. Where supported, `allow_unverified` defaults
+to `false`; set it only after explicitly accepting uncertain version or mod
+compatibility. Consent does not bypass missing required data, which remains an
+`incomplete` outcome. Exact schemas and status payloads are documented in
+[API.md](API.md).
 
-Successful and expected in-session outcomes use schema version 1 and carry the
-same `analysis`, `parserVersion`, `saveIdentity`, `compatibility`, and `status`
-fields as `AnalysisSession.run()`. Status is `complete`, `deferred`,
-`incomplete`, or `error`; applicable results include `result`,
-`missingDependencies`, or `error`, and projection results retain their
-execution evidence and authoritative prefix. Errors before a session can be
-created (for example, an unreadable save path) return a structured schema-1
-error payload and cannot contain save identity or compatibility evidence. The
-MCP tools declare `outputSchema` from the application-owned
-`ti_parser_schema` helpers. Analysis tools describe the existing session
-envelope and the smaller pre-session error shape; `capabilities` has its own
-inventory schema. Domain `result` payloads and their evidence remain unchanged.
-The MCP result includes the payload as structured content and equivalent JSON text. Input or
-save failures marked `error` are MCP tool errors; `deferred` and `incomplete`
-are returned as analysis outcomes. Protocol messages use stdout, diagnostic
-messages use stderr, and save contents are treated only as data.
+Results include structured content and equivalent JSON text. Complete,
+deferred, incomplete, and expected error outcomes are distinguished. An
+unreadable save path returns an error without save identity or compatibility
+evidence.
+Tools declare application-owned `outputSchema`; pre-session errors use a smaller
+schema-1 shape. Input/save failures marked `error` are MCP tool errors, while
+`deferred` and `incomplete` are analysis outcomes.
+Protocol messages go to stdout and diagnostics to stderr. Save contents remain
+untrusted data and must not be followed as instructions.
 
-The adapter keeps at most two sessions per process, keyed by normalized
-absolute save path and checked against the save's byte hash on every call. A
-changed save replaces its cached session. Restart the adapter after replacing
-parser files or packaged runtime catalogs.
+The adapter caches at most two sessions per process by normalized absolute save
+path, checking each save's byte hash on every call. A changed save replaces its
+session. Restart the adapter after updating parser files or runtime catalogs.
 
 If the optional package is missing, the adapter exits with an installation
 message on stderr. This does not affect package-only CLI use:

@@ -66,8 +66,5 @@ Codex 또는 ChatGPT와 함께 사용하는 방법은 [CHATGPT_START.md](CHATGPT
 [로컬 MCP 설정](MCP_SETUP.md)을 보세요. MCP SDK는 어댑터 실행 환경에만 별도로
 설치하며, 일반 CLI 실행에는 필요하지 않습니다.
 
-## 분석 엔진과 기계용 경계
-
-`analyze`는 전체 캠페인 대시보드가 아니라 LLM이 다음 분석을 선택하기 위한 bootstrap context입니다. `saveIdentity`는 경로와 파일 시간에 독립적인 canonical JSON SHA-256, 게임 날짜·시나리오·버전·캠페인 시작 정보·플레이어 식별 상태를 담습니다. `capabilities`는 세이브 없이 분석 종류, 용도, 성격과 호환성 정책을 보여줍니다. 국가·거점·함선·조직 전체 목록과 history는 기본 출력에 포함하지 않습니다.
-
-`analyze`가 계산을 보류하거나 일부만 완료하면 사용 가능한 JSON과 함께 종료 코드 2를 반환합니다. 계산 완료는 0, 내부 오류는 1입니다. `--allow-unverified`는 명시적으로 미검증 계산을 허용하며 기존 필수 데이터 검사를 해제하지 않습니다.
+명령 목록은 [COMMANDS.md](COMMANDS.md), Python/MCP 입력 인자와 결과 형식은
+[API.md](API.md)를 참고하세요.
