@@ -19,10 +19,10 @@ from typing import Any, Mapping
 from ti_parser_capabilities import capabilities as application_capabilities
 from ti_parser_errors import UserInputError
 from ti_parser_registry import get_analysis, get_input_schema, validate_argument_shape
-from ti_parser_schema import get_capabilities_output_schema
 from ti_parser_session import AnalysisSession
 from ti_parser_fairplay import (
-    FAIRPLAY_BOOTSTRAP_POLICY, exposed_entries, get_profile_output_schema,
+    FAIRPLAY_BOOTSTRAP_POLICY, FAIRPLAY_ROUTING_INSTRUCTIONS, exposed_entries, get_profile_output_schema,
+    get_profile_capabilities_output_schema, policy_inventory,
     run_profile, sanitize_profile_error, validate_profile,
 )
 from ti_parser_version import __version__
@@ -63,8 +63,14 @@ def _mcp_capabilities(entries: tuple[Any, ...], schemas: Mapping[str, dict[str, 
     return payload
 
 
-def _tool_description(entry: Any) -> str:
+def _tool_description(entry: Any, profile: str = "default") -> str:
     description = entry.purpose
+    if profile == "fair-play" and entry.command == "inspect-save":
+        return ("Save identity and compatibility inspection for an explicit correlation or "
+                "compatibility request. Current nation facts and previous-save changes "
+                "belong to Companion; this tool supplies neither. "
+                "It is not a prerequisite for Companion-only answers. "
+                "It supplies no selected nation ID or forecast.")
     if entry.kind == "planning-evidence":
         description += " Provides evidence for strategy decisions."
     if entry.routing_class == "bootstrap":
@@ -214,7 +220,7 @@ def create_server(*, profile: str = "default") -> Any:
     tools = [
         mcp_types.Tool(
             name=entry.command,
-            description=_tool_description(entry),
+            description=_tool_description(entry, profile),
             input_schema=schemas[entry.command],
             output_schema=get_profile_output_schema(profile, entry.command),
         )
@@ -223,9 +229,12 @@ def create_server(*, profile: str = "default") -> Any:
     tools.append(
         mcp_types.Tool(
             name="capabilities",
-            description="Return MCP-visible analysis metadata without opening a save.",
+            description=("Return MCP-visible analysis metadata without opening a save. "
+                         "Fair-play-projection-v1 is pending and disabled; only identity inspection "
+                         "is allowed." if profile == "fair-play" else
+                         "Return MCP-visible analysis metadata without opening a save."),
             input_schema=_capability_schema(),
-            output_schema=get_capabilities_output_schema(),
+            output_schema=get_profile_capabilities_output_schema(profile),
         )
     )
 
@@ -248,6 +257,7 @@ def create_server(*, profile: str = "default") -> Any:
             inventory = _mcp_capabilities(entries, schemas)
             if profile == "fair-play":
                 inventory["bootstrapPolicy"] = FAIRPLAY_BOOTSTRAP_POLICY
+                inventory["fairPlayPolicy"] = policy_inventory()["adviceGenerationPolicy"]
             return profile_result(mcp_types, inventory)
 
         try:
@@ -297,6 +307,7 @@ def create_server(*, profile: str = "default") -> Any:
         "ti-parser",
         version=__version__,
         description="Terra Invicta save analysis through the local MCP stdio transport.",
+        instructions=FAIRPLAY_ROUTING_INSTRUCTIONS if profile == "fair-play" else None,
         on_list_tools=on_list_tools,
         on_call_tool=on_call_tool,
     )

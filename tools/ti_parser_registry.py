@@ -82,6 +82,7 @@ class AnalysisDescriptor:
     fair_play_classification: Literal[
         "safe", "own-subject", "visibility-dependent", "diagnostic"
     ] = "visibility-dependent"
+    fair_play_guard_policy: str | None = None
 
     @property
     def fair_play_policy(self) -> str:
@@ -157,7 +158,7 @@ _METADATA: tuple[tuple[Any, ...], ...] = (
     ("project-analysis", "Project unlocks and resource tradeoffs", "planning-evidence", True, "primary", True, "indexed", (), "visibility-dependent"),
     ("nation-ui", "Nation priorities and displayed metrics", "reconstructed-state", True, "primary", True, "indexed", ("nation_name",), "visibility-dependent"),
     ("nation-claims", "Claims and reconstructed hostility", "reconstructed-state", True, "primary", True, "indexed", (), "visibility-dependent"),
-    ("nation-projection", "Audited conditional nation projection", "simulation", True, "primary", True, "indexed", ("nation_name", "days"), "visibility-dependent"),
+    ("nation-projection", "Counterfactual future nation outcomes under candidate priority plans; preserve conditional mechanics evidence", "simulation", True, "primary", True, "indexed", ("nation_name", "days"), "visibility-dependent"),
     ("advise", "Hypothetical councilor advice contribution", "simulation", True, "primary", True, "indexed", ("councilor_name", "nation_name"), "visibility-dependent"),
     ("world-ui", "World population, climate and markets", "reconstructed-state", True, "primary", True, "indexed", (), "visibility-dependent"),
     ("ai-fleet-diagnostics", "AI goals and unresolved causes", "reconstructed-state", True, "diagnostic", True, "indexed", (), "diagnostic"),
@@ -185,6 +186,7 @@ def _make_descriptor(row: tuple[Any, ...]) -> AnalysisDescriptor:
         input_kind=input_kind,
         required_arguments=frozenset(required_arguments),
         fair_play_classification=fair_play_classification,
+        fair_play_guard_policy="fair-play-projection-v1" if command == "nation-projection" else None,
     )
 
 

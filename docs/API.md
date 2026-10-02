@@ -132,5 +132,30 @@ must leave that comparison unresolved unless the ID is provided by another
 authoritative approved source. See the [MCP runbook](MCP_SETUP.md#matching-the-pinned-save)
 for operator steps.
 
-Companion MCP/Codex tool routing and mechanics behavior still require external
-acceptance. Local profile support does not establish those results.
+`validate_advice_generation(context_envelope, ti_inspection_envelope,
+projection_envelope, ti_reinspect_envelope,
+companion_reobserved_context_envelope, *, pinned)` checks a complete advice
+observation batch. It is a Python correlation helper, not a policy approval or
+MCP tool. Peer envelopes require `status="complete"`, `saveIdentity`,
+`selectedNationId`, and `result.nation.id` equal to that selected ID. Identities
+must describe the snapshot that produced each result, not a later lookup.
+
+TI envelopes use schema version 1, the expected analysis, and their response
+`saveIdentity`; normalized inspection, projection, and reinspection results
+must each attest `result.selectedNationId`. Inspections also retain their
+matching `result.saveIdentity`. All three TI fingerprints must be supported
+and identical. The current public TI results do not provide these selected
+nation bindings and are rejected; callers must not insert a guessed ID.
+
+A future approved adapter's complete projection needs usable plans and
+comparison data. An incomplete result must retain its authoritative prefix;
+the helper returns `outcomeStatus="incomplete"` rather than converting it to a
+complete prediction. Deferred/error results reject the batch. Pinned weak peer
+identity can return only `provisional`, even after reobservation. Any conflict
+or missing observation requires discarding the batch and observing again.
+
+Fair-play capabilities include `fairPlayPolicy` with the pending, disabled
+`fair-play-projection-v1` identity. Registry target classification and an
+approved execution policy are separate; no projection domain is approved yet.
+Companion MCP and mechanics behavior still require external acceptance. Local
+profile support and mock-client routing do not establish those results.

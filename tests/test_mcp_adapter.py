@@ -675,4 +675,7 @@ def test_fairplay_cli_profile_over_real_stdio():
     assert {tool.name for tool in listed.tools} == {"inspect-save", "capabilities"}
     assert [row["command"] for row in result.structured_content["analyses"]] == ["inspect-save"]
     assert "blocked" in result.structured_content["bootstrapPolicy"]
-    _validate_result(result, get_capabilities_output_schema())
+    from ti_parser_fairplay import get_profile_capabilities_output_schema
+    assert result.structured_content["fairPlayPolicy"]["enabled"] is False
+    assert result.structured_content["fairPlayPolicy"]["id"] == "fair-play-projection-v1"
+    _validate_result(result, get_profile_capabilities_output_schema("fair-play"))

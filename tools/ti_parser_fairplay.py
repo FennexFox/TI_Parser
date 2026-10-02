@@ -18,6 +18,21 @@ from ti_parser_registry import ANALYSES
 
 
 DEFAULT_PROFILE = "default"
+FAIRPLAY_ROUTING_INSTRUCTIONS = (
+    "Use Companion for current nation observations and previous-save changes. "
+    "Call TI inspect-save only for requested save correlation or compatibility; "
+    "it is not a bootstrap prerequisite for Companion-only questions. "
+    "Fair-play projections are blocked pending source-read and authoritative evidence "
+    "acceptance. Refuse hidden-state requests directly without tool calls. "
+    "Do not retry another profile, infer hidden state, or invent forecasts."
+)
+FAIRPLAY_ADVICE_GENERATION_POLICY = {
+    "id": "fair-play-projection-v1",
+    "status": "pending",
+    "enabled": False,
+    "authorityHashStatus": "known-mismatch",
+    "runtimeInstalledDiscovery": False,
+}
 FAIR_PLAY_PROFILE = "fair-play"
 FAIRPLAY_BOOTSTRAP_POLICY = (
     "fair-play: identity inspection only; nation-projection and all other save "
@@ -72,10 +87,12 @@ def policy_inventory() -> dict[str, Any]:
     return {
         "profile": FAIR_PLAY_PROFILE,
         "bootstrapPolicy": FAIRPLAY_BOOTSTRAP_POLICY,
+        "adviceGenerationPolicy": deepcopy(FAIRPLAY_ADVICE_GENERATION_POLICY),
         "analyses": [
             {
                 "command": descriptor.command,
                 "classification": descriptor.fair_play_classification,
+                "guardPolicy": descriptor.fair_play_guard_policy,
                 "exposed": descriptor.command in visible,
             }
             for descriptor in ANALYSES
@@ -375,6 +392,262 @@ def _fairplay_error_schema() -> dict[str, Any]:
     }
 
 
+def validate_advice_generation(
+    context_envelope: Mapping[str, Any] | None,
+    ti_inspection_envelope: Mapping[str, Any] | None,
+    projection_envelope: Mapping[str, Any] | None,
+    ti_reinspect_envelope: Mapping[str, Any] | None,
+    companion_reobserved_context_envelope: Mapping[str, Any] | None,
+    *,
+    pinned: bool,
+) -> dict[str, str]:
+    """Accept only a context-bound, reobserved projection generation.
+
+    The two peer context envelopes contain saveIdentity, selectedNationId, and
+    result.nation.id, which binds the selected id. Parser envelopes use the
+    standard analysis, status, saveIdentity, and result fields. Approved
+    normalized inspect and projection adapters must each place their attested
+    selected id in result.selectedNationId. The current public inspect and
+    projection responses do not supply those bindings, so they are rejected
+    until approved adapters do.
+
+    Exact generation correlation requires the supported parser fingerprint to
+    remain stable across inspect, projection, and reinspect. If either peer
+    observation lacks an exact fingerprint, only an explicit pin permits a
+    provisional contextual match. That weak match cannot detect hidden
+    same-date changes. Incomplete projection envelopes are accepted for
+    correlation only when they contain a structurally valid authoritative
+    prefix; callers must preserve the incomplete outcome and must not synthesize
+    predictions from it. This helper does not enable a route or expose results.
+    """
+
+    if type(pinned) is not bool:
+        return _rejected("invalid-pin-state")
+
+    peer_before = _bound_peer_context(context_envelope, "context")
+    if peer_before.get("status") == "rejected":
+        return peer_before
+    peer_after = _bound_peer_context(companion_reobserved_context_envelope, "companion-reobserved-context")
+    if peer_after.get("status") == "rejected":
+        return peer_after
+
+    inspection = _parser_generation_envelope(
+        ti_inspection_envelope, "inspect-save", {"complete"}, require_nested_identity=True
+    )
+    if inspection.get("status") == "rejected":
+        return inspection
+    projection = _parser_generation_envelope(
+        projection_envelope, "nation-projection", {"complete", "incomplete"}
+    )
+    if projection.get("status") == "rejected":
+        return projection
+    reinspect = _parser_generation_envelope(
+        ti_reinspect_envelope, "inspect-save", {"complete"}, require_nested_identity=True
+    )
+    if reinspect.get("status") == "rejected":
+        return reinspect
+
+    projection_result = projection["result"]
+    selected_nation_id = _normalize_id(projection_result.get("selectedNationId"))
+    if selected_nation_id is _MISSING:
+        return _rejected("projection-selected-nation-id-missing")
+    inspection_nation_id = _normalize_id(inspection["result"].get("selectedNationId"))
+    if inspection_nation_id is _MISSING:
+        return _rejected("inspect-save-selected-nation-id-missing")
+    reinspect_nation_id = _normalize_id(reinspect["result"].get("selectedNationId"))
+    if reinspect_nation_id is _MISSING:
+        return _rejected("inspect-save-selected-nation-id-missing")
+    if not _same_value(inspection_nation_id, selected_nation_id):
+        return _rejected("selected-nation-id-mismatch")
+    if not _same_value(reinspect_nation_id, selected_nation_id):
+        return _rejected("selected-nation-id-mismatch")
+
+    projection_reason = _usable_projection_result(projection["status"], projection_result)
+    if projection_reason is not None:
+        return _rejected(projection_reason)
+
+    for observation in (inspection, projection, reinspect):
+        if observation["fingerprint_state"] != "supported":
+            return _rejected("parser-fingerprint-unavailable-or-invalid")
+    if projection["fingerprint"] != inspection["fingerprint"]:
+        return _rejected("parser-fingerprint-changed")
+    if reinspect["fingerprint"] != inspection["fingerprint"]:
+        return _rejected("parser-fingerprint-changed")
+
+    parser_identity = inspection["identity"]
+    projection_identity = projection["identity"]
+    reinspect_identity = reinspect["identity"]
+
+    parser_pairs = (
+        compare_save_context(
+            parser_identity, projection_identity, inspection_nation_id, selected_nation_id,
+            pinned=False, previous_parser_fingerprint=inspection["fingerprint"],
+        ),
+        compare_save_context(
+            reinspect_identity, projection_identity, reinspect_nation_id, selected_nation_id,
+            pinned=False, previous_parser_fingerprint=projection["fingerprint"],
+        ),
+    )
+    for comparison in parser_pairs:
+        if comparison["status"] != "exact":
+            return comparison
+
+    peer_pairs = (
+        compare_save_context(
+            parser_identity, peer_before["identity"], inspection_nation_id, peer_before["nation_id"],
+            pinned=pinned,
+        ),
+        compare_save_context(
+            reinspect_identity, peer_after["identity"], reinspect_nation_id, peer_after["nation_id"],
+            pinned=pinned, previous_parser_fingerprint=inspection["fingerprint"],
+        ),
+    )
+    for comparison in peer_pairs:
+        if comparison["status"] == "rejected":
+            return comparison
+
+    if any(comparison["status"] == "provisional" for comparison in peer_pairs):
+        accepted = {
+            "status": "provisional",
+            "reason": "pinned-context-match-without-peer-fingerprint",
+        }
+    else:
+        accepted = {
+            "status": "exact",
+            "reason": "exact-generation-and-context-match",
+        }
+    if projection["status"] == "incomplete":
+        accepted["outcomeStatus"] = "incomplete"
+    return accepted
+
+
+def _bound_peer_context(envelope: Any, label: str) -> dict[str, Any]:
+    if not isinstance(envelope, Mapping):
+        return _rejected(f"{label}-missing")
+    if envelope.get("status") != "complete":
+        return _rejected(f"{label}-status-invalid")
+    identity = envelope.get("saveIdentity")
+    if not isinstance(identity, Mapping):
+        return _rejected(f"{label}-save-identity-missing")
+    nation_id = _normalize_id(envelope.get("selectedNationId"))
+    result = envelope.get("result")
+    nation = result.get("nation") if isinstance(result, Mapping) else None
+    bound_id = _normalize_id(nation.get("id")) if isinstance(nation, Mapping) else _MISSING
+    if nation_id is _MISSING or bound_id is _MISSING:
+        return _rejected(f"{label}-selected-nation-unbound")
+    if not _same_value(nation_id, bound_id):
+        return _rejected(f"{label}-selected-nation-binding-mismatch")
+    return {"identity": identity, "nation_id": nation_id}
+
+
+def _parser_generation_envelope(
+    envelope: Any,
+    expected_analysis: str,
+    allowed_statuses: set[str],
+    *,
+    require_nested_identity: bool = False,
+) -> dict[str, Any]:
+    if not isinstance(envelope, Mapping):
+        return _rejected(f"{expected_analysis}-envelope-missing")
+    if type(envelope.get("schemaVersion")) is not int or envelope.get("schemaVersion") != 1:
+        return _rejected(f"{expected_analysis}-envelope-schema-version-unsupported")
+    if envelope.get("analysis") != expected_analysis:
+        return _rejected(f"{expected_analysis}-analysis-mismatch")
+    status = envelope.get("status")
+    if not isinstance(status, str) or status not in allowed_statuses:
+        return _rejected(f"{expected_analysis}-status-invalid")
+    identity = envelope.get("saveIdentity")
+    result = envelope.get("result")
+    if not isinstance(identity, Mapping):
+        return _rejected(f"{expected_analysis}-save-identity-missing")
+    if not isinstance(result, Mapping):
+        return _rejected(f"{expected_analysis}-result-missing")
+    nested_identity = result.get("saveIdentity", _MISSING)
+    if require_nested_identity and not isinstance(nested_identity, Mapping):
+        return _rejected(f"{expected_analysis}-result-save-identity-missing")
+    if nested_identity is not _MISSING:
+        if not isinstance(nested_identity, Mapping) or not _same_identity_value(nested_identity, identity):
+            return _rejected(f"{expected_analysis}-response-save-identity-mismatch")
+    schema = identity.get("schemaVersion", _MISSING)
+    if schema is not _MISSING and (type(schema) is not int or schema != 1):
+        return _rejected(f"{expected_analysis}-identity-schema-version-unsupported")
+    if schema != 1:
+        return _rejected(f"{expected_analysis}-identity-schema-version-unsupported")
+    fingerprint_state, fingerprint = _parse_fingerprint(identity.get("fingerprint"))
+    if fingerprint_state == "invalid":
+        return _rejected(f"{expected_analysis}-fingerprint-invalid")
+    if fingerprint_state != "supported":
+        return _rejected(f"{expected_analysis}-fingerprint-unavailable")
+    return {
+        "status": status,
+        "identity": identity,
+        "result": result,
+        "fingerprint_state": fingerprint_state,
+        "fingerprint": fingerprint,
+    }
+
+
+def get_profile_capabilities_output_schema(profile: str) -> dict[str, Any]:
+    """Extend the shared schema only for the optional profile's pending policy."""
+    from ti_parser_schema import get_capabilities_output_schema
+
+    selected = validate_profile(profile)
+    schema = get_capabilities_output_schema()
+    if selected == FAIR_PLAY_PROFILE:
+        inventory = schema["oneOf"][0]
+        inventory["properties"]["fairPlayPolicy"] = {
+            "type": "object",
+            "properties": {key: {"const": value} for key, value in FAIRPLAY_ADVICE_GENERATION_POLICY.items()},
+            "required": list(FAIRPLAY_ADVICE_GENERATION_POLICY),
+            "additionalProperties": False,
+        }
+        inventory["required"].append("fairPlayPolicy")
+    return schema
+
+
+def _same_identity_value(left: Any, right: Any) -> bool:
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, Mapping):
+        return left.keys() == right.keys() and all(
+            _same_identity_value(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _same_identity_value(left_value, right_value)
+            for left_value, right_value in zip(left, right)
+        )
+    return left == right
+
+
+def _usable_projection_result(status: str, result: Mapping[str, Any]) -> str | None:
+    initial_state = result.get("initialState")
+    if not isinstance(initial_state, Mapping) or not isinstance(initial_state.get("nation"), Mapping):
+        return "projection-result-unusable"
+    plans = result.get("plans")
+    if not isinstance(plans, list) or not plans:
+        return "projection-result-unusable"
+    if not isinstance(result.get("comparison"), Mapping):
+        return "projection-result-unusable"
+    if any(
+        not isinstance(plan, Mapping)
+        or not isinstance(plan.get("status"), str)
+        or plan.get("status") not in {"complete", "incomplete"}
+        for plan in plans
+    ):
+        return "projection-result-unusable"
+    incomplete_plans = [plan for plan in plans if plan.get("status") == "incomplete"]
+    if status == "complete":
+        return "projection-status-result-mismatch" if incomplete_plans else None
+    if not incomplete_plans:
+        return "projection-status-result-mismatch"
+    for plan in incomplete_plans:
+        last_state = plan.get("lastAuthoritativeState")
+        if not isinstance(last_state, Mapping) or not isinstance(last_state.get("nation"), Mapping):
+            return "projection-result-incomplete-without-authoritative-prefix"
+    return None
+
+
 def compare_save_context(
     parser_identity: Mapping[str, Any] | None,
     companion_identity: Mapping[str, Any] | None,
@@ -529,7 +802,11 @@ def _rejected(reason: str) -> dict[str, str]:
 
 
 __all__ = [
+    "get_profile_capabilities_output_schema",
+    "FAIRPLAY_ROUTING_INSTRUCTIONS",
     "DEFAULT_PROFILE", "FAIR_PLAY_PROFILE", "FAIRPLAY_BOOTSTRAP_POLICY",
-    "compare_save_context", "exposed_entries", "get_profile_output_schema",
+    "FAIRPLAY_ADVICE_GENERATION_POLICY", "compare_save_context",
+    "exposed_entries", "get_profile_output_schema",
     "policy_inventory", "run_profile", "sanitize_profile_error", "validate_profile",
+    "validate_advice_generation",
 ]
