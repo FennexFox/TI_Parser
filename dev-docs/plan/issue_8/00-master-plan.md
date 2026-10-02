@@ -1,48 +1,43 @@
-# Fair-play profile and interoperability audit
+# Projection structural audit and pre-integration acceptance
 
 ## Issue Target And Scope Summary
 
-- Issue target: #8
-- Title: Fair-play profile and interoperability audit
-- Source plan: None
-- Scope: Implement the fair-play route policy and save-context comparison, audit visibility limits, document the integration contract, and retain external acceptance evidence as an explicit gate.
+Issue #8 continues from the existing fair-play enforcement and correlation contract. This plan is authoritative for structural read auditing, evidence gates, test-only orchestration, and real-client acceptance. Existing default runtime behavior and committed catalogs remain unchanged.
 
 ## Strategy
 
-- Preserve default behavior when the profile is omitted. The initial fair-play allowlist is only `inspect-save` plus a filtered `capabilities` inventory; globally block `nation-projection` pending an authoritative visibility audit; exclude all other analyses. Implement exact save identity comparison and pinned-only provisional matching. Keep the Companion MCP plus Codex-side two-server test as an unresolved acceptance gate.
+Trace a fully owned ModernScenario nation for 180 days with single-segment plans, empty advisors and no diagnostic output. Knowledge/Welfare 3:1 and 1:3 are acceptance fixtures, not a production permission rule. Dynamic tracing is paired with static closure review. No trace, build, or visibility uncertainty may be interpreted as approval.
 
 ## Phase Order
 
-1. [Policy and API boundary](01-discovery.md)
-2. [Contract and routing guidance](02-documentation.md)
-3. [External interoperability validation](03-acceptance.md)
+1. [Structural read audit](01-structural-audit.md)
+2. [Authoritative build and visibility evidence](02-authority.md)
+3. [Guarded projection policy](03-guard.md)
+4. [Mock Companion and real TI Parser integration](04-mock-integration.md)
+5. [Real Companion and Codex acceptance](05-real-acceptance.md)
 
 ## Phase Dependencies
 
-- Phase 1 has no phase dependency beyond resolved issue context.
-- Phase 2 depends on completion and validation of phase 1.
-- Phase 3 depends on completion and validation of phase 2.
-
-## Current Phase Status
-
-| Phase | Status | Note |
-| --- | --- | --- |
-| 1. Policy and API boundary | Complete | Profile and comparison implementation committed as `6be8b83`; coordinator reports 60 focused tests passed. Full suite and ZIP verification are being completed separately. |
-| 2. Contract and routing guidance | Complete | Runtime user guide, API note, and developer audit/index updated. |
-| 3. External interoperability validation | Pending | Actual Companion MCP and Codex-side two-server session remain unavailable; acceptance remains open. |
+Phase 2 complements phase 1; phase 3 requires both structural completeness and authoritative visibility/correctness acceptance. Phase 4 is independent of projection approval and must test the current blocked behavior when phase 3 cannot proceed. Phase 5 requires actual Companion and an approved projection path.
 
 ## Source Of Truth Decisions
 
-- `00-master-plan.md` is the phased implementation plan source of truth.
-- Phase files in this directory define phase-local scope and validation.
-- Earlier monolithic plans are input material only unless explicitly retained.
-- The public `--profile default|fair-play` contract and visibility limits are recorded in [the interoperability audit](../../fairplay_interoperability.md). Runtime profile implementation is in commit `6be8b83`; the Companion MCP/Codex two-server run remains an external acceptance gate.
+The maintained [interoperability audit](../../fairplay_interoperability.md) owns evidence and limits. User-facing setup and correlation sequence live in [MCP setup](../../../docs/MCP_SETUP.md). Registry classification is separate from a future approved `fair-play-projection-v1` guard policy. The current route remains visibility-dependent and denied.
 
 ## Global Validation Expectations
 
-- python C:\\Users\\techn\\.codex\\skills\\phased-issue-implementation\\scripts\\phase_plan_helper.py validate --plan-dir dev-docs/plan/issue_8
-- git diff --check
+Run relevant audit, correlation and MCP tests, then the full pytest suite. Verify committed distribution bytes, local documentation links and `git diff --check`. Keep automated MCP calls separate from actual Codex routing evidence.
 
 ## Known Risks And Assumptions
 
-- `nation-projection` visibility is not established by output schemas or redaction. Actual companion MCP and Codex-side server are unavailable in this checkout; retain acceptance as pending.
+Installed DLL SHA-256 differs from the catalog evidence DLL. Catalog regeneration/build migration is out of scope. A/B synthetic fixtures do not prove visibility. Container copies, normalization and scalar materialization can lose read provenance; unresolved escapes or static/dynamic discrepancies force audit incomplete. Strong generation identity requires same-algorithm fingerprints; pinned weak identity remains provisional even after reobservation. Actual Companion substitution and successful fair-play prediction remain required for issue closure.
+
+## Current State
+
+Application generation checks, pending guard metadata and mock two-server
+protocol/routing tooling are implemented. Structural instrumentation is a
+development aid; unresolved read mappings keep completeness open. Authority
+remains blocked by the build mismatch, so guarded prediction is disabled.
+Actual Companion/TI/Codex prediction acceptance remains open. See phase files
+for evidence and the [routing record](routing-evidence.json) for synthetic
+client observations; this plan is retained while acceptance gates are unresolved.

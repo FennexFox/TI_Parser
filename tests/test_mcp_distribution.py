@@ -106,6 +106,9 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
     extracted = tmp_path / "extracted"
     extract_verified(archive, extracted)
     assert (extracted / "tools" / "ti_parser_schema.py").is_file()
+    assert not (extracted / "tests").exists()
+    assert not (extracted / "tools" / "audit_projection_reads.py").exists()
+    assert not (extracted / "tools" / "run_fairplay_routing.py").exists()
     if _tracked_in_head("tools/ti_parser_fairplay.py"):
         assert (extracted / "tools" / "ti_parser_fairplay.py").is_file()
         assert not (extracted / "dev-docs").exists()
@@ -190,6 +193,11 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
                     listed = await session.list_tools()
                     by_name = {tool.name: tool for tool in listed.tools}
                     assert set(by_name) == {"inspect-save", "capabilities"}
+                    inventory = await session.call_tool("capabilities", {})
+                    inventory_payload = _envelope(inventory)
+                    validate(inventory_payload, by_name["capabilities"].output_schema)
+                    assert inventory_payload["fairPlayPolicy"]["id"] == "fair-play-projection-v1"
+                    assert inventory_payload["fairPlayPolicy"]["enabled"] is False
                     result = await session.call_tool("inspect-save", {"save_path": str(save)})
                     assert not result.is_error
                     payload = _envelope(result)

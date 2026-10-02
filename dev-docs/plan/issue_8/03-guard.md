@@ -1,0 +1,56 @@
+# Guarded projection policy
+
+## Goal
+
+Enable only a proven execution shape after every predecessor gate passes.
+
+## Scope
+
+Application/registry-owned policy identity, scope predicates, dependency approval, profile schemas and preservation of normal result evidence.
+
+## Non-goals
+
+Activate the route based on A/B fixture success or unconditional own-subject classification.
+
+## Affected files
+
+tools/ti_parser_fairplay.py; tools/ti_parser_registry.py; profile tests.
+
+## Implementation steps
+
+Require complete structural trace and authority approval; only then add own-subject classification plus guard policy and approved input-domain tests.
+
+## Acceptance criteria
+
+All approved inputs must have proven source-read, branch, completion and output closure. allow_unverified cannot bypass policy. Otherwise preserve global denial.
+
+## Validation commands
+
+- `python -m pytest tests/test_fairplay.py tests/test_mcp_adapter.py -q`
+- `git diff --check`
+
+## Manual smoke tests
+
+Confirm current fair-play lists inspect-save only and denies projection before save loading.
+
+## Rollback risks
+
+Broad input approval can disclose derived hidden state; preserve default behavior.
+
+## Progress
+
+Not activated: prerequisite evidence is absent.
+
+Registry metadata references `fair-play-projection-v1` separately from the
+unchanged visibility-dependent classification. Application/MCP capabilities
+identify it as pending and disabled; profile schemas remain application-owned.
+No input domain or successful guarded execution is approved.
+
+## Decision log
+
+Do not build an unused alternate calculator or fake successful projection.
+
+## Outcomes / Retrospective
+
+Pre-handler denial and default compatibility tests pass. Approval remains
+blocked; fixture parity and `allow_unverified` do not bypass the evidence gate.

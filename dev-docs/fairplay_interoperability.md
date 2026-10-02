@@ -2,8 +2,8 @@
 
 This source-checkout reference records the Issue #8 profile boundary and the
 evidence required before fair-play routing can be accepted with a companion MCP
-and Codex-side server. It does not claim that the external two-server test has
-run.
+and Codex-side server. Test-only two-server probes and real Codex CLI routing
+are separate from acceptance using the actual Companion.
 
 ## Policy decision
 
@@ -46,6 +46,74 @@ is read and emitted; DLL/template evidence and an authoritative visibility
 model are still needed to classify what the player may know. Scenario
 assumptions must remain separate from that evidence.
 
+## Structural audit and authoritative acceptance are separate
+
+The bounded fixture is ModernScenario, a fully player-owned nation, 180 days,
+single-segment Knowledge/Welfare 3:1 and 1:3 plans, explicitly empty advisors,
+and no diagnostic output. These pips are acceptance fixtures. They are not a
+production contract or permission to classify the whole route as own-subject.
+
+The developer-only `tools/audit_projection_reads.py` records source paths and
+read operations across preparation, simulation, and output. Dynamic logs must
+be reconciled with static call/branch closure. `dict`, `list`, comprehensions,
+copy/deepcopy, index aliases and helper normalization can lose provenance after
+materializing plain containers/scalars. An unexplained escape, unreached stage,
+or static/dynamic discrepancy makes the audit incomplete. No hidden read in the
+log is not proof that no hidden input influenced the result. Existing metric
+coverage records calculated lineage, not complete raw read visibility.
+
+Original/traced result, status and coverage parity is required before relying
+on instrumentation. Unrelated preparation must not be omitted merely because
+the fixture has empty advisors: current preparation scans councilors and
+cross-faction effects. Any scoped optimization requires separate parity tests
+and does not establish game visibility.
+
+The controlled six-CP fixture completes both 180-day plans with exact
+baseline/traced result, coverage and status parity. The bounded trace observes
+496 aggregated read rows across save/catalog payloads and preparation/execution.
+Empty advisors still execute `councilor_summary_maps`,
+`projection_advisor_profiles` and `calculate_topbar`; no preparation was removed.
+Catalog decoding/manifest checks, plain index-container reads and normalized
+scalar mappings are explicitly unresolved, so structural status is `incomplete`.
+All raw read visibility classifications remain unresolved. Reproduce the
+offline report from a source checkout with an explicit output path:
+
+```powershell
+python tools/audit_projection_reads.py --output C:\path\to\audit.json --assembly-path C:\path\to\Assembly-CSharp.dll
+```
+
+Exit 2 is the current fail-closed result, even though fixture calculation
+parity passes. The JSON separates structural status from assembly hash
+comparison; matching hashes alone would still not establish UI visibility.
+
+The installed DLL observed during planning has SHA-256
+`4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350`.
+The packaged nation catalog and mechanics audit cite
+`ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5`.
+They are different builds. Hashing an explicitly supplied assembly is an offline
+audit input only; normal runtime never discovers an installed DLL.
+
+Structural auditing can proceed, but authoritative visibility/correctness
+acceptance cannot pass without matching-build or validated cross-build evidence.
+Catalog regeneration and mechanics migration are outside this workstream.
+This is a mandatory predecessor gate for projection approval.
+
+## Future guarded policy boundary
+
+`fair-play-projection-v1` is a pending policy identity, not an enabled tool.
+Only after structural completeness and authoritative acceptance both pass can
+the registry assign own-subject classification together with this application-
+owned policy. Its scope must bind approved scenario/catalog evidence, complete
+ownership, horizon, single segment, empty advisors, approved priorities and
+execution shape. Values outside a fixture may be accepted only when their
+read/branch/completion/output closure is proven; fixture success cannot establish
+a broad domain. Diagnostics, unresolved ownership/dependencies and unapproved
+shapes remain denied. `allow_unverified` never bypasses any of these gates.
+
+The current route stays visibility-dependent and globally blocked. No unused
+alternate calculator or fabricated successful prediction is introduced while
+the authority gate remains open.
+
 | Evidence layer | Current evidence | What it establishes |
 | --- | --- | --- |
 | Save/parser | `handle_nation_projection` (`ti_parser_application.py:464`), `extract_nation_projection_state` (`ti_parser_projection_adapter.py:565`), `calculate_nation_projection` (`:953`), `_state_snapshot` (`ti_parser_nation_projection.py:2187`), `projection_output` (`:3839`) | Which save fields, factions, CP owners, public-opinion/market values, regions, and output diagnostics the implementation can read or produce. |
@@ -82,7 +150,8 @@ fields after execution is insufficient.
 
 ## Save identity and peer matching
 
-Use `inspect-save` from each server and compare the public `saveIdentity`.
+Read Companion's response-bound context identity, then TI `inspect-save`, and
+compare the public `saveIdentity`.
 For exact matching, require schema version 1 on both sides and the same
 supported fingerprint algorithm/value. The exact fingerprint is
 `sha256-canonical-save-json-v1`:
@@ -144,14 +213,18 @@ launch command is invented here.
 
 | Gate | Status | Evidence still required |
 | --- | --- | --- |
-| Default profile preserves route behavior | Verified by coordinator; 60 focused tests passed | Omitted profile and explicit `default` retain existing behavior. |
-| Fair-play allowlist and pre-handler denial | Verified by coordinator; 60 focused tests passed | Fair-play analysis route is only `inspect-save`; capabilities lists only that route. Projection and all other routes are denied. |
-| Exact and provisional save matching | Verified by coordinator; 60 focused tests passed | Exact schema-1 supported fingerprints and context must match. Missing/invalid/change rejects; unavailable fingerprint allows only pinned and complete equal context. |
-| Projection visibility audit | Open; projection remains blocked | Parser source traces are recorded above. Authoritative DLL/template visibility classification across branches and cross-scope reads is not established. |
-| Companion MCP plus Codex-side server | Not run; external acceptance pending | Requires the actual Companion MCP and Codex-side integration. Run the 180-day A/B prompt with the same pinned save; retain tool/result evidence without sensitive save data. |
+| Default profile preserves route behavior | Regression-tested | Omitted profile and explicit `default` retain existing behavior. |
+| Fair-play allowlist and pre-handler denial | Regression-tested | Only identity inspection is exposed; projection and other routes are denied before save reads. Capabilities identify the pending disabled guard. |
+| Exact/provisional matching and generation checks | Regression-tested | Response-bound peer target and independent TI target bindings, fingerprints and reobservations must agree. Weak peer identity remains provisional. Current TI results lack target bindings, so full advice acceptance rejects them. |
+| Structural read completeness | Open | A/B result/status/coverage parity alone does not establish complete tracing. Materialized values, catalog loading and static dependency closure require explicit mappings. |
+| Authoritative visibility/correctness | Blocked | Installed/catalog DLL hashes differ; matching-build or validated cross-build evidence is required. No catalog migration is performed. |
+| Mock Companion plus TI stdio | Protocol-tested | Synthetic fixture-only connection, discovery, policy denial and correlation; not a visibility oracle. |
+| Real Codex routing with mock | Six canonical prompts reviewed | Current/history use Companion, correlation uses both with target unresolved, forecasts stay blocked, and hidden goals are refused without calls. [Synthetic client evidence](plan/issue_8/routing-evidence.json) records initial failures and corrected ownership; no mechanics approval follows. |
+| Actual Companion plus TI/Codex | Open | Substitute a runnable actual Companion (local branch/server is sufficient) and execute the approved 180-day A/B scenario. |
 
-The local profile implementation and regression checks pass, but this does not
-complete the actual Companion MCP/Codex two-server acceptance. Keep that gate
-open and keep projection blocked until authoritative visibility evidence is
-complete. This repository task had no access to the actual Companion MCP or a
-configured Codex two-server session.
+Local tooling does not complete Issue #8. Keep projection blocked until
+structural completeness, authoritative visibility/correctness and the guarded
+execution policy pass; actual Companion/TI/Codex prediction acceptance then
+remains required. See the [active plan](plan/issue_8/00-master-plan.md) for open
+gates and the [MCP runbook](../docs/MCP_SETUP.md#generation-sequence-and-advice-eligibility)
+for the required observation sequence and discard/retry behavior.
