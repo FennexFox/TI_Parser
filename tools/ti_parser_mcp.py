@@ -8,6 +8,7 @@ runtime dependency to the normal CLI or application API.
 from __future__ import annotations
 
 import asyncio
+import argparse
 import hashlib
 import json
 import sys
@@ -17,9 +18,13 @@ from typing import Any, Mapping
 
 from ti_parser_capabilities import capabilities as application_capabilities
 from ti_parser_errors import UserInputError
-from ti_parser_registry import ANALYSES, get_analysis, get_input_schema, validate_argument_shape
-from ti_parser_schema import get_analysis_output_schema, get_capabilities_output_schema
+from ti_parser_registry import get_analysis, get_input_schema, validate_argument_shape
+from ti_parser_schema import get_capabilities_output_schema
 from ti_parser_session import AnalysisSession
+from ti_parser_fairplay import (
+    FAIRPLAY_BOOTSTRAP_POLICY, exposed_entries, get_profile_output_schema,
+    run_profile, sanitize_profile_error, validate_profile,
+)
 from ti_parser_version import __version__
 
 
@@ -175,26 +180,25 @@ class SessionCache:
         *,
         allow_unverified: bool,
         kwargs: Mapping[str, Any],
+        profile: str = "default",
     ) -> dict[str, Any]:
         async with self._lock:
             session, error = self._load(path)
             if error is not None:
                 return error
             assert session is not None
-            return session.run(analysis, allow_unverified=allow_unverified, **dict(kwargs))
+            return run_profile(session, analysis, profile=profile,
+                               allow_unverified=allow_unverified, **dict(kwargs))
 
 
-def _exposed_entries() -> tuple[Any, ...]:
-    return tuple(
-        entry
-        for entry in ANALYSES
-        if entry.routing_class in {"bootstrap", "primary"}
-    )
+def _exposed_entries(profile: str = "default") -> tuple[Any, ...]:
+    return exposed_entries(profile)
 
 
-def create_server() -> Any:
+def create_server(*, profile: str = "default") -> Any:
     """Create a low-level MCP server; importing this function needs ``mcp``."""
 
+    validate_profile(profile)
     try:
         import mcp.types as mcp_types
         from mcp.server.lowlevel import Server
@@ -205,14 +209,14 @@ def create_server() -> Any:
         ) from exc
 
     cache = SessionCache()
-    entries = _exposed_entries()
+    entries = _exposed_entries(profile)
     schemas = {entry.command: _tool_schema(entry) for entry in entries}
     tools = [
         mcp_types.Tool(
             name=entry.command,
             description=_tool_description(entry),
             input_schema=schemas[entry.command],
-            output_schema=get_analysis_output_schema(),
+            output_schema=get_profile_output_schema(profile, entry.command),
         )
         for entry in entries
     ]
@@ -225,6 +229,9 @@ def create_server() -> Any:
         )
     )
 
+    def profile_result(types_module: Any, payload: Any, *, is_error: bool = False) -> Any:
+        return _result(types_module, sanitize_profile_error(payload, profile), is_error=is_error)
+
     async def on_list_tools(_ctx: Any, _params: Any) -> Any:
         return mcp_types.ListToolsResult(tools=tools)
 
@@ -233,19 +240,22 @@ def create_server() -> Any:
         arguments = dict(params.arguments or {})
         if name == "capabilities":
             if arguments:
-                return _result(
+                return profile_result(
                     mcp_types,
                     _error_payload("invalid-arguments", "capabilities does not accept arguments"),
                     is_error=True,
                 )
-            return _result(mcp_types, _mcp_capabilities(entries, schemas))
+            inventory = _mcp_capabilities(entries, schemas)
+            if profile == "fair-play":
+                inventory["bootstrapPolicy"] = FAIRPLAY_BOOTSTRAP_POLICY
+            return profile_result(mcp_types, inventory)
 
         try:
             entry = get_analysis(name)
         except UserInputError as exc:
-            return _result(mcp_types, _error_payload(exc.code, exc.message, context=exc.context), is_error=True)
+            return profile_result(mcp_types, _error_payload(exc.code, exc.message, context=exc.context), is_error=True)
         if entry not in entries:
-            return _result(
+            return profile_result(
                 mcp_types,
                 _error_payload("unsupported-analysis", f"Analysis is not exposed by the MCP adapter: {name}"),
                 is_error=True,
@@ -255,12 +265,12 @@ def create_server() -> Any:
         try:
             path = _normalize_save_path(save_path)
         except UserInputError as exc:
-            return _result(mcp_types, _error_payload(exc.code, exc.message, context=exc.context), is_error=True)
+            return profile_result(mcp_types, _error_payload(exc.code, exc.message, context=exc.context), is_error=True)
 
         allow_present = "allow_unverified" in arguments
         allow_unverified = arguments.pop("allow_unverified", False)
         if not entry.allows_explicit_unverified_consent and allow_present:
-            return _result(
+            return profile_result(
                 mcp_types,
                 _error_payload("invalid-arguments", f"allow_unverified is not supported for {name}"),
                 is_error=True,
@@ -269,7 +279,7 @@ def create_server() -> Any:
             try:
                 validate_argument_shape(name, "plan_payload", arguments["plan_payload"])
             except UserInputError as exc:
-                return _result(
+                return profile_result(
                     mcp_types,
                     _error_payload(exc.code, exc.message, context=exc.context),
                     is_error=True,
@@ -279,8 +289,9 @@ def create_server() -> Any:
             name,
             allow_unverified=allow_unverified,
             kwargs=arguments,
+            profile=profile,
         )
-        return _result(mcp_types, payload, is_error=isinstance(payload, dict) and payload.get("status") == "error")
+        return profile_result(mcp_types, payload, is_error=isinstance(payload, dict) and payload.get("status") == "error")
 
     server = Server(
         "ti-parser",
@@ -305,8 +316,11 @@ async def _run_stdio(server: Any) -> None:
 def main() -> None:
     """Run the adapter over stdio, keeping stdout exclusively for MCP frames."""
 
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=("default", "fair-play"), default="default")
+    args = parser.parse_args()
     try:
-        server = create_server()
+        server = create_server(profile=args.profile)
     except MissingSDKError as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(2) from exc

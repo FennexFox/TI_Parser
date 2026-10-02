@@ -79,6 +79,15 @@ class AnalysisDescriptor:
     application_callable: bool
     input_kind: str
     required_arguments: frozenset[str] = frozenset()
+    fair_play_classification: Literal[
+        "safe", "own-subject", "visibility-dependent", "diagnostic"
+    ] = "visibility-dependent"
+
+    @property
+    def fair_play_policy(self) -> str:
+        """Alias emphasizing that the classification is policy metadata."""
+
+        return self.fair_play_classification
 
     @property
     def id(self) -> str:
@@ -128,41 +137,41 @@ class AnalysisDescriptor:
 
 
 # (command, purpose, kind, compatibility requirement, routing class,
-# application-callable, input kind, required caller selectors)
+# application-callable, input kind, required caller selectors, fair-play class)
 _METADATA: tuple[tuple[Any, ...], ...] = (
-    ("inspect-save", "Identify save, campaign and player without calculations", "observed-state", False, "bootstrap", True, "session", ()),
-    ("analyze", "Bounded LLM bootstrap context and next analysis routes", "bootstrap-context", False, "bootstrap", True, "session", ()),
-    ("summary", "Compact campaign summary", "reconstructed-state", True, "primary", True, "snapshot", ()),
-    ("faction", "Faction summary", "reconstructed-state", True, "primary", True, "snapshot", ("name",)),
-    ("nation", "Nation summary", "reconstructed-state", True, "primary", True, "snapshot", ("name",)),
-    ("councilor", "Councilor attributes and conditions", "reconstructed-state", True, "primary", True, "snapshot", ("name",)),
-    ("topbar", "Resource income, MC and CP capacity; optional queue forecast", "reconstructed-state", True, "primary", True, "indexed", ()),
-    ("research", "Research income breakdown", "reconstructed-state", True, "primary", True, "indexed", ()),
-    ("research-ui", "Active research slots, progress and ETA", "reconstructed-state", True, "primary", True, "indexed", ()),
-    ("research-plan", "Research candidates and goal-specific evidence", "planning-evidence", True, "primary", True, "indexed", ()),
-    ("org-plan", "Organization acquisition and assignment evidence", "planning-evidence", True, "primary", True, "indexed", ()),
-    ("hab-ui", "Habitat power, modules and support", "reconstructed-state", True, "primary", True, "indexed", ("hab_name",)),
-    ("hab-slots", "Usable habitat slots", "reconstructed-state", True, "primary", True, "indexed", ()),
-    ("hab-plan", "Habitat module candidates and expansion evidence", "planning-evidence", True, "primary", True, "indexed", ()),
-    ("ship-plan", "Ship component choices and design simulations", "planning-evidence", True, "primary", True, "indexed", ()),
-    ("project-analysis", "Project unlocks and resource tradeoffs", "planning-evidence", True, "primary", True, "indexed", ()),
-    ("nation-ui", "Nation priorities and displayed metrics", "reconstructed-state", True, "primary", True, "indexed", ("nation_name",)),
-    ("nation-claims", "Claims and reconstructed hostility", "reconstructed-state", True, "primary", True, "indexed", ()),
-    ("nation-projection", "Audited conditional nation projection", "simulation", True, "primary", True, "indexed", ("nation_name", "days")),
-    ("advise", "Hypothetical councilor advice contribution", "simulation", True, "primary", True, "indexed", ("councilor_name", "nation_name")),
-    ("world-ui", "World population, climate and markets", "reconstructed-state", True, "primary", True, "indexed", ()),
-    ("ai-fleet-diagnostics", "AI goals and unresolved causes", "reconstructed-state", True, "diagnostic", True, "indexed", ()),
-    ("raw", "Selected raw save fields", "observed-state", False, "advanced", False, "indexed", ()),
-    ("types", "Save state type counts", "observed-state", False, "advanced", False, "indexed", ()),
-    ("export", "Export calculated compact snapshot", "maintenance", True, "maintenance", False, "snapshot", ()),
-    ("cache", "Build or validate calculated snapshot cache", "maintenance", True, "maintenance", False, "indexed", ()),
-    ("catalog-verify", "Audit packaged catalogs against explicit game sources", "maintenance", False, "maintenance", False, "session", ()),
-    ("capabilities", "Machine-readable analysis inventory", "inventory", False, "inventory", False, "session", ()),
+    ("inspect-save", "Identify save, campaign and player without calculations", "observed-state", False, "bootstrap", True, "session", (), "safe"),
+    ("analyze", "Bounded LLM bootstrap context and next analysis routes", "bootstrap-context", False, "bootstrap", True, "session", (), "visibility-dependent"),
+    ("summary", "Compact campaign summary", "reconstructed-state", True, "primary", True, "snapshot", (), "visibility-dependent"),
+    ("faction", "Faction summary", "reconstructed-state", True, "primary", True, "snapshot", ("name",), "visibility-dependent"),
+    ("nation", "Nation summary", "reconstructed-state", True, "primary", True, "snapshot", ("name",), "visibility-dependent"),
+    ("councilor", "Councilor attributes and conditions", "reconstructed-state", True, "primary", True, "snapshot", ("name",), "visibility-dependent"),
+    ("topbar", "Resource income, MC and CP capacity; optional queue forecast", "reconstructed-state", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("research", "Research income breakdown", "reconstructed-state", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("research-ui", "Active research slots, progress and ETA", "reconstructed-state", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("research-plan", "Research candidates and goal-specific evidence", "planning-evidence", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("org-plan", "Organization acquisition and assignment evidence", "planning-evidence", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("hab-ui", "Habitat power, modules and support", "reconstructed-state", True, "primary", True, "indexed", ("hab_name",), "visibility-dependent"),
+    ("hab-slots", "Usable habitat slots", "reconstructed-state", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("hab-plan", "Habitat module candidates and expansion evidence", "planning-evidence", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("ship-plan", "Ship component choices and design simulations", "planning-evidence", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("project-analysis", "Project unlocks and resource tradeoffs", "planning-evidence", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("nation-ui", "Nation priorities and displayed metrics", "reconstructed-state", True, "primary", True, "indexed", ("nation_name",), "visibility-dependent"),
+    ("nation-claims", "Claims and reconstructed hostility", "reconstructed-state", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("nation-projection", "Audited conditional nation projection", "simulation", True, "primary", True, "indexed", ("nation_name", "days"), "visibility-dependent"),
+    ("advise", "Hypothetical councilor advice contribution", "simulation", True, "primary", True, "indexed", ("councilor_name", "nation_name"), "visibility-dependent"),
+    ("world-ui", "World population, climate and markets", "reconstructed-state", True, "primary", True, "indexed", (), "visibility-dependent"),
+    ("ai-fleet-diagnostics", "AI goals and unresolved causes", "reconstructed-state", True, "diagnostic", True, "indexed", (), "diagnostic"),
+    ("raw", "Selected raw save fields", "observed-state", False, "advanced", False, "indexed", (), "diagnostic"),
+    ("types", "Save state type counts", "observed-state", False, "advanced", False, "indexed", (), "diagnostic"),
+    ("export", "Export calculated compact snapshot", "maintenance", True, "maintenance", False, "snapshot", (), "diagnostic"),
+    ("cache", "Build or validate calculated snapshot cache", "maintenance", True, "maintenance", False, "indexed", (), "diagnostic"),
+    ("catalog-verify", "Audit packaged catalogs against explicit game sources", "maintenance", False, "maintenance", False, "session", (), "diagnostic"),
+    ("capabilities", "Machine-readable analysis inventory", "inventory", False, "inventory", False, "session", (), "safe"),
 )
 
 
 def _make_descriptor(row: tuple[Any, ...]) -> AnalysisDescriptor:
-    command, purpose, kind, requires_verified, routing_class, application_callable, input_kind, required_arguments = row
+    command, purpose, kind, requires_verified, routing_class, application_callable, input_kind, required_arguments, fair_play_classification = row
     return AnalysisDescriptor(
         command=command,
         purpose=purpose,
@@ -175,6 +184,7 @@ def _make_descriptor(row: tuple[Any, ...]) -> AnalysisDescriptor:
         application_callable=bool(application_callable),
         input_kind=input_kind,
         required_arguments=frozenset(required_arguments),
+        fair_play_classification=fair_play_classification,
     )
 
 
@@ -195,6 +205,10 @@ def _validate_registry() -> None:
     if len(commands) != len(set(commands)):
         raise RuntimeError("Analysis registry contains duplicate command IDs.")
     for descriptor in ANALYSES:
+        if descriptor.fair_play_classification not in {
+            "safe", "own-subject", "visibility-dependent", "diagnostic"
+        }:
+            raise RuntimeError(f"Invalid fair-play classification for {descriptor.command!r}.")
         if descriptor.routing_class in {"primary", "bootstrap", "diagnostic"} and not descriptor.application_callable:
             raise RuntimeError(f"Callable routing class is disabled for {descriptor.command!r}.")
         if descriptor.routing_class in {"advanced", "maintenance", "inventory"} and descriptor.application_callable:

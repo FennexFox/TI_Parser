@@ -106,6 +106,9 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
     extracted = tmp_path / "extracted"
     extract_verified(archive, extracted)
     assert (extracted / "tools" / "ti_parser_schema.py").is_file()
+    if _tracked_in_head("tools/ti_parser_fairplay.py"):
+        assert (extracted / "tools" / "ti_parser_fairplay.py").is_file()
+        assert not (extracted / "dev-docs").exists()
 
     save = tmp_path / "외부 세이브 경로" / "campaign copy.gz"
     _synthetic_save(save)
@@ -172,12 +175,38 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
     assert inspected["saveIdentity"] == deferred["saveIdentity"] == allowed["saveIdentity"]
     assert save.read_bytes() == original_save_bytes
 
+    if _tracked_in_head("tools/ti_parser_fairplay.py"):
+        async def exercise_fairplay():
+            from mcp import ClientSession, StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            from jsonschema import validate
+
+            params = StdioServerParameters(command=sys.executable, args=[
+                str(extracted / "tools" / "ti_parser_mcp.py"), "--profile", "fair-play",
+            ], cwd=str(tmp_path))
+            async with stdio_client(params) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    listed = await session.list_tools()
+                    by_name = {tool.name: tool for tool in listed.tools}
+                    assert set(by_name) == {"inspect-save", "capabilities"}
+                    result = await session.call_tool("inspect-save", {"save_path": str(save)})
+                    assert not result.is_error
+                    payload = _envelope(result)
+                    validate(payload, by_name["inspect-save"].output_schema)
+                    assert payload["saveIdentity"] == inspected["saveIdentity"]
+                    assert "modEvidence" not in payload["compatibility"]
+
+        asyncio.run(exercise_fairplay())
+        assert save.read_bytes() == original_save_bytes
+
 
 def test_missing_optional_dependency_is_stderr_only(tmp_path: Path) -> None:
     isolated_entrypoint = (
         "import runpy, sys; "
         "sys.path.insert(0, sys.argv[1]); "
-        "runpy.run_path(sys.argv[2], run_name='__main__')"
+        "entrypoint = sys.argv[2]; sys.argv = [entrypoint]; "
+        "runpy.run_path(entrypoint, run_name='__main__')"
     )
     process = subprocess.Popen(
         [
