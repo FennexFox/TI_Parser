@@ -93,3 +93,44 @@ verified tuples. Consent is narrow: package catalogs remain mandatory, and
 unsupported mechanics, unresolved required references, and missing blocking
 dependencies stay explicit. See [Commands](COMMANDS.md) for the CLI contract
 and [the beta data notice](BETA_DATA_NOTICE.md) for data boundaries.
+
+## Fair-play profile boundary
+
+The MCP adapter accepts `--profile default|fair-play`; omitting the option
+preserves the default route set. `run_profile(session, analysis, *,
+profile="default", **kwargs)` applies the same policy to session calls. In
+fair-play, only `inspect-save` is an analysis route. `capabilities` remains an
+inventory tool and lists only `inspect-save`; every other registry route is
+denied before its handler runs. `nation-projection` is globally blocked
+pending the authoritative visibility audit described in the
+[interoperability audit](../dev-docs/fairplay_interoperability.md).
+
+Fair-play keeps the envelope fields `schemaVersion`, `parserVersion`,
+`analysis`, `saveIdentity`, `compatibility`, and `status`. Its save identity
+allowlist contains the supported fingerprint, observed game date/scenario and
+version facts, campaign start, and resolved player faction identity; unresolved
+player identity is rejected. Compatibility contains only status, reason codes,
+and a valid catalog fingerprint, without observations, context, or mod
+internals. Errors are reduced to
+`schemaVersion`, `status`, and a generic error code/message, preventing
+profile-denied details from leaking through diagnostics. Compatibility checks
+remain in force; `allow_unverified` does not grant access to denied routes.
+
+The Python `compare_save_context(parser_identity, companion_identity,
+parser_nation_id, companion_nation_id, *, pinned,
+previous_parser_fingerprint=None)` helper compares save context; it is not an
+MCP tool. Exact matching requires schema version 1 on both identities, equal
+supported canonical-save SHA-256 fingerprints, and equal campaign start, game
+date, resolved player faction ID and template, and selected nation ID. A
+provisional match is allowed only when an exact fingerprint is unavailable,
+the save is pinned, and every context value is present and equal. A present
+supported algorithm with an invalid digest, a previous-fingerprint change, a
+mismatch, or a missing/changed context field rejects comparison; fingerprint
+mismatch never falls back to weak fields.
+`inspect-save` does not expose a selected nation ID, so an MCP-only workflow
+must leave that comparison unresolved unless the ID is provided by another
+authoritative approved source. See the [MCP runbook](MCP_SETUP.md#matching-the-pinned-save)
+for operator steps.
+
+Companion MCP/Codex tool routing and mechanics behavior still require external
+acceptance. Local profile support does not establish those results.
