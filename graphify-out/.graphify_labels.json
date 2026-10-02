@@ -202,5 +202,12 @@
   "200": "00 Master Plan Area 200",
   "201": "Requirements Dev Area",
   "202": "09 Metric Dependency Graph Area",
-  "203": "11 Validity And Verification Area"
+  "203": "11 Validity And Verification Area",
+  "204": "Optional local stdio MCP adapter",
+  "205": "test_input_schema.py",
+  "206": "ti_parser_catalogs.py",
+  "207": "Separate graph refresh preserves source commit provenance",
+  "208": "Parameter",
+  "209": "Evidence-backed planning views",
+  "210": "parametrize"
 }
