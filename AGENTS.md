@@ -10,8 +10,9 @@ mechanics from `.gz` saves while keeping normal runtime operation package-only.
 The parser favors auditable, evidence-backed calculations over convenient
 fallbacks.
 
-Start with `README.md` for command behavior and module ownership. Important
-implementation areas include:
+Start with `README.md` for orientation, `docs/COMMANDS.md` for command behavior,
+and `dev-docs/architecture.md` for module ownership. Important implementation
+areas include:
 
 - `tools/ti_parser_core.py`: save loading, indexing, and reference helpers.
 - `tools/ti_parser_snapshot.py`: compact snapshots and cache handling.
@@ -80,6 +81,46 @@ semantics, stochastic treatment, coverage, or provenance boundaries.
   explicitly concerns them.
 - The worktree may already contain user changes. Never revert, overwrite, stage,
   or clean unrelated changes. Scope inspection and edits to the task.
+
+## Documentation maintenance
+
+### Placement and ownership
+
+- Keep `README.md` limited to the project overview, quick start, essential
+  compatibility/data boundaries, and navigation. Put detailed guidance in the
+  appropriate reference and link to it.
+- Use `docs/` for user workflows and public CLI, Python API, and MCP contracts.
+  Use `dev-docs/` for architecture, mechanics audits, development references,
+  and active implementation plans. Generated reference tables belong in
+  `dev-docs/reference/`; their generators own their contents and output paths.
+- Maintain one authoritative document per subject. Update its existing section
+  instead of appending duplicate explanations or chronological work logs.
+  Other documents should link to it and include only context their readers need.
+- Update `docs/README.md` or `dev-docs/README.md` when adding, moving, or removing
+  a reference. Keep essential user instructions accessible in the runtime ZIP;
+  mark source-checkout-only developer references explicitly.
+
+### Plan lifecycle
+
+- Put new active plans in `dev-docs/plan/<topic>/`, never in `docs/`.
+- On completion, move enduring contracts, decisions, evidence, and limitations
+  into maintained references, then remove the completed phase plans/logs.
+  Preserve unresolved acceptance gates and follow-ups explicitly before removal;
+  implementation completion does not establish release acceptance.
+- Add a brief note to `dev-docs/development-notes.md` only when historical context
+  remains useful. Keep detailed chronology, old test counts, and execution logs
+  in Git history rather than duplicating them in maintained documentation.
+
+### Change checks
+
+- For document changes, check local links and run `git diff --check`.
+- For moves or renames, update repository references, generator output paths,
+  and distribution required/allowlisted paths as applicable. Verify new user
+  guides are included and developer documents remain excluded from the ZIP.
+- Run relevant generator/distribution tests when their paths or packaging change.
+  Prose-only edits need link and whitespace checks, not a new full test run.
+
+See [the developer documentation index](dev-docs/README.md) for current references.
 
 ## Testing and verification
 

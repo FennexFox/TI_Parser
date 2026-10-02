@@ -14,9 +14,6 @@ active work. It is excluded from the runtime ZIP.
 | [Module catalog](reference/module_catalog.md) | Generated hab-module table |
 | [Research catalog](reference/research_catalog.md) | Generated research dependency table |
 
-Keep one authoritative document per subject. Put user instructions in `docs/`,
-current engineering contracts here, and new active implementation plans in
-`dev-docs/plan/<topic>/`. On completion, remove phase logs after moving lasting
-decisions into the appropriate reference; add a short development note only when
-the historical context remains useful. Git preserves detailed work history.
-Generated tables are rebuilt by their generators, never edited by hand.
+The repository's [documentation maintenance rules](../AGENTS.md#documentation-maintenance)
+define placement, ownership, plan cleanup, and change checks. Use this index to
+find maintained references; Git preserves detailed work history.
