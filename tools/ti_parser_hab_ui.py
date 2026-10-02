@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ti_parser_errors import UserInputError
+
 import math
 from datetime import datetime
 from pathlib import Path
@@ -553,7 +555,7 @@ def calculate_hab_ui(
 ) -> dict[str, Any]:
     found = match_raw_state(indexed, "TIHabState", hab_name)
     if not found:
-        raise SystemExit(f"Hab not found: {hab_name}")
+        raise UserInputError(f"Hab not found: {hab_name}")
     hab_id, hab = found
     hab_module_templates = load_hab_module_catalog()
     location_catalog = load_location_catalog()

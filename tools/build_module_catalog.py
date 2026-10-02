@@ -26,7 +26,7 @@ from standalone_catalog_integrity import attach_payload_fingerprint
 
 SCHEMA_VERSION = 1
 DEFAULT_JSON_OUTPUT = Path("data/module_catalog.json")
-DEFAULT_MARKDOWN_OUTPUT = Path("docs/module_catalog.md")
+DEFAULT_MARKDOWN_OUTPUT = Path("dev-docs/reference/module_catalog.md")
 RESOURCES = (
     "Money",
     "Influence",

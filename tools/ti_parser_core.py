@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 import gzip
 import hashlib
 import json
@@ -10,6 +13,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
+from ti_parser_errors import UserInputError, EntityLookupError, SaveIntegrityError
 
 
 DEFAULT_CACHE_DIR = ".ti_cache"
@@ -93,7 +97,22 @@ def json_default(value: Any) -> Any:
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
+_RESULT_METADATA = ContextVar("ti_result_metadata", default=None)
+
+
+@contextmanager
+def result_metadata_scope(metadata):
+    token = _RESULT_METADATA.set(metadata)
+    try:
+        yield
+    finally:
+        _RESULT_METADATA.reset(token)
+
+
 def print_json(value: Any, *, compact: bool = False) -> None:
+    metadata = _RESULT_METADATA.get()
+    if metadata and isinstance(value, dict):
+        value = {**value, **metadata}
     if compact:
         print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=json_default))
     else:
@@ -200,10 +219,13 @@ def resolve_templates_dir(templates_arg: str | None) -> Path | None:
 
 
 def load_save(save_path: Path) -> dict[str, Any]:
-    with gzip.open(save_path, "rt", encoding="utf-8-sig") as handle:
-        data = json.load(handle)
+    try:
+        with gzip.open(save_path, "rt", encoding="utf-8-sig") as handle:
+            data = json.load(handle)
+    except (OSError, EOFError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SaveIntegrityError("Cannot decode save", code="save-decode-failed", context={"path": str(save_path)}) from exc
     if not isinstance(data, dict) or "gamestates" not in data:
-        raise ValueError(f"Not a recognized Terra Invicta save: {save_path}")
+        raise SaveIntegrityError("Not a recognized Terra Invicta save", code="save-structure-invalid")
     return data
 
 
@@ -730,20 +752,32 @@ def raw_name_values(state: dict[str, Any]) -> list[str]:
     return values
 
 
-def match_raw_state(indexed: IndexedState, wanted_type: str, name: str) -> tuple[int | None, dict[str, Any]] | None:
+def match_raw_state(indexed: IndexedState, wanted_type: str, name: str | int) -> tuple[int | None, dict[str, Any]] | None:
+    def candidate(sid, value, typ=wanted_type):
+        return {"id": sid, "name": value.get("displayName") or value.get("templateName"), "type": typ}
+    if type(name) is int:
+        found = indexed.id_index.get(name)
+        if found is None:
+            raise EntityLookupError("Entity ID not found", code="entity-not-found", context={"id": name})
+        if wanted_type not in found[:2]:
+            raise EntityLookupError("Entity ID has a different type", code="entity-type-mismatch", candidates=[candidate(name, found[2], found[1])])
+        return name, found[2]
+    if not isinstance(name, str) or not name.strip():
+        raise EntityLookupError("Entity name must not be empty")
     needle = name.casefold()
-    partial: list[tuple[int | None, dict[str, Any]]] = []
+    exact, partial = [], []
     for entry in type_entries(indexed, wanted_type):
-        state = entry.get("Value") or {}
-        if not isinstance(state, dict):
-            continue
-        names = raw_name_values(state)
-        state_id = raw_state_id(entry)
-        if any(value.casefold() == needle for value in names):
-            return state_id, state
-        if any(needle in value.casefold() for value in names):
-            partial.append((state_id, state))
-    return partial[0] if partial else None
+        value = entry.get("Value") or {}
+        names = raw_name_values(value)
+        row = (raw_state_id(entry), value)
+        if any(v.casefold() == needle for v in names):
+            exact.append(row)
+        elif any(needle in v.casefold() for v in names):
+            partial.append(row)
+    matches = exact or partial
+    if len(matches) > 1:
+        raise EntityLookupError("Entity selector is ambiguous", code="entity-ambiguous", candidates=[candidate(*row) for row in matches], context={"selector": name})
+    return matches[0] if matches else None
 
 
 def state_value_by_id(indexed: IndexedState, state_id: int | None) -> dict[str, Any] | None:
@@ -754,27 +788,11 @@ def state_value_by_id(indexed: IndexedState, state_id: int | None) -> dict[str, 
 
 
 def find_faction_state(indexed: IndexedState, name: str | None = None) -> tuple[int, dict[str, Any]]:
-    if name:
-        needle = name.casefold()
-        exact: list[tuple[int, dict[str, Any]]] = []
-        partial: list[tuple[int, dict[str, Any]]] = []
-        for entry in type_entries(indexed, "TIFactionState"):
-            faction = entry.get("Value") or {}
-            state_id = raw_state_id(entry)
-            if state_id is None or not isinstance(faction, dict):
-                continue
-            names = raw_name_values(faction)
-            if any(value.casefold() == needle for value in names):
-                exact.append((state_id, faction))
-            elif any(needle in value.casefold() for value in names):
-                partial.append((state_id, faction))
-        matches = exact or partial
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            labels = ", ".join(str(faction.get("templateName")) for _, faction in matches)
-            raise SystemExit(f"Faction override is ambiguous ({name}): {labels}")
-        raise SystemExit(f"Faction not found: {name}")
+    if name is not None:
+        found = match_raw_state(indexed, "TIFactionState", name)
+        if found is not None and found[0] is not None:
+            return found
+        raise EntityLookupError(f"Faction not found: {name}", code="entity-not-found")
 
     player_candidates: dict[int, dict[str, Any]] = {}
     for entry in type_entries(indexed, "TIPlayerState"):
@@ -782,9 +800,10 @@ def find_faction_state(indexed: IndexedState, name: str | None = None) -> tuple[
         if not isinstance(player, dict) or player.get("isAI") is not False:
             continue
         faction_id = ref_id(player.get("faction"))
-        faction = state_value_by_id(indexed, faction_id)
-        if faction_id is not None and isinstance(faction, dict):
-            player_candidates[faction_id] = faction
+        resolved = indexed.id_index.get(faction_id)
+        if resolved is None or resolved[1] != "TIFactionState":
+            raise EntityLookupError("Human player faction reference is unresolved or has the wrong type.", code="player-faction-unresolved")
+        player_candidates[faction_id] = resolved[2]
 
     metadata = first_value(indexed, "TIMetadataState") or {}
     player_faction_name = metadata.get("playerFactionName")
@@ -801,18 +820,18 @@ def find_faction_state(indexed: IndexedState, name: str | None = None) -> tuple[
 
     if len(player_candidates) > 1:
         labels = ", ".join(str(value.get("templateName")) for value in player_candidates.values())
-        raise SystemExit(f"Multiple human player factions found in TIPlayerState: {labels}")
+        raise EntityLookupError(f"Multiple human player factions found in TIPlayerState: {labels}")
     if len(metadata_candidates) > 1:
         labels = ", ".join(str(value.get("templateName")) for value in metadata_candidates.values())
-        raise SystemExit(f"Metadata playerFactionName is ambiguous: {labels}")
+        raise EntityLookupError(f"Metadata playerFactionName is ambiguous: {labels}")
     if player_candidates and metadata_candidates and player_candidates.keys() != metadata_candidates.keys():
-        raise SystemExit("Human player faction metadata conflicts with TIPlayerState.")
+        raise EntityLookupError("Human player faction metadata conflicts with TIPlayerState.")
+    if player_faction_name and not metadata_candidates:
+        raise EntityLookupError(f"Metadata player faction could not be resolved: {player_faction_name}")
     candidates = player_candidates or metadata_candidates
     if len(candidates) == 1:
         return next(iter(candidates.items()))
-    if player_faction_name and not metadata_candidates:
-        raise SystemExit(f"Metadata player faction could not be resolved: {player_faction_name}")
-    raise SystemExit("Human player faction could not be resolved from save metadata/player state.")
+    raise EntityLookupError("Human player faction could not be resolved from save metadata/player state.", code="player-faction-unresolved")
 
 
 def faction_is_human_player(indexed: IndexedState, faction: dict[str, Any]) -> bool:
@@ -954,24 +973,36 @@ def effect_modifier_delta(
 
 
 def build_index(data: dict[str, Any]) -> IndexedState:
-    gamestates = data.get("gamestates", {})
+    gamestates = data.get("gamestates")
     if not isinstance(gamestates, dict):
-        raise ValueError("Save gamestates field is not an object")
-
-    id_index: dict[int, tuple[str, str, dict[str, Any]]] = {}
+        raise SaveIntegrityError("Save gamestates field is not an object", code="save-structure-invalid")
+    id_index = {}
+    normalized = {}
     for full_type, entries in gamestates.items():
-        if not isinstance(entries, list):
-            continue
-        type_name = short_type(full_type)
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            value = entry.get("Value")
-            if not isinstance(value, dict):
-                continue
-            state_id = ref_id(entry.get("Key")) or ref_id(value.get("ID"))
-            if state_id is not None:
-                id_index[state_id] = (full_type, type_name, value)
+        # Actual game saves serialize empty collections as {} as well as [].
+        if entries == {}:
+            entries = []
+        if not isinstance(full_type, str) or not isinstance(entries, list):
+            raise SaveIntegrityError("Invalid state collection", code="save-collection-invalid", context={"type": str(full_type)})
+        normalized[full_type] = entries
+        for position, entry in enumerate(entries):
+            context = {"type": full_type, "row": position}
+            if not isinstance(entry, dict) or not isinstance(entry.get("Value"), dict):
+                raise SaveIntegrityError("Invalid state row", code="save-row-invalid", context=context)
+            value = entry["Value"]
+            key, own = ref_id(entry.get("Key")), ref_id(value.get("ID"))
+            for label, container, resolved in (("Key", entry, key), ("ID", value, own)):
+                if label in container and (resolved is None or type(resolved) is not int):
+                    raise SaveIntegrityError("Invalid state ID", code="save-row-invalid", context=context)
+            if key is not None and own is not None and key != own:
+                raise SaveIntegrityError("State Key and ID differ", code="save-row-id-mismatch", context=context)
+            sid = key if key is not None else own
+            if sid is not None:
+                if sid in id_index:
+                    prev = id_index[sid]
+                    candidates = [{"id":sid,"name":v.get("displayName") or v.get("templateName"),"type":t} for t,v in ((prev[0],prev[2]),(full_type,value))]
+                    raise SaveIntegrityError("Duplicate state ID", code="save-state-id-duplicate", candidates=candidates)
+                id_index[sid] = (full_type, short_type(full_type), value)
     return IndexedState(data=data, gamestates=gamestates, id_index=id_index)
 
 
@@ -1013,7 +1044,7 @@ def region_nation_summary(indexed: IndexedState, value: Any) -> dict[str, Any] |
 def type_entries(indexed: IndexedState, wanted_type: str) -> list[dict[str, Any]]:
     for full_type, entries in indexed.gamestates.items():
         if full_type == wanted_type or short_type(full_type) == wanted_type:
-            return entries
+            return entries if isinstance(entries, list) else []
     return []
 
 

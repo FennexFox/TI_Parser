@@ -10,8 +10,9 @@ mechanics from `.gz` saves while keeping normal runtime operation package-only.
 The parser favors auditable, evidence-backed calculations over convenient
 fallbacks.
 
-Start with `README.md` for command behavior and module ownership. Important
-implementation areas include:
+Start with `README.md` for orientation, `docs/COMMANDS.md` for command behavior,
+and `dev-docs/architecture.md` for module ownership. Important implementation
+areas include:
 
 - `tools/ti_parser_core.py`: save loading, indexing, and reference helpers.
 - `tools/ti_parser_snapshot.py`: compact snapshots and cache handling.
@@ -24,6 +25,10 @@ implementation areas include:
   transactions, and fail-closed simulation.
 - `tools/ti_parser_projection_coverage.py`: execution-derived metric coverage.
 - `tools/ti_parser_catalogs.py`: packaged runtime catalog validation.
+- `tools/ti_parser_registry.py`: analysis metadata and caller argument contracts.
+- `tools/ti_parser_application.py`: shared CLI and machine analysis handlers.
+- `tools/ti_parser_session.py`: reusable save/index/catalog lifetime and machine result envelopes.
+- `tools/ti_parser_mcp.py`: optional local stdio transport over the session API.
 - `tools/ti_parser_cli.py`: CLI parsing and dispatch.
 - `tools/ti_save_parser.py`: public entrypoint and compatibility wrappers.
 - `tests/`: behavioral, provenance, runtime-boundary, and regression coverage.
@@ -57,7 +62,7 @@ implementation areas include:
   changing code: save extraction, catalog/input resolution, parser mechanics,
   scenario assumptions, and the game's authoritative behavior.
 
-See `docs/nation_projection_mechanics_audit.md` when changing projection
+See `dev-docs/nation_projection_mechanics_audit.md` when changing projection
 semantics, stochastic treatment, coverage, or provenance boundaries.
 
 ## Change discipline
@@ -76,6 +81,46 @@ semantics, stochastic treatment, coverage, or provenance boundaries.
   explicitly concerns them.
 - The worktree may already contain user changes. Never revert, overwrite, stage,
   or clean unrelated changes. Scope inspection and edits to the task.
+
+## Documentation maintenance
+
+### Placement and ownership
+
+- Keep `README.md` limited to the project overview, quick start, essential
+  compatibility/data boundaries, and navigation. Put detailed guidance in the
+  appropriate reference and link to it.
+- Use `docs/` for user workflows and public CLI, Python API, and MCP contracts.
+  Use `dev-docs/` for architecture, mechanics audits, development references,
+  and active implementation plans. Generated reference tables belong in
+  `dev-docs/reference/`; their generators own their contents and output paths.
+- Maintain one authoritative document per subject. Update its existing section
+  instead of appending duplicate explanations or chronological work logs.
+  Other documents should link to it and include only context their readers need.
+- Update `docs/README.md` or `dev-docs/README.md` when adding, moving, or removing
+  a reference. Keep essential user instructions accessible in the runtime ZIP;
+  mark source-checkout-only developer references explicitly.
+
+### Plan lifecycle
+
+- Put new active plans in `dev-docs/plan/<topic>/`, never in `docs/`.
+- On completion, move enduring contracts, decisions, evidence, and limitations
+  into maintained references, then remove the completed phase plans/logs.
+  Preserve unresolved acceptance gates and follow-ups explicitly before removal;
+  implementation completion does not establish release acceptance.
+- Add a brief note to `dev-docs/development-notes.md` only when historical context
+  remains useful. Keep detailed chronology, old test counts, and execution logs
+  in Git history rather than duplicating them in maintained documentation.
+
+### Change checks
+
+- For document changes, check local links and run `git diff --check`.
+- For moves or renames, update repository references, generator output paths,
+  and distribution required/allowlisted paths as applicable. Verify new user
+  guides are included and developer documents remain excluded from the ZIP.
+- Run relevant generator/distribution tests when their paths or packaging change.
+  Prose-only edits need link and whitespace checks, not a new full test run.
+
+See [the developer documentation index](dev-docs/README.md) for current references.
 
 ## Testing and verification
 
@@ -105,43 +150,43 @@ collection, or materially improves quality.
 
 When the runtime supports explicit child model and reasoning-effort selection:
 
-- **GPT-6 Astra, low**: preferred root coordinator. Use for task decomposition,
+- **GPT-6.1 Sol, low**: preferred root coordinator. Use for task decomposition,
   deciding what evidence is needed, assigning workers, integrating worker
   results, and final checks. Keep the root focused on orchestration and global
   state rather than routine implementation.
-- **GPT-5.6 Luna, low**: repository search, symbol/usages lookup, extraction,
+- **GPT-6 Luna, low**: repository search, symbol/usages lookup, extraction,
   inventory work, repetitive read-heavy inspection, and simple log/test-output
   classification.
-- **GPT-5.6 Luna, medium**: bounded analysis that needs modest reasoning but has
+- **GPT-6 Luna, medium**: bounded analysis that needs modest reasoning but has
   a clear question and narrow evidence set. Also suitable for very small,
   mechanically specified code changes where implementation judgment is minimal.
-- **GPT-5.6 Luna, xhigh**: preferred default implementation worker. Use for
+- **GPT-6 Luna, xhigh**: preferred default implementation worker. Use for
   ordinary implementation, refactoring, test writing, and debugging when the
   task is reasonably well specified and the relevant code surface is bounded.
   Prefer this over Luna max for routine software-engineering work.
-- **GPT-5.6 Luna, max**: bounded reasoning escalation. Use when Luna xhigh has
+- **GPT-6 Luna, max**: bounded reasoning escalation. Use when Luna xhigh has
   produced an incomplete result, several plausible implementations or failure
   causes must be explored and checked, or a difficult but still well-scoped task
   benefits from deeper search, verification, and revision. Do not use max by
   default merely because a task involves coding.
-- **GPT-5.6 Sol, medium**: capability and context-integration escalation. Use
+- **GPT-6.1 Sol, medium**: capability and context-integration escalation. Use
   when the relevant scope is broad, several subsystems must be integrated,
   abstraction or API choices have significant downstream effects, or Luna
   repeatedly misses relevant context or produces structurally weak solutions.
   Prefer Sol over simply increasing Luna effort when the likely limitation is
   model capability or context breadth rather than insufficient deliberation.
-- **GPT-5.6 Sol, high**: difficult implementation and engineering escalation.
+- **GPT-6.1 Sol, high**: difficult implementation and engineering escalation.
   Use for stubborn cross-cutting debugging, complex refactors or migrations,
   subtle stateful/concurrent behavior, or other bounded technical work where Sol
   medium is insufficient. Keep final cross-source synthesis and repository-level
-  semantic decisions with the Astra coordinator.
-- **GPT-6 Astra, medium**: root-level escalation for conflicting worker
+  semantic decisions with the GPT-6.1 Sol coordinator.
+- **GPT-6.1 Sol, medium**: root-level escalation for conflicting worker
   evidence, invalidated plans, parser/game-semantics disagreements, repeated
   failures that suggest the problem framing itself may be wrong, or
   architecture/simulation-semantics decisions requiring stronger global
   reasoning.
-- **GPT-6 Astra, high**: exceptional root escalation only for unresolved,
-  high-impact, structurally difficult problems where Astra medium has not been
+- **GPT-6.1 Sol, high**: exceptional root escalation only for unresolved,
+  high-impact, structurally difficult problems where Sol medium has not been
   sufficient.
 
 Model names are routing preferences, not repository invariants. If a requested
@@ -163,7 +208,7 @@ kind of uncertainty or failure:
   coordinator.
 - If evidence conflicts, assumptions collapse, or the remaining question is
   fundamentally about mechanics, architecture, provenance, or simulation
-  semantics, escalate the Astra root rather than merely increasing worker
+  semantics, escalate the GPT-6.1 Sol root rather than merely increasing worker
   effort.
 - After the difficult decision is resolved, return routine implementation,
   search, and verification to the cheapest worker that can perform them
@@ -194,7 +239,7 @@ kind of uncertainty or failure:
 
 ### Coordinator escalation triggers
 
-Raise the root from Astra low to medium when one or more of these occurs:
+Raise the root from GPT-6.1 Sol low to medium when one or more of these occurs:
 
 1. Independent worker results materially conflict.
 2. A core assumption in the original plan is disproved during execution.

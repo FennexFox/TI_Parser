@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import ti_save_parser as ti
 import ti_parser_commands as commands
+import ti_parser_application as application
 import ti_parser_topbar as topbar
 from ti_parser_catalogs import RuntimeCatalogs
 from tests import test_package_only_runtime as fixtures
@@ -30,7 +31,7 @@ class ParserCliTests(unittest.TestCase):
     def run_cli(self, args):
         output, errors = io.StringIO(), io.StringIO()
         with redirect_stdout(output), redirect_stderr(errors):
-            code = ti.main(args)
+            code = ti.main(["--allow-unverified", *args])
         return code, output.getvalue(), errors.getvalue()
 
     def test_default_summary_matches_explicit_summary_and_honors_limit(self):
@@ -41,6 +42,7 @@ class ParserCliTests(unittest.TestCase):
         }
         with (
             patch.object(ti, "resolve_save_path", return_value=Path("fixture.gz")),
+            patch("ti_parser_cli.AnalysisSession", return_value=SimpleNamespace(indexed=None, require_calculation=lambda allow: {"status":"unverified", "unverifiedAllowed":allow})),
             patch.object(ti, "load_or_build_snapshot", return_value=(snapshot, Path("cache.json"), True)),
         ):
             default = self.run_cli([])
@@ -77,18 +79,19 @@ class ParserCliTests(unittest.TestCase):
             self.assertEqual(json.loads(output)["status"], "partial")
             self.assertIsNone(verify.call_args.kwargs["save_path"])
             verify.reset_mock()
-            code, _, errors = self.run_cli([
+            code, output, errors = self.run_cli([
                 "--save", "missing.gz", "--templates-dir", "templates",
                 "catalog-verify", "--scenario", "ModernScenario",
             ])
             self.assertEqual(code, 2)
-            self.assertIn("No saves", errors)
+            self.assertIn("No saves", json.loads(output)["error"]["message"])
             verify.assert_not_called()
 
     def test_missing_topbar_effect_is_structured_dependency(self):
         context = sorted(ti.TOPBAR_EFFECT_CONTEXTS)[0]
         with (
             patch.object(ti, "resolve_save_path", return_value=Path("fixture.gz")),
+            patch("ti_parser_cli.AnalysisSession", return_value=SimpleNamespace(indexed=None, require_calculation=lambda allow: {"status":"unverified", "unverifiedAllowed":allow})),
             patch.object(commands, "load_save", return_value={"gamestates": {}}),
             patch.object(topbar, "calculation_catalogs", return_value=SimpleNamespace(traits={}, effects={})),
             patch.object(topbar, "load_hab_module_catalog", return_value={}),
@@ -149,13 +152,13 @@ class ParserCliTests(unittest.TestCase):
                 with (
                     patch.object(commands, "load_save", return_value={}),
                     patch.object(commands, "build_index", return_value=indexed),
-                    patch.object(commands, "calculation_catalogs", return_value=SimpleNamespace(traits={}, effects={})),
-                    patch.object(commands, "find_faction_state", return_value=(1, {"templateName": "FactionOne"})),
-                    patch.object(commands, "faction_effect_contexts", return_value={}),
-                    patch.object(commands, "councilor_summary_maps", return_value=([summary], {10: summary})),
-                    patch.object(commands, "nation_research_contribution_month") as contribution,
+                    patch.object(application, "calculation_catalogs", return_value=SimpleNamespace(traits={}, effects={})),
+                    patch.object(application, "find_faction_state", return_value=(1, {"templateName": "FactionOne"})),
+                    patch.object(application, "faction_effect_contexts", return_value={}),
+                    patch.object(application, "councilor_summary_maps", return_value=([summary], {10: summary})),
+                    patch.object(application, "nation_research_contribution_month") as contribution,
                 ):
-                    with self.assertRaisesRegex(SystemExit, expected):
+                    with self.assertRaisesRegex(ValueError, expected):
                         commands.command_advise(Path("fixture.gz"), None, args)
                 contribution.assert_not_called()
 

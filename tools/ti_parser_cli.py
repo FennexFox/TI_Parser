@@ -8,7 +8,15 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from ti_parser_catalogs import runtime_catalog_scope
+from ti_parser_catalogs import runtime_catalog_scope, CatalogError
+from ti_parser_errors import UserInputError
+from ti_parser_nation_projection import ProjectionInputError
+from ti_parser_session import AnalysisSession
+from ti_parser_version import __version__
+from ti_parser_capabilities import capabilities, CALCULATION_COMMANDS
+from ti_parser_analysis import write_analysis
+from ti_parser_core import result_metadata_scope
+from ti_parser_core import ModuleCatalogError, LocationCatalogError, SolarPowerDataError
 
 
 RAW_COMMANDS = {
@@ -40,9 +48,27 @@ SNAPSHOT_COMMANDS = {
 }
 
 
+class InputParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise UserInputError(message, code="invalid-arguments")
+
+
+ENTITY_SELECTORS = {
+    "faction": "name", "nation": "name", "councilor": "name",
+    "org-plan": "faction", "research": "faction", "research-ui": "faction",
+    "research-plan": "faction", "topbar": "faction", "ship-plan": "faction",
+    "project-analysis": "faction", "ai-fleet-diagnostics": "faction",
+    "nation-ui": "name", "nation-projection": "name", "hab-ui": "name",
+    "hab-plan": "name", "nation-claims": "claimant", "advise": "councilor",
+}
+REQUIRED_SELECTORS = {"faction", "nation", "councilor", "nation-ui", "nation-projection", "hab-ui", "advise"}
+
+
 def build_parser(api: ModuleType) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Parse Terra Invicta saves into compact summaries.")
+    parser = InputParser(description="Parse Terra Invicta saves into compact summaries.")
+    parser.add_argument("--version", action="version", version=__version__)
     parser.set_defaults(top_nations=20)
+    parser.add_argument("--allow-unverified", action="store_true", help="Explicitly consent to calculations on this unverified save for this invocation.")
     parser.add_argument("--save", help="Path to a .gz Terra Invicta save. Defaults to newest local save.")
     parser.add_argument("--templates-dir", help="Path to TerraInvicta_Data\\StreamingAssets\\Templates.")
     parser.add_argument("--cache-dir", default=api.DEFAULT_CACHE_DIR, help="Directory for compact parser cache.")
@@ -50,6 +76,13 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     parser.add_argument("--compact", action="store_true", help="Print compact JSON.")
 
     subparsers = parser.add_subparsers(dest="command", required=False)
+    inventory = subparsers.add_parser("capabilities", help="List analysis capabilities without a save.")
+    inventory.add_argument("--compact", action="store_true", default=argparse.SUPPRESS)
+    analyze = subparsers.add_parser("analyze", help="Bounded LLM bootstrap context; query specialized commands as needed.")
+    analyze.add_argument("--output", help="Optional JSON report output, distinct from the save.")
+    analyze.add_argument("--compact", action="store_true", default=argparse.SUPPRESS)
+    inspection = subparsers.add_parser("inspect-save", help="Inspect saved facts and compatibility without calculations.")
+    inspection.add_argument("--compact", action="store_true", default=argparse.SUPPRESS)
 
     def add_compact_flag(subparser: argparse.ArgumentParser) -> None:
         subparser.add_argument("--compact", action="store_true", default=argparse.SUPPRESS, help="Print compact JSON.")
@@ -106,7 +139,7 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     )
     research_plan.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
     research_plan.add_argument("--top", type=int, default=8, help="Rows per objective signal view.")
-    research_plan.add_argument("--mode", choices=("all", "global", "project"), default="all")
+    research_plan.add_argument("--mode", choices=api.RESEARCH_PLAN_MODE_CHOICES, default="all")
     research_plan.add_argument("--all-candidates", action="store_true", help="Include full candidate lists, not just shortlists.")
     add_compact_flag(research_plan)
 
@@ -226,58 +259,94 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     cache.set_defaults(cache_command=True)
     add_compact_flag(cache)
 
+    for child in subparsers.choices.values():
+        child.add_argument("--allow-unverified", action="store_true", default=argparse.SUPPRESS)
+    for command, field in ENTITY_SELECTORS.items():
+        child = subparsers.choices[command]
+        child.add_argument("--entity-id", type=int, help="Select the primary entity by ID instead of name.")
+        for action in child._actions:
+            if action.dest == field and not action.option_strings:
+                action.nargs = "?"
     return parser
 
 
 def main(api: ModuleType, argv: list[str] | None = None) -> int:
-    with runtime_catalog_scope():
-        return _run_command(api, argv)
+    try:
+        with runtime_catalog_scope():
+            return _run_command(api, argv)
+    except UserInputError as exc:
+        api.print_json({"status": "error", "error": exc.to_dict()})
+        return 2
 
 
 def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
     parser = build_parser(api)
     args = parser.parse_args(argv)
     command = args.command or "summary"
+    field = ENTITY_SELECTORS.get(command)
+    if field:
+        selected = getattr(args, field)
+        if args.entity_id is not None:
+            if selected is not None:
+                parser.error("Use a name or --entity-id, not both")
+            setattr(args, field, args.entity_id)
+        elif command in REQUIRED_SELECTORS and selected is None:
+            parser.error("A name or --entity-id is required")
     if command == "nation-projection" and args.days <= 0:
         parser.error("nation-projection --days must be positive")
 
     try:
         if command == "catalog-verify":
+            if not (Path(__file__).parent / "build_runtime_catalogs.py").is_file():
+                raise UserInputError("catalog-verify requires the source checkout and generator tools; it is not included in the runtime ZIP.", code="source-checkout-required")
             if not args.templates_dir:
                 parser.error("catalog-verify requires --templates-dir")
             return api.command_catalog_verify(args)
         if args.templates_dir:
             parser.error("--templates-dir is verification-only; use it with catalog-verify")
+        if command == "capabilities":
+            api.print_json(capabilities(), compact=args.compact)
+            return 0
         save_path = api.resolve_save_path(args.save)
         if command == "raw":
             api.command_raw(save_path, args)
             return 0
-        templates_dir = None
-        if command in RAW_COMMANDS:
-            getattr(api, RAW_COMMANDS[command])(save_path, templates_dir, args)
+        session = AnalysisSession(save_path)
+        if command == "analyze":
+            report = session.analyze(allow_unverified=args.allow_unverified)
+            if args.output:
+                write_analysis(report, args.output, save_path)
+            api.print_json(report, compact=args.compact)
+            return 0 if report["status"] == "complete" else 2
+        if command == "inspect-save":
+            api.print_json(session.inspect(), compact=args.compact)
             return 0
-
-        snapshot, cache_path_value, cache_hit = api.load_or_build_snapshot(
-            save_path,
-            Path(args.cache_dir),
-            templates_dir,
-            refresh=args.refresh_cache,
-        )
-        if command in SNAPSHOT_COMMANDS:
-            getattr(api, SNAPSHOT_COMMANDS[command])(snapshot, args)
-        elif command == "cache":
-            api.print_json(
-                {
-                    "cache": str(cache_path_value),
-                    "cacheHit": cache_hit,
-                    "source": snapshot.get("source"),
-                    "templateSource": snapshot.get("templateSource"),
-                    "schemaVersion": snapshot.get("schemaVersion"),
-                },
-                compact=args.compact,
+        if command == "types":
+            counts = sorted(((api.short_type(k), len(v)) for k,v in session.indexed.gamestates.items()), key=lambda row:(-row[1],row[0]))
+            api.print_json([{"type":k,"count":v} for k,v in (counts[:args.limit] if args.limit else counts)], compact=args.compact)
+            return 0
+        if command not in CALCULATION_COMMANDS:
+            raise RuntimeError(f"Command has no compatibility policy: {command}")
+        compatibility = session.require_calculation(args.allow_unverified)
+        args._indexed = session.indexed
+        with result_metadata_scope({"compatibility": compatibility}):
+            templates_dir = None
+            if command in RAW_COMMANDS:
+                getattr(api, RAW_COMMANDS[command])(save_path, templates_dir, args)
+                return 0
+            snapshot, cache_path_value, cache_hit = api.load_or_build_snapshot(
+                save_path, Path(args.cache_dir), templates_dir, refresh=args.refresh_cache,
+                indexed=session.indexed,
             )
-        else:
-            parser.error(f"Unknown command: {command}")
+            snapshot = {**snapshot, "compatibility": compatibility}
+            if command in SNAPSHOT_COMMANDS:
+                getattr(api, SNAPSHOT_COMMANDS[command])(snapshot, args)
+            elif command == "cache":
+                api.print_json({"cache": str(cache_path_value), "cacheHit": cache_hit,
+                    "source": snapshot.get("source"), "templateSource": snapshot.get("templateSource"),
+                    "schemaVersion": snapshot.get("schemaVersion")}, compact=args.compact)
+            else:
+                parser.error(f"Unknown command: {command}")
     except BrokenPipeError:
         return 1
     except api.CalculationDependencyError as exc:
@@ -289,7 +358,12 @@ def _run_command(api: ModuleType, argv: list[str] | None = None) -> int:
             compact=getattr(args, "compact", False),
         )
         return 2
-    except Exception as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    except UserInputError:
+        raise
+    except (OSError, ProjectionInputError, CatalogError, ModuleCatalogError, LocationCatalogError, SolarPowerDataError) as exc:
+        api.print_json({"status": "error", "error": {"code": "invalid-input", "message": str(exc)}}, compact=args.compact)
         return 2
+    except Exception as exc:
+        api.print_json({"status": "error", "error": {"code": "internal-error", "message": str(exc)}}, compact=args.compact)
+        return 1
     return 0

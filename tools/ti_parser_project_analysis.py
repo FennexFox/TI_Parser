@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ti_parser_errors import UserInputError
+
 from pathlib import Path
 from typing import Any
 
@@ -841,11 +843,11 @@ def calculate_project_analysis(
     utility_module_templates = research_templates.utility_modules
     analysis_slot = slot if slot is not None else default_project_analysis_slot(faction)
     if analysis_slot is None:
-        raise SystemExit("Faction has no unlocked project research slot.")
+        raise UserInputError("Faction has no unlocked project research slot.")
     if analysis_slot not in faction_project_slots(faction):
-        raise SystemExit(f"Project slot {analysis_slot} is not currently unlocked for this faction.")
+        raise UserInputError(f"Project slot {analysis_slot} is not currently unlocked for this faction.")
     if sort_axis not in PROJECT_ANALYSIS_SORT_CHOICES:
-        raise SystemExit(f"Unknown project-analysis sort axis: {sort_axis}")
+        raise UserInputError(f"Unknown project-analysis sort axis: {sort_axis}")
 
     topbar = calculate_topbar(
         indexed,

@@ -325,7 +325,7 @@ class PackageOnlyRuntimeTests(unittest.TestCase):
     def _run(self, save: Path, arguments: list[str]) -> dict:
         output = StringIO()
         with redirect_stdout(output):
-            code = ti.main(["--save", str(save), *arguments, "--compact"])
+            code = ti.main(["--allow-unverified", "--save", str(save), *arguments, "--compact"])
         self.assertEqual(code, 0, output.getvalue())
         result = json.loads(output.getvalue())
         self.assertNotEqual(result.get("status"), "incomplete", output.getvalue())
@@ -342,7 +342,7 @@ class PackageOnlyRuntimeTests(unittest.TestCase):
                 ):
                     output = StringIO()
                     with redirect_stdout(output):
-                        code = ti.main(arguments)
+                        code = ti.main(["--allow-unverified", *arguments])
                     self.assertEqual(code, 0, output.getvalue())
                     self.assertNotEqual(json.loads(output.getvalue()).get("status"), "incomplete")
 
@@ -419,7 +419,7 @@ class PackageOnlyRuntimeTests(unittest.TestCase):
             save = self._save(Path(tmp), "UnsupportedScenario")
             output = StringIO()
             with redirect_stdout(output):
-                code = ti.main(["--save", str(save), "topbar", "ResistCouncil", "--compact"])
+                code = ti.main(["--allow-unverified", "--save", str(save), "topbar", "ResistCouncil", "--compact"])
             result = json.loads(output.getvalue())
             self.assertEqual(code, 2)
             self.assertEqual(result["status"], "incomplete")

@@ -9,6 +9,8 @@ or references under ``unknown``.
 
 from __future__ import annotations
 
+from ti_parser_errors import UserInputError
+
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable
@@ -564,26 +566,28 @@ def calculate_ai_fleet_diagnostics(
     """
     if stale_days is not None:
         if isinstance(stale_days, bool):
-            raise ValueError("stale_days must be a non-negative number")
+            raise UserInputError("stale_days must be a non-negative number")
         try:
             stale_days = float(stale_days)
         except (TypeError, ValueError) as exc:
-            raise ValueError("stale_days must be a non-negative number") from exc
+            raise UserInputError("stale_days must be a non-negative number") from exc
         if stale_days < 0:
-            raise ValueError("stale_days must be a non-negative number")
+            raise UserInputError("stale_days must be a non-negative number")
 
     time_state = first_value(indexed, "TITimeState") or {}
     raw_current = time_state.get("currentDateTime")
     current = _ti_datetime(raw_current)
     stats = _ResolutionStats()
     candidates: list[tuple[int, dict[str, Any], dict[str, Any] | None, bool]] = []
+    from ti_parser_core import match_raw_state
+    selected = match_raw_state(indexed, "TIFactionState", faction_name) if faction_name is not None else None
     named_matches = 0
     for entry in type_entries(indexed, "TIFactionState"):
         faction = entry.get("Value") if isinstance(entry.get("Value"), dict) else {}
         faction_id = _entry_id(entry)
         if faction_id is None:
             continue
-        if faction_name is not None and not _faction_matches(faction, faction_name):
+        if faction_name is not None and (selected is None or faction_id != selected[0]):
             continue
         if faction_name is not None:
             named_matches += 1
@@ -592,9 +596,9 @@ def calculate_ai_fleet_diagnostics(
             candidates.append((faction_id, faction, player, is_ai))
 
     if faction_name is not None and named_matches == 0:
-        raise ValueError(f"Faction not found: {faction_name}")
+        raise UserInputError(f"Faction not found: {faction_name}")
     if faction_name is not None and not candidates:
-        raise ValueError(f"Faction is not AI: {faction_name}")
+        raise UserInputError(f"Faction is not AI: {faction_name}")
 
     factions = [
         _faction_diagnostic(indexed, faction_id, faction, player, is_ai, current, stale_days, stats)

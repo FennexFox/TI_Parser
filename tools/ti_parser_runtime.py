@@ -214,8 +214,10 @@ def load_or_build_snapshot(
     cache_dir: Path,
     templates_dir: Path | None,
     refresh: bool = False,
+    *,
+    indexed: IndexedState | None = None,
 ) -> tuple[dict[str, Any], Path, bool]:
-    return snapshot_layer.load_or_build_snapshot(save_path, cache_dir, templates_dir, SNAPSHOT_CONFIG, refresh=refresh)
+    return snapshot_layer.load_or_build_snapshot(save_path, cache_dir, templates_dir, SNAPSHOT_CONFIG, refresh=refresh, indexed=indexed)
 
 
 match_named = org_layer.match_named

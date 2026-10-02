@@ -124,20 +124,17 @@ def councilor_attribute_breakdown(
     return snapshot_layer.councilor_attribute_breakdown(indexed, councilor, trait_templates, ORG_SNAPSHOT_CONFIG)
 
 
-def match_named(items: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
-    needle = name.casefold()
-    exact_fields = ("template", "code", "display")
-    for item in items:
-        for field in exact_fields:
-            value = item.get(field)
-            if isinstance(value, str) and value.casefold() == needle:
-                return item
-    for item in items:
-        for field in exact_fields:
-            value = item.get(field)
-            if isinstance(value, str) and needle in value.casefold():
-                return item
-    return None
+def match_named(items: list[dict[str, Any]], name: str | int) -> dict[str, Any] | None:
+    from ti_parser_errors import EntityLookupError
+    if type(name) is int:
+        matches = [item for item in items if item.get("id") == name]
+    else:
+        needle = name.casefold()
+        exact = [item for item in items if any(isinstance(item.get(k),str) and item[k].casefold()==needle for k in ("template","code","display"))]
+        matches = exact or [item for item in items if any(isinstance(item.get(k),str) and needle in item[k].casefold() for k in ("template","code","display"))]
+    if len(matches)>1:
+        raise EntityLookupError("Entity selector is ambiguous", code="entity-ambiguous", candidates=[{"id":i.get("id"),"name":i.get("display") or i.get("template")} for i in matches])
+    return matches[0] if matches else None
 
 
 def parse_bool(value: Any) -> bool | None:

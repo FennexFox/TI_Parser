@@ -234,7 +234,7 @@ class ParserReliabilityTests(unittest.TestCase):
         add_state(gamestates, "TIPlayerState", 20, {"isAI": True, "faction": ref(10)})
         indexed = ti.build_index({"gamestates": gamestates})
 
-        with self.assertRaisesRegex(SystemExit, "Human player faction could not be resolved"):
+        with self.assertRaisesRegex(ValueError, "Human player faction could not be resolved"):
             ti.faction_is_active_human(indexed, faction)
 
     def test_unresolved_player_faction_fails_closed(self):
@@ -248,7 +248,7 @@ class ParserReliabilityTests(unittest.TestCase):
                 }
             }
         )
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(ValueError):
             ti.find_faction_state(indexed)
 
     def test_packaged_catalog_supplies_operations_center_and_missing_catalog_fails(self):

@@ -33,7 +33,7 @@ SCHEMA_VERSION = 2
 GENERATOR_NAME = "build_research_catalog"
 GENERATOR_VERSION = "2"
 DEFAULT_JSON_OUTPUT = Path("data/research_catalog.json")
-DEFAULT_MARKDOWN_OUTPUT = Path("docs/research_catalog.md")
+DEFAULT_MARKDOWN_OUTPUT = Path("dev-docs/reference/research_catalog.md")
 RESEARCH_TEMPLATE_FILES = {
     "tech": "TITechTemplate.json",
     "project": "TIProjectTemplate.json",

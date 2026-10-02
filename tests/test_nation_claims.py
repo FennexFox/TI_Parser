@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import ti_parser_claims as claims
 import ti_parser_core as core
 import ti_parser_commands as commands
+import ti_parser_application as application
 import ti_save_parser as ti
 
 
@@ -203,7 +204,7 @@ class NationClaimsTests(unittest.TestCase):
         with (
             patch.object(commands, "load_save", return_value={}),
             patch.object(commands, "build_index", return_value=self._build_indexed()),
-            patch.object(commands, "calculation_catalogs", return_value=RuntimeCatalogs()),
+            patch.object(application, "calculation_catalogs", return_value=RuntimeCatalogs()),
             redirect_stdout(output),
         ):
             ti.command_nation_claims(Path("synthetic.gz"), None, args)
