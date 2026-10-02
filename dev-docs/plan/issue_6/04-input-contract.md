@@ -20,8 +20,8 @@ List tools through the SDK client and inspect projection, planning and forecast 
 ## Rollback risks
 Revert registry and adapter changes together; retain original runtime semantics and bootstrap routes.
 ## Progress
-Implementation started.
+Implementation and targeted validation complete.
 ## Decision log
 Use existing choice constants; JSON Schema describes canonical public inputs without replacing domain validation/normalization.
 ## Outcomes / Retrospective
-Pending validation.
+SDK-free input/application verification: 44 passed. SDK client smoke: 22 exposed tools; research mode enum is all/global/project; save-free inventory contains the 21 analysis routes. Existing handler type support (including Literal, tuples, Mapping and Path) moved into the canonical registry translator. Special projection-root validation is shared with the adapter to preserve pre-session errors.

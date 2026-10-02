@@ -10,11 +10,20 @@ from __future__ import annotations
 
 import inspect
 import types
+from collections import abc as collections_abc
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Union, get_args, get_origin, get_type_hints
+from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin, get_type_hints
 
+from ti_parser_config import (
+    HAB_MONTHLY_RESOURCES,
+    HAB_PLAN_FOCUS_CHOICES,
+    ORG_PLAN_FOCUS_CHOICES,
+    PROJECT_ANALYSIS_SORT_CHOICES,
+    RESEARCH_PLAN_MODE_CHOICES,
+    SHIP_PLAN_ROLE_CHOICES,
+)
 from ti_parser_errors import UserInputError
 
 
@@ -22,6 +31,15 @@ _NO_DEFAULT = object()
 _BOOTSTRAP_IDS = frozenset({"inspect-save", "analyze"})
 _RUNTIME_OVERRIDE_NAMES = frozenset({"research_templates", "base_daily_cache"})
 _ALWAYS_PRIVATE_NAMES = frozenset({"templates_dir", "templates", "runtime_catalogs", "claim_catalog"})
+_ARGUMENT_CHOICES: Mapping[tuple[str, str], tuple[Any, ...]] = MappingProxyType({
+    ("org-plan", "focus"): ORG_PLAN_FOCUS_CHOICES,
+    ("hab-plan", "focus"): HAB_PLAN_FOCUS_CHOICES,
+    ("ship-plan", "role"): SHIP_PLAN_ROLE_CHOICES,
+    ("project-analysis", "sort_axis"): PROJECT_ANALYSIS_SORT_CHOICES,
+    ("project-analysis", "slot"): (3, 4, 5),
+    ("research-plan", "mode"): RESEARCH_PLAN_MODE_CHOICES,
+    ("topbar", "forecast_resource"): HAB_MONTHLY_RESOURCES,
+})
 
 
 @dataclass(frozen=True)
@@ -88,7 +106,11 @@ class AnalysisDescriptor:
 
         if self.command in _BOOTSTRAP_IDS or not self.application_callable:
             return ()
-        return _signature_arguments(self.handler, required_arguments=self.required_arguments)
+        return _signature_arguments(
+            self.handler,
+            required_arguments=self.required_arguments,
+            analysis_id=self.command,
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -226,6 +248,7 @@ def _signature_arguments(
     handler: Callable[..., Any],
     *,
     required_arguments: frozenset[str] = frozenset(),
+    analysis_id: str | None = None,
 ) -> tuple[ArgumentDescriptor, ...]:
     signature, hints = _signature_parameters(handler)
     arguments: list[ArgumentDescriptor] = []
@@ -242,7 +265,11 @@ def _signature_arguments(
                 kind=parameter.kind.name.lower().replace("_", "-"),
                 annotation=_annotation_text(annotation),
                 default=_NO_DEFAULT if parameter.default is inspect.Parameter.empty else parameter.default,
-                choices=_literal_choices(annotation),
+                choices=(
+                    _ARGUMENT_CHOICES.get((analysis_id, parameter.name))
+                    if analysis_id is not None and (analysis_id, parameter.name) in _ARGUMENT_CHOICES
+                    else _literal_choices(annotation)
+                ),
             )
         )
     return tuple(arguments)
@@ -258,6 +285,140 @@ def get_analysis(analysis: str) -> AnalysisDescriptor:
             context={"analysis": analysis},
         )
     return ANALYSIS_REGISTRY[analysis]
+
+
+def _schema_for_annotation(annotation: Any) -> dict[str, Any]:
+    """Translate the supported public handler annotations to JSON Schema."""
+
+    if annotation is inspect.Parameter.empty:
+        return {}
+    if annotation in (Any, object):
+        return {}
+    if annotation is type(None):
+        return {"type": "null"}
+
+    origin = get_origin(annotation)
+    if origin is Literal:
+        values = list(get_args(annotation))
+        schema: dict[str, Any] = {"enum": [_json_value(value) for value in values]}
+        value_types = {_schema_for_annotation(type(value)).get("type") for value in values}
+        if len(value_types) == 1:
+            schema["type"] = value_types.pop()
+        return schema
+    if origin in (types.UnionType, Union):
+        return {"anyOf": [_schema_for_annotation(item) for item in get_args(annotation)]}
+    if origin in (list, set, frozenset):
+        item_types = get_args(annotation)
+        item_type = item_types[0] if item_types and item_types[0] is not Ellipsis else Any
+        return {"type": "array", "items": _schema_for_annotation(item_type)}
+    if origin is tuple:
+        item_types = get_args(annotation)
+        if len(item_types) == 2 and item_types[1] is Ellipsis:
+            return {"type": "array", "items": _schema_for_annotation(item_types[0])}
+        if item_types:
+            return {
+                "type": "array",
+                "prefixItems": [_schema_for_annotation(item_type) for item_type in item_types],
+                "items": False,
+                "minItems": len(item_types),
+                "maxItems": len(item_types),
+            }
+        return {"type": "array", "items": {}}
+    if origin in (dict, Mapping, collections_abc.Mapping):
+        value_type = get_args(annotation)[1] if len(get_args(annotation)) > 1 else Any
+        return {"type": "object", "additionalProperties": _schema_for_annotation(value_type)}
+    if annotation is Path:
+        return {"type": "string"}
+    if annotation is bool:
+        return {"type": "boolean"}
+    if annotation is int:
+        return {"type": "integer"}
+    if annotation is float:
+        return {"type": "number"}
+    if annotation is str:
+        return {"type": "string"}
+    raise TypeError(f"Unsupported application argument annotation for JSON Schema: {annotation!r}")
+
+
+def _schema_with_choices(schema: dict[str, Any], choices: tuple[Any, ...] | None) -> dict[str, Any]:
+    if choices is None:
+        return schema
+    if "anyOf" in schema:
+        for branch in schema["anyOf"]:
+            if branch.get("type") != "null" and "enum" not in branch:
+                branch["enum"] = [_json_value(value) for value in choices]
+    elif "enum" not in schema:
+        schema["enum"] = [_json_value(value) for value in choices]
+    return schema
+
+
+def get_input_schema(analysis: str) -> dict[str, Any]:
+    """Return a fresh JSON Schema object for one callable analysis contract.
+
+    The registry derives argument presence and types from the application
+    handler signatures, then adds declared selector choices owned here. The
+    returned nested objects are newly allocated so callers may extend them.
+    """
+
+    descriptor = get_analysis(analysis)
+    if not descriptor.application_callable:
+        raise UserInputError(
+            f"Analysis is not callable through the application API: {descriptor.command}",
+            code="unsupported-analysis",
+            context={"analysis": descriptor.command, "routingClass": descriptor.routing_class},
+        )
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    if descriptor.command not in _BOOTSTRAP_IDS:
+        handler = descriptor.handler
+        signature, hints = _signature_parameters(handler)
+        for argument in descriptor.arguments:
+            parameter = signature.parameters[argument.name]
+            annotation = hints.get(argument.name, parameter.annotation)
+            if descriptor.command == "nation-projection" and argument.name == "plan_payload":
+                schema = {"anyOf": [{"type": "object"}, {"type": "null"}]}
+            else:
+                schema = _schema_for_annotation(annotation)
+            schema = _schema_with_choices(schema, argument.choices)
+            if argument.default is not _NO_DEFAULT:
+                schema["default"] = _json_value(argument.default)
+            properties[argument.name] = schema
+            if argument.required:
+                required.append(argument.name)
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def validate_argument_shape(entry: AnalysisDescriptor | str, name: str, value: Any) -> None:
+    """Validate a caller value whose application annotation is too broad.
+
+    JSON plan documents are objects or null. Keeping this narrow check in the
+    registry lets transports reject malformed documents before opening a save
+    session while the application API enforces the same contract.
+    """
+
+    descriptor = get_analysis(entry) if isinstance(entry, str) else entry
+    if (
+        isinstance(descriptor, AnalysisDescriptor)
+        and descriptor.command == "nation-projection"
+        and name == "plan_payload"
+        and value is not None
+        and not isinstance(value, dict)
+    ):
+        raise UserInputError(
+            "Argument 'plan_payload' must be an object or null.",
+            code="invalid-arguments",
+            context={
+                "analysis": descriptor.command,
+                "argument": name,
+                "expected": "object or null",
+                "received": type(value).__name__,
+            },
+        )
 
 
 def _json_value(value: Any) -> Any:
@@ -398,6 +559,7 @@ def validate_arguments(
     for name, value in bound.arguments.items():
         parameter = signature.parameters[name]
         annotation = hints.get(name, parameter.annotation)
+        validate_argument_shape(descriptor, name, value)
         if name in descriptor.required_arguments and value is None:
             raise UserInputError(
                 f"Argument {name!r} is required for {descriptor.command!r}.",
@@ -422,5 +584,6 @@ def validate_arguments(
 
 __all__ = [
     "ANALYSES", "ANALYSIS_REGISTRY", "CALLABLE_ANALYSIS_IDS", "PRIMARY_ANALYSIS_IDS",
-    "AnalysisDescriptor", "ArgumentDescriptor", "get_analysis", "validate_arguments",
+    "AnalysisDescriptor", "ArgumentDescriptor", "get_analysis", "get_input_schema",
+    "validate_argument_shape", "validate_arguments",
 ]

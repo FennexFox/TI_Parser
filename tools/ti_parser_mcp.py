@@ -9,18 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import inspect
 import json
 import sys
-import types as _types
 from collections import OrderedDict
-from collections.abc import Mapping as ABCMapping
 from pathlib import Path
-from typing import Any, Mapping, Union, get_args, get_origin, get_type_hints
+from typing import Any, Mapping
 
 from ti_parser_capabilities import capabilities as application_capabilities
 from ti_parser_errors import UserInputError
-from ti_parser_registry import ANALYSES, get_analysis
+from ti_parser_registry import ANALYSES, get_analysis, get_input_schema, validate_argument_shape
 from ti_parser_session import AnalysisSession
 from ti_parser_version import __version__
 
@@ -33,89 +30,15 @@ class MissingSDKError(RuntimeError):
     """Raised when the optional MCP dependency is not installed."""
 
 
-def _json_schema(annotation: Any) -> dict[str, Any]:
-    """Translate a resolved Python annotation into a conservative JSON schema."""
-
-    if annotation is inspect.Parameter.empty or annotation in (Any, object):
-        return {}
-    if annotation is type(None):
-        return {"type": "null"}
-
-    origin = get_origin(annotation)
-    args = get_args(annotation)
-    if origin in (Union, _types.UnionType):
-        return {"anyOf": [_json_schema(item) for item in args]}
-    if origin is not None and str(origin).endswith("Literal"):
-        return {"enum": list(args)}
-    if origin in (list, set, frozenset):
-        return {"type": "array", "items": _json_schema(args[0]) if args else {}}
-    if origin is tuple:
-        if len(args) == 2 and args[1] is Ellipsis:
-            return {"type": "array", "items": _json_schema(args[0])}
-        schema: dict[str, Any] = {"type": "array"}
-        if args:
-            schema["prefixItems"] = [_json_schema(item) for item in args]
-            schema["minItems"] = len(args)
-            schema["maxItems"] = len(args)
-        return schema
-    if origin in (dict, ABCMapping):
-        return {"type": "object"}
-
-    if annotation is bool:
-        return {"type": "boolean"}
-    if annotation is int:
-        return {"type": "integer"}
-    if annotation is float:
-        return {"type": "number"}
-    if annotation is str:
-        return {"type": "string"}
-    if annotation is Path:
-        return {"type": "string"}
-    return {}
-
-
-def _public_parameters(entry: Any) -> tuple[tuple[inspect.Parameter, Any], ...]:
-    """Return handler parameters with private application plumbing removed."""
-
-    if entry.routing_class == "bootstrap" or not entry.application_callable:
-        return ()
-    handler = entry.handler
-    if handler is None:
-        return ()
-    parameters = list(inspect.signature(handler).parameters.values())
-    if parameters:
-        parameters = parameters[1:]  # indexed save or compact snapshot
-    public_names = {argument.name for argument in entry.arguments}
-    parameters = [parameter for parameter in parameters if parameter.name in public_names]
-    try:
-        hints = get_type_hints(handler)
-    except (NameError, TypeError, ValueError):
-        hints = {}
-    return tuple((parameter, hints.get(parameter.name, parameter.annotation)) for parameter in parameters)
-
-
 def _tool_schema(entry: Any) -> dict[str, Any]:
-    properties: dict[str, Any] = {"save_path": {"type": "string"}}
-    required = ["save_path"]
-    for parameter, annotation in _public_parameters(entry):
-        schema = _json_schema(annotation)
-        if parameter.name == "plan_payload":
-            # This handler intentionally accepts Any; the MCP transport keeps
-            # its public contract to JSON object-or-null.
-            schema = {"anyOf": [{"type": "object"}, {"type": "null"}]}
-        if parameter.default is not inspect.Parameter.empty:
-            schema["default"] = parameter.default
-        properties[parameter.name] = schema
-        if parameter.name in entry.required_arguments or parameter.default is inspect.Parameter.empty:
-            required.append(parameter.name)
+    """Add transport fields to the registry-owned public analysis contract."""
+
+    schema = get_input_schema(entry.command)
+    schema["properties"]["save_path"] = {"type": "string"}
+    schema["required"] = ["save_path", *schema.get("required", [])]
     if entry.allows_explicit_unverified_consent:
-        properties["allow_unverified"] = {"type": "boolean", "default": False}
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": False,
-    }
+        schema["properties"]["allow_unverified"] = {"type": "boolean", "default": False}
+    return schema
 
 
 def _capability_schema() -> dict[str, Any]:
@@ -339,16 +262,13 @@ def create_server() -> Any:
                 _error_payload("invalid-arguments", f"allow_unverified is not supported for {name}"),
                 is_error=True,
             )
-        if name == "nation-projection" and "plan_payload" in arguments:
-            plan_payload = arguments["plan_payload"]
-            if plan_payload is not None and not isinstance(plan_payload, dict):
+        if "plan_payload" in arguments:
+            try:
+                validate_argument_shape(name, "plan_payload", arguments["plan_payload"])
+            except UserInputError as exc:
                 return _result(
                     mcp_types,
-                    _error_payload(
-                        "invalid-arguments",
-                        "plan_payload must be a JSON object or null",
-                        context={"analysis": name, "argument": "plan_payload"},
-                    ),
+                    _error_payload(exc.code, exc.message, context=exc.context),
                     is_error=True,
                 )
         payload = await cache.run(

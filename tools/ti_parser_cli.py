@@ -139,7 +139,7 @@ def build_parser(api: ModuleType) -> argparse.ArgumentParser:
     )
     research_plan.add_argument("faction", nargs="?", help="Faction template/display/code. Defaults to the player faction.")
     research_plan.add_argument("--top", type=int, default=8, help="Rows per objective signal view.")
-    research_plan.add_argument("--mode", choices=("all", "global", "project"), default="all")
+    research_plan.add_argument("--mode", choices=api.RESEARCH_PLAN_MODE_CHOICES, default="all")
     research_plan.add_argument("--all-candidates", action="store_true", help="Include full candidate lists, not just shortlists.")
     add_compact_flag(research_plan)
 
