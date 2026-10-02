@@ -33,6 +33,7 @@ import ti_parser_nation_projection as projection
 import ti_parser_runtime as runtime_layer
 import ti_parser_topbar as topbar_layer
 import ti_save_parser as parser
+from projection_audit_dependencies import reconcile, source_inventory
 from ti_parser_catalogs import RuntimeCatalogs, canonical_json_bytes, file_sha256, runtime_catalog_scope
 
 
@@ -112,6 +113,8 @@ class ReadTracker:
         self.mutations = 0
         self.safe_keys = _source_string_constants() | STATIC_CATALOG_KEYS
         self.call_counts: Counter[tuple[str, str]] = Counter()
+        self.read_consumers: dict[tuple[str, str, str, str], set[str]] = {}
+        self.read_call_paths: dict[tuple[str, str, str, str], set[tuple[str, ...]]] = {}
 
     def safe_path(self, path: str) -> str:
         return path or "$"
@@ -130,7 +133,23 @@ class ReadTracker:
 
     def record(self, path: str, operation: str, container: str) -> None:
         category = "catalog" if path.startswith("$.catalogs") else "save"
-        self.events[(self.safe_path(path), self.stage_name, operation, f"{category}-{container}")] += 1
+        event_key = (self.safe_path(path), self.stage_name, operation, f"{category}-{container}")
+        self.events[event_key] += 1
+        consumers = self.read_consumers.setdefault(event_key, set())
+        frame = sys._getframe(1)
+        call_path = []
+        # Retain the helper and caller chain: required-field helpers receive keys
+        # as parameters, while the literal source evidence lives at the caller.
+        for _ in range(12):
+            if frame is None:
+                break
+            module = str(frame.f_globals.get("__name__", ""))
+            if module.startswith("ti_parser_"):
+                consumer = f"{module}.{frame.f_code.co_name}"
+                consumers.add(consumer)
+                call_path.append(consumer)
+            frame = frame.f_back
+        self.read_call_paths.setdefault(event_key, set()).add(tuple(call_path))
 
     def escape(self, path: str, operation: str, container: str) -> None:
         self.escape_events[(self.safe_path(path), operation, container)] += 1
@@ -153,6 +172,8 @@ class ReadTracker:
                 "container": container,
                 "count": count,
                 "classification": "unresolved",
+                "consumers": sorted(self.read_consumers.get((path, stage, operation, container), set())),
+                "callPathsNearestConsumerFirst": [list(chain) for chain in sorted(self.read_call_paths.get((path, stage, operation, container), set()))],
             }
             for (path, stage, operation, container), count in sorted(self.events.items())
         ]
@@ -479,6 +500,8 @@ def _state_identity(data: dict[str, Any], nation_name: str | None, faction_name:
     fully_owned = all(core.ref_id(point.get("faction")) == player_id for point in points)
     if not fully_owned:
         raise AuditInputError("Every selected nation control point must be owned by the resolved player faction")
+    if len(positions) != 6:
+        raise AuditInputError("The bounded projection audit requires exactly six control points")
     return str(nation_name), faction_name, sorted(positions), fully_owned
 
 
@@ -585,20 +608,107 @@ def _static_checklist(tracker: ReadTracker) -> dict[str, Any]:
                 "callCount": tracker.call_counts[(module, function)],
             }
         )
+    inventory = source_inventory(TOOLS, tracker.call_counts)
+    reconciliation = reconcile(inventory, tracker.report()["reads"])
     unresolved_mappings = [
         {"sourcePattern": source, "destinationCategory": destination, "status": "unresolved"}
         for source, destination in STATIC_MAPPING_CHECKLIST
     ]
+    for row in unresolved_mappings:
+        matching = [dependency for dependency in inventory["dependencies"]
+                    if dependency["mappingStatus"] == "mapped" and dependency["sourceKey"] in row["sourcePattern"]]
+        if matching:
+            row.update(status="mapped", sourceEvidence=[dependency["sourceLocation"] for dependency in matching],
+                       destinationRoles=sorted({dependency["destinationRole"] for dependency in matching}),
+                       visibilityCategory="unresolved")
     missing_calls = sum(not row["observed"] for row in call_rows)
-    unresolved_escapes = sum(row["count"] for row in tracker.escape_events.values())
-    complete = missing_calls == 0 and not unresolved_mappings and unresolved_escapes == 0
+    unresolved_escapes = sum(tracker.escape_events.values())
+    complete = (missing_calls == 0 and all(row["status"] == "mapped" for row in unresolved_mappings)
+                and unresolved_escapes == 0 and reconciliation["complete"]
+                and not inventory["normalizationBoundaries"])
     return {
         "requiredRuntimeCheckpoints": call_rows,
         "normalizationMappings": unresolved_mappings,
+        "sourceDerivedDependencies": inventory,
+        "dynamicStaticReconciliation": reconciliation,
         "unresolvedPlainContainerEscapes": unresolved_escapes,
         "complete": complete,
         "status": "complete" if complete else "incomplete",
         "reason": "Plain derived containers require source-to-output mapping before a complete read trace can be claimed.",
+    }
+
+
+def _policy_status(
+    *, structural_complete: bool, assembly_status: str,
+    provided_hash: str | None, packaged_hash: str | None,
+    evidence: dict[str, Any] | None = None,
+    required_dependency_ids: tuple[str, ...] = (), scope_fingerprint: str | None = None,
+) -> dict[str, Any]:
+    """Fail closed even when every structural gate passes.
+
+    This is a decision function, not an authority-evidence generator. Accepted
+    evidence must explicitly cover source authority, build applicability, and
+    every dependency's permitted visibility. Hash equality alone proves none
+    of those properties. Live audit runs currently supply no accepted evidence.
+    """
+    evidence = evidence if isinstance(evidence, dict) else {}
+    source = evidence.get("sourceAuthority")
+    applicability = evidence.get("buildApplicability")
+    visibility = evidence.get("visibility")
+    source = source if isinstance(source, dict) else {}
+    applicability = applicability if isinstance(applicability, dict) else {}
+    visibility = visibility if isinstance(visibility, dict) else {}
+    valid_hash = lambda value: isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
+    valid_references = lambda value: isinstance(value, list) and bool(value) and all(isinstance(item, str) and bool(item.strip()) for item in value)
+    source_accepted = (source.get("status") == "accepted"
+                       and isinstance(source.get("authorityKind"), str)
+                       and source.get("authorityKind") in {"game-dll", "game-source"}
+                       and valid_hash(source.get("sha256"))
+                       and source.get("sha256") == provided_hash
+                       and valid_references(source.get("evidenceReferences")))
+    build_accepted = (applicability.get("status") == "accepted"
+                      and applicability.get("providedSha256") == provided_hash
+                      and applicability.get("packagedSha256") == packaged_hash
+                      and valid_references(applicability.get("evidenceReferences")))
+    dependencies = visibility.get("dependencies")
+    dependency_ids = [row.get("dependencyId") for row in dependencies if isinstance(row, dict)] if isinstance(dependencies, list) else []
+    required_ids_valid = (isinstance(required_dependency_ids, tuple) and bool(required_dependency_ids)
+                          and all(isinstance(value, str) and bool(value.strip()) for value in required_dependency_ids)
+                          and len(set(required_dependency_ids)) == len(required_dependency_ids))
+    inventory_bound = (required_ids_valid and valid_hash(scope_fingerprint)
+                       and visibility.get("scopeFingerprint") == scope_fingerprint
+                       and len(dependency_ids) == len(required_dependency_ids)
+                       and all(isinstance(value, str) for value in dependency_ids)
+                       and set(dependency_ids) == set(required_dependency_ids))
+    allowed_categories = {"player-visible", "player-owned", "globally-public", "intel-gated"}
+    visibility_accepted = (visibility.get("status") == "accepted"
+                           and visibility.get("allDependenciesClassified") is True
+                           and visibility.get("dynamicStaticReconciled") is True
+                           and isinstance(dependencies, list) and bool(dependencies)
+                           and inventory_bound
+                           and all(isinstance(row, dict) and row.get("status") == "accepted"
+                                   and isinstance(row.get("category"), str)
+                                   and row.get("category") in allowed_categories
+                                   and row.get("providedSha256") == provided_hash
+                                   and row.get("packagedSha256") == packaged_hash
+                                   and valid_references(row.get("evidenceReferences"))
+                                   and (row.get("category") != "intel-gated" or row.get("intelGateSatisfied") is True)
+                                   for row in dependencies))
+    gates = {
+        "structuralComplete": structural_complete is True,
+        "assemblyProvided": valid_hash(provided_hash),
+        "packagedSourceHashPresent": valid_hash(packaged_hash),
+        "assemblyHashMatches": assembly_status == "match" and provided_hash == packaged_hash,
+        "sourceAuthorityAccepted": source_accepted,
+        "buildApplicabilityAccepted": build_accepted,
+        "visibilityAccepted": visibility_accepted,
+    }
+    accepted = all(gates.values())
+    return {
+        "buildSourceAuthorityStatus": {"status": "accepted" if all(gates[key] for key in ("assemblyProvided", "packagedSourceHashPresent", "assemblyHashMatches", "sourceAuthorityAccepted", "buildApplicabilityAccepted")) else "unresolved", "gates": {key: value for key, value in gates.items() if key not in {"structuralComplete", "visibilityAccepted"}}},
+        "visibilityStatus": {"status": "accepted" if visibility_accepted else "unresolved", "classificationDefault": "unresolved"},
+        "policyEligibility": {"status": "accepted" if accepted else "not_approved", "eligible": accepted, "gates": gates},
+        "exitCode": 0 if accepted else 2,
     }
 
 
@@ -680,6 +790,11 @@ def audit_projection_reads(
         "staticCallChecklistComplete": static["complete"],
     }
     structural_status = "complete" if all(gates.values()) else "incomplete"
+    policy = _policy_status(structural_complete=structural_status == "complete",
+                            assembly_status=assembly_status, provided_hash=supplied_assembly,
+                            packaged_hash=expected_assembly,
+                            required_dependency_ids=tuple(sorted({row["dependencyId"] for row in static["sourceDerivedDependencies"]["dependencies"]})),
+                            scope_fingerprint=_canonical_hash(static["sourceDerivedDependencies"]))
     report = {
         "schemaVersion": 1,
         "tool": "audit_projection_reads",
@@ -696,6 +811,7 @@ def audit_projection_reads(
             "days": DAYS,
             "checkpoints": CHECKPOINTS,
             "everyControlPoint": True,
+            "segmentCount": 1,
             "advisorCount": 0,
             "details": False,
             "diagnostics": False,
@@ -738,8 +854,11 @@ def audit_projection_reads(
             "visibilityClassification": "unresolved",
             "packageBuildIdentityMatches": assembly_status == "match",
         },
+        "buildSourceAuthorityStatus": policy["buildSourceAuthorityStatus"],
+        "visibilityStatus": policy["visibilityStatus"],
+        "policyEligibility": policy["policyEligibility"],
     }
-    exit_code = 0 if structural_status == "complete" and assembly_status != "mismatch" else 2
+    exit_code = policy["exitCode"]
     return report, exit_code
 
 
@@ -777,7 +896,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        print(json.dumps({"report": str(output_path), "structuralStatus": report["structuralStatus"]["status"], "authorityStatus": report["authorityStatus"]["assemblyHashComparison"], "readPathCount": len(report["dynamicReads"]["reads"])}, ensure_ascii=False))
+        print(json.dumps({"report": str(output_path), "structuralStatus": report["structuralStatus"]["status"],
+                          "assemblyHashComparison": report["authorityStatus"]["assemblyHashComparison"],
+                          "authorityStatus": report["authorityStatus"]["status"],
+                          "buildSourceAuthorityStatus": report["buildSourceAuthorityStatus"]["status"],
+                          "visibilityStatus": report["visibilityStatus"]["status"],
+                          "policyEligibility": report["policyEligibility"]["status"],
+                          "readPathCount": len(report["dynamicReads"]["reads"])}, ensure_ascii=False))
         return exit_code
     except Exception as exc:
         print(f"projection read audit failed: {type(exc).__name__}", file=sys.stderr)
