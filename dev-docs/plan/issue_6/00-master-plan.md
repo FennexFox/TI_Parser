@@ -57,3 +57,14 @@ The following records describe the original delivery. Issue #6 now additionally 
 - Beta archive verification passed using `-I -S`, outside the checkout, with game-input/network guards.
 - Unrelated external AGENTS.md changes were preserved and not staged.
 - No push, host configuration change, or external publication was performed.
+
+## Schema Completion Verification
+
+- Canonical input contracts and shared choice metadata: `a3b346d`.
+- Application-owned output schemas, real/fake protocol envelope checks and ZIP stdio tests: `39bf4c9`.
+- Required schema-module packaging and current setup documentation: `6107c32`.
+- SDK-free checkout and committed fresh export: 444 passed, 16 skipped, 75 subtests passed each; separate package-only/raw-loader checks: 6 passed.
+- SDK-enabled MCP tests: 17 passed; all exposed tools declare matching input/output contracts, and tool errors are explicitly schema-validated.
+- Standalone ZIP build/verification from `6107c32` passed with 61 packaged files and stdlib-only isolation.
+- The pre-existing ordinary Windows CI pytest failure remains separate; no new workflow results are claimed for these unpushed commits.
+- Schema completion phases 4–6 are complete; the generated repository graph is refreshed after the source verification record.

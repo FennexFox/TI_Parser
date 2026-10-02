@@ -23,8 +23,8 @@ Real extracted-ZIP stdio client; missing-SDK stderr-only startup; graph query fo
 ## Rollback risks
 Archive requirements must track schema helper availability; regenerated graph must match committed sources.
 ## Progress
-Phases 4 and 5 complete. SDK-free checkout: 444 passed, 16 skipped, 75 subtests passed. SDK-enabled adapter and extracted-ZIP stdio: 17 passed. Distribution membership/tamper checks: 14 passed. Committing archive requirements and docs before the clean committed-export acceptance gate.
+Phases 4 and 5 complete. SDK-free checkout and committed fresh-export suites: 444 passed, 16 skipped, 75 subtests passed each. SDK-enabled adapter and extracted-ZIP stdio: 17 passed. Distribution membership/tamper checks: 14 passed. Standalone beta ZIP build and verification passed from 6107c32.
 ## Decision log
 No push or external publication. Existing ordinary Windows matrix failures predate MCP; investigate only new regressions in this change. The latest pre-change CI run at 2091cc3 had all eight MCP jobs and all four Linux validation jobs green, while the four ordinary Windows pytest jobs failed. Local Python 3.14.3 checkout tests pass without MCP installed; this does not establish the cause of the separate CI failure.
 ## Outcomes / Retrospective
-Canonical input/output contracts and SDK protocol checks are green. Clean committed-export and standalone archive acceptance remain to be recorded after the packaging commit; graph refresh follows the final source records.
+Canonical input/output contracts and SDK protocol checks are green. Fresh-export package-only/raw-loader guard suite passed (6 tests), and all six supported scenarios loaded the packaged catalogs. Archive verification passed under stdlib-only -I -S isolation, outside the checkout with network/game-input guards. Graph refresh follows these final source records; its generated output is committed separately so the graph can stamp the source commit without a circular identity.
