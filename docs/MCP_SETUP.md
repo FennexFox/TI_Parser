@@ -39,7 +39,10 @@ The adapter exposes one MCP tool for each `inspect-save`, `analyze`, and
 `primary` analysis route in the application registry, plus `capabilities`.
 `capabilities` takes no arguments and does not open a save. Each analysis tool
 requires `save_path` (a non-empty path string); its other argument names and
-defaults follow the registered application handler. Unknown extra properties
+defaults follow the canonical input schema provided by
+`ti_parser_registry.get_input_schema()`. This contract includes constrained
+planning choices, nullable selectors and typed arrays; the adapter adds only
+`save_path` and eligible consent. Unknown extra properties
 are rejected. Routes that support explicit unverified-compatibility consent
 also expose `allow_unverified`, defaulting to `false`. `nation-projection`
 accepts `plan_payload` as a JSON object or `null`, and `checkpoints` as an
@@ -53,7 +56,11 @@ fields as `AnalysisSession.run()`. Status is `complete`, `deferred`,
 execution evidence and authoritative prefix. Errors before a session can be
 created (for example, an unreadable save path) return a structured schema-1
 error payload and cannot contain save identity or compatibility evidence. The
-MCP result includes the payload as structured content and JSON text. Input or
+MCP tools declare `outputSchema` from the application-owned
+`ti_parser_schema` helpers. Analysis tools describe the existing session
+envelope and the smaller pre-session error shape; `capabilities` has its own
+inventory schema. Domain `result` payloads and their evidence remain unchanged.
+The MCP result includes the payload as structured content and equivalent JSON text. Input or
 save failures marked `error` are MCP tool errors; `deferred` and `incomplete`
 are returned as analysis outcomes. Protocol messages use stdout, diagnostic
 messages use stderr, and save contents are treated only as data.

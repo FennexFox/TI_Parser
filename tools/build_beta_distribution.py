@@ -34,6 +34,7 @@ REQUIRED_PATHS = frozenset(
         "docs/MCP_SETUP.md",
         "requirements-mcp.txt",
         "tools/ti_parser_mcp.py",
+        "tools/ti_parser_schema.py",
         "tools/ti_save_parser.py",
         "tools/ti_parser_version.py",
         "tools/standalone_catalog_integrity.py",

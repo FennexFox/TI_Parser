@@ -32,12 +32,14 @@ def test_rejects_unsafe_archive_paths(tmp_path, name):
         extract_verified(target, tmp_path / 'extract')
 
 
-@pytest.mark.parametrize('mutation', ['extra', 'missing'])
+@pytest.mark.parametrize('mutation', ['extra', 'missing', 'missing-schema'])
 def test_rejects_self_consistent_wrong_distribution_membership(tmp_path, mutation):
     files = {name: b'{}' for name in REQUIRED_PATHS | {f'data/{name}' for name in RUNTIME_DATA}}
     files['data/catalog_manifest.json'] = b'{"catalogs": {}}'
     if mutation == 'extra':
         files['private-save.gz'] = b'private'
+    elif mutation == 'missing-schema':
+        del files['tools/ti_parser_schema.py']
     else:
         del files['data/module_catalog.json']
     manifest = {'files': {name: {'sha256': hashlib.sha256(data).hexdigest()} for name, data in files.items()}}

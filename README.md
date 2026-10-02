@@ -55,6 +55,10 @@ the indexed save for existing domain `calculate_*` functions while sharing a
 validated catalog lifetime. Sessions are single-threaded and represent one
 immutable save/runtime snapshot; create another after either input changes.
 
+`ti_parser_registry.get_input_schema()` returns the canonical public argument
+schema for each callable analysis. MCP consumes that schema and declares the
+existing machine envelopes using the SDK-independent `ti_parser_schema` module.
+
 ```python
 from pathlib import Path
 from ti_parser_session import AnalysisSession
@@ -130,6 +134,7 @@ Implementation layout (current ownership):
 - `tools/ti_parser_registry.py` owns stable machine-facing analysis metadata and argument contracts; `tools/ti_parser_application.py` maps analysis IDs to executable handlers; `tools/ti_parser_session.py` provides the reusable one-save API and versioned `run()` boundary.
 - `tools/ti_parser_analysis.py` builds the bounded LLM bootstrap report, and `tools/ti_parser_capabilities.py` publishes the registry inventory.
 - `tools/ti_parser_mcp.py` is the optional stdio MCP adapter. Its SDK dependency is isolated in `requirements-mcp.txt`; the normal CLI and Python API do not import it.
+- `tools/ti_parser_schema.py` describes application machine envelopes and save-free capabilities without importing the MCP SDK.
 - `tools/build_beta_distribution.py` builds the runtime ZIP; `tools/verify_beta_distribution.py` validates it.
 
 The runtime ZIP includes the CLI, Python API, MCP adapter source, and MCP requirements file. The MCP SDK itself is optional and installed separately only in an environment that launches the adapter. Normal CLI and Python API use remain package-only and do not require it. Raw game templates and `Assembly-CSharp.dll` remain generation, audit, or `catalog-verify` inputs rather than normal runtime dependencies.

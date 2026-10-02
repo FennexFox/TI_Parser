@@ -70,6 +70,7 @@ class BetaDistributionTests(unittest.TestCase):
         self._write("docs/MCP_SETUP.md", "# MCP setup\n")
         self._write("requirements-mcp.txt", "mcp==2.2.0\n")
         self._write("tools/ti_parser_mcp.py", "print('mcp entrypoint')\n")
+        self._write("tools/ti_parser_schema.py", "# machine output schemas\n")
         self._write("tools/ti_save_parser.py", "print('entrypoint')\n")
         self._write("tools/ti_parser_core.py", "VALUE = 'first'\n")
         self._write("tools/ti_parser_version.py", "__version__ = '0.1.0b1'\n")
