@@ -55,8 +55,9 @@ also provides `result`; expected failures provide `missingDependencies` or
 
 An incomplete projection keeps its authoritative completed prefix, scope status,
 and diagnostics. Expected errors are returned in the envelope, while unexpected
-programming exceptions propagate. `run()` requires `allow_unverified` to be a
-real boolean. Compatibility opt-in does not suppress missing dependencies or
+programming exceptions propagate. Every session method that accepts calculation
+consent requires `allow_unverified` to be a real boolean. Compatibility opt-in
+does not suppress missing dependencies or
 catalog errors. The CLI keeps its own output shapes and exit codes.
 
 ## Save identity

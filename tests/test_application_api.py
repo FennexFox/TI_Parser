@@ -606,3 +606,25 @@ def test_summary_resolves_player_metadata_through_campaign_code(tmp_path):
     assert envelope["saveIdentity"]["playerFaction"]["status"] == "resolved"
     assert envelope["status"] == "complete"
     assert envelope["result"]["faction"]["template"] == "2030_Resistance"
+
+
+@pytest.mark.parametrize(
+    ("entrypoint", "consent"),
+    [("calculate", "false"), ("calculation_scope", "false"), ("analyze", None)],
+)
+def test_direct_session_calculation_rejects_non_boolean_consent(tmp_path, entrypoint, consent):
+    from ti_parser_errors import UserInputError
+
+    session = session_layer.AnalysisSession(_save(tmp_path))
+    with patch.object(application, "calculate_topbar") as calculate:
+        with pytest.raises(UserInputError) as error:
+            if entrypoint == "calculate":
+                session.calculate("topbar", allow_unverified=consent)
+            elif entrypoint == "analyze":
+                session.analyze(allow_unverified=consent)
+            else:
+                with session.calculation_scope(allow_unverified=consent):
+                    pytest.fail("invalid consent must not enter calculation scope")
+
+    assert error.value.code == "invalid-arguments"
+    calculate.assert_not_called()

@@ -34,7 +34,9 @@ class AnalysisSession:
         return result
 
     def require_calculation(self, allow_unverified=False):
-        result = {**self.compatibility, "unverifiedAllowed": bool(allow_unverified)}
+        if type(allow_unverified) is not bool:
+            raise UserInputError("allow_unverified must be a boolean", code="invalid-arguments")
+        result = {**self.compatibility, "unverifiedAllowed": allow_unverified}
         if result["status"] != "verified" and not allow_unverified:
             raise UserInputError("Calculation requires verified compatibility or explicit --allow-unverified consent.", code="unverified-compatibility", context={"compatibility": result})
         return result
@@ -103,6 +105,8 @@ class AnalysisSession:
         return envelope
 
     def analyze(self, *, allow_unverified=False):
+        if type(allow_unverified) is not bool:
+            raise UserInputError("allow_unverified must be a boolean", code="invalid-arguments")
         from ti_parser_analysis import bootstrap_context
         return bootstrap_context(self, allow_unverified=allow_unverified)
 
