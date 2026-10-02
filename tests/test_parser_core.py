@@ -75,7 +75,11 @@ class ParserCoreTests(unittest.TestCase):
             sources = core.scenario_template_sources(indexed, base_dir)
             templates = core.load_named_templates(sources, "TITechTemplate.json")
 
-        self.assertEqual(sources, (base_dir, scenario_2003))
+            # Windows temporary paths may use an 8.3 alias for the same directory.
+            self.assertEqual(
+                tuple(path.resolve() for path in sources),
+                (base_dir.resolve(), scenario_2003.resolve()),
+            )
         self.assertEqual(templates["MissionToSpace"]["researchCost"], 1000)
         self.assertIn("MillenniumOnly", templates)
         self.assertNotIn("PostApocOnly", templates)
@@ -96,7 +100,11 @@ class ParserCoreTests(unittest.TestCase):
 
             sources = core.scenario_template_sources(indexed, base_dir)
 
-        self.assertEqual(sources, (base_dir, future_dir))
+            # Resolve while the temporary directories still exist.
+            self.assertEqual(
+                tuple(path.resolve() for path in sources),
+                (base_dir.resolve(), future_dir.resolve()),
+            )
 
     def test_save_parser_reexports_core_api(self):
         self.assertIs(ti.IndexedState, core.IndexedState)
