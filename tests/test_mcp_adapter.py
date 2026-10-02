@@ -543,6 +543,12 @@ def test_real_application_validation_keeps_save_context(tmp_path, monkeypatch):
         "topbar",
         {"save_path": str(save), "allow_unverified": "yes"},
     )
+    invalid_research_mode = anyio.run(
+        _call,
+        server,
+        "research-plan",
+        {"save_path": str(save), "mode": "unsupported-mode"},
+    )
     assert invalid_argument.is_error is True
     assert invalid_argument.structured_content["error"]["code"] == "invalid-arguments"
     assert "saveIdentity" in invalid_argument.structured_content
@@ -551,6 +557,11 @@ def test_real_application_validation_keeps_save_context(tmp_path, monkeypatch):
     assert invalid_consent.structured_content["error"]["code"] == "invalid-arguments"
     assert "saveIdentity" in invalid_consent.structured_content
     _validate_result(invalid_consent, tool_schemas["topbar"])
+    assert invalid_research_mode.is_error is True
+    assert invalid_research_mode.structured_content["error"]["code"] == "invalid-arguments"
+    assert "saveIdentity" in invalid_research_mode.structured_content
+    assert "result" not in invalid_research_mode.structured_content
+    _validate_result(invalid_research_mode, tool_schemas["research-plan"])
 
 
 def test_real_unresolved_player_and_compatibility_failure_match_output_schema(tmp_path, monkeypatch):

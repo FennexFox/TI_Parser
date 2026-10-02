@@ -566,8 +566,10 @@ def validate_arguments(
                 code="invalid-arguments",
                 context={"analysis": descriptor.command, "argument": name, "expected": _annotation_text(annotation)},
             )
-        choices = _literal_choices(annotation)
-        if choices is not None and value not in choices:
+        choices = _ARGUMENT_CHOICES.get((descriptor.command, name))
+        if choices is None:
+            choices = _literal_choices(annotation)
+        if choices is not None and value is not None and value not in choices:
             raise UserInputError(
                 f"Invalid choice for argument {name!r} of {descriptor.command!r}.",
                 code="invalid-arguments",

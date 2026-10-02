@@ -461,6 +461,20 @@ def test_all_faction_arguments_accept_integer_ids_at_application_boundary():
         registry.validate_arguments(entry, kwargs)
 
 
+def test_application_run_rejects_invalid_research_plan_mode_before_calculation(tmp_path, monkeypatch):
+    session = session_layer.AnalysisSession(_save(tmp_path, research=True))
+
+    def forbid_calculation(*_args, **_kwargs):
+        raise AssertionError("invalid analysis arguments must be rejected before calculation")
+
+    monkeypatch.setattr(session, "calculate", forbid_calculation)
+    envelope = session.run("research-plan", allow_unverified=True, mode="unsupported-mode")
+
+    assert envelope["status"] == "error"
+    assert envelope["error"]["code"] == "invalid-arguments"
+    assert "result" not in envelope
+
+
 def test_ship_plan_design_api_matches_cli_and_keeps_only_selected_design(tmp_path):
     save = fixtures.PackageOnlyRuntimeTests()._ship_save(tmp_path)
     session = session_layer.AnalysisSession(save)
@@ -557,3 +571,38 @@ def test_councilor_context_selection_does_not_mutate_cached_snapshot(tmp_path):
     assert second_call[2] is snapshot["councilors"][0]["locationNation"]
     assert second_call[3] == "currentLocation"
     assert snapshot == before
+
+
+def test_summary_rejects_unresolved_player_metadata_despite_human_player_candidate(tmp_path):
+    factory = fixtures.PackageOnlyRuntimeTests()
+    gamestates = factory._base_gamestates()
+    gamestates["TIMetadataState"] = [
+        fixtures.state(7, {"playerFactionName": "Missing Faction"})
+    ]
+    save = factory._write_save(tmp_path, "unresolved-player-metadata", gamestates)
+    session = session_layer.AnalysisSession(save)
+
+    envelope = session.run("summary", allow_unverified=True)
+
+    assert envelope["saveIdentity"]["playerFaction"]["status"] == "unresolved"
+    assert envelope["status"] == "error"
+    assert envelope["error"]["code"] == "player-faction-unresolved"
+
+
+def test_summary_resolves_player_metadata_through_campaign_code(tmp_path):
+    factory = fixtures.PackageOnlyRuntimeTests()
+    gamestates = factory._base_gamestates()
+    faction = factory._value(gamestates, "TIFactionState", 2)
+    faction["templateName"] = "2030_Resistance"
+    faction["displayName"] = None
+    gamestates["TIMetadataState"] = [
+        fixtures.state(7, {"playerFactionName": "Resistance"})
+    ]
+    save = factory._write_save(tmp_path, "campaign-code-player-metadata", gamestates)
+    session = session_layer.AnalysisSession(save)
+
+    envelope = session.run("summary", allow_unverified=True)
+
+    assert envelope["saveIdentity"]["playerFaction"]["status"] == "resolved"
+    assert envelope["status"] == "complete"
+    assert envelope["result"]["faction"]["template"] == "2030_Resistance"

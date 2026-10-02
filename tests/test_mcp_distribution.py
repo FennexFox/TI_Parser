@@ -30,6 +30,7 @@ def _tracked_in_head(path: str) -> bool:
         capture_output=True,
         text=True,
         encoding="utf-8",
+        stdin=subprocess.DEVNULL,
     )
     return result.returncode == 0 and path in result.stdout.splitlines()
 

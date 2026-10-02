@@ -85,6 +85,38 @@ def test_analysis_choice_metadata_and_schema_share_config_constants():
     ]
 
 
+@pytest.mark.parametrize(
+    ("analysis_id", "name", "choices"),
+    (
+        ("org-plan", "focus", config.ORG_PLAN_FOCUS_CHOICES),
+        ("hab-plan", "focus", config.HAB_PLAN_FOCUS_CHOICES),
+        ("ship-plan", "role", config.SHIP_PLAN_ROLE_CHOICES),
+        ("project-analysis", "sort_axis", config.PROJECT_ANALYSIS_SORT_CHOICES),
+        ("project-analysis", "slot", (3, 4, 5)),
+        ("research-plan", "mode", config.RESEARCH_PLAN_MODE_CHOICES),
+        ("topbar", "forecast_resource", config.HAB_MONTHLY_RESOURCES),
+    ),
+)
+def test_configured_argument_choices_are_enforced_at_application_boundary(analysis_id, name, choices):
+    valid_choice = choices[0]
+    assert registry.validate_arguments(analysis_id, {name: valid_choice})[name] == valid_choice
+    with pytest.raises(UserInputError) as caught:
+        registry.validate_arguments(analysis_id, {name: "not-a-supported-choice"})
+
+    assert caught.value.code == "invalid-arguments"
+    assert caught.value.context["analysis"] == analysis_id
+    assert caught.value.context["argument"] == name
+    assert caught.value.context["choices"] == list(choices)
+
+
+@pytest.mark.parametrize(
+    ("analysis_id", "name"),
+    (("project-analysis", "slot"), ("topbar", "forecast_resource")),
+)
+def test_nullable_configured_choices_accept_null(analysis_id, name):
+    assert registry.validate_arguments(analysis_id, {name: None})[name] is None
+
+
 def test_research_plan_cli_uses_the_shared_mode_choices():
     assert public_api.RESEARCH_PLAN_MODE_CHOICES is config.RESEARCH_PLAN_MODE_CHOICES
     parser = ti_parser_cli.build_parser(public_api)

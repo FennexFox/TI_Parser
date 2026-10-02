@@ -504,6 +504,12 @@ def handle_summary(snapshot: dict[str, Any], top_nations: int = 20) -> dict[str,
             if needle
             in {
                 str(faction.get("template") or "").casefold(),
+                str(
+                    campaign_code(
+                        faction.get("template") if isinstance(faction.get("template"), str) else None
+                    )
+                    or ""
+                ).casefold(),
                 str(faction.get("display") or "").casefold(),
                 str(faction.get("code") or "").casefold(),
             }
@@ -515,6 +521,11 @@ def handle_summary(snapshot: dict[str, Any], top_nations: int = 20) -> dict[str,
     ]
     if len(metadata_candidates) > 1 or len(player_state_candidates) > 1:
         raise UserInputError("Multiple human player faction candidates found in snapshot.")
+    if player_name and not metadata_candidates:
+        raise UserInputError(
+            f"Metadata player faction could not be resolved: {player_name}",
+            code="player-faction-unresolved",
+        )
     if metadata_candidates and player_state_candidates and metadata_candidates[0].get("id") != player_state_candidates[0].get("id"):
         raise UserInputError("Snapshot player faction metadata conflicts with TIPlayerState.")
     player_faction = (player_state_candidates or metadata_candidates or [None])[0]
