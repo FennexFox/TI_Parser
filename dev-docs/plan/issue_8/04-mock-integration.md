@@ -50,8 +50,8 @@ Real AnalysisSession contract tests cover exact/provisional correlation and
 save replacement. This is a correlation primitive, not a new MCP tool or
 fair-play approval; the public guarded projection remains disabled.
 
-Real Codex CLI runs used isolated per-run configuration and six canonical
-prompts against the pre-refresh baseline. Those retained observations are
+Real Codex CLI runs used isolated per-run configuration and canonical prompts
+against the pre-refresh baseline. Those retained observations are
 protocol/routing evidence only and do not certify current-build mechanics or
 visibility. Initial approval/routing failures were separated from calculation
 failures; application-owned descriptions/instructions corrected unnecessary
@@ -67,3 +67,8 @@ The mock and audit helpers remain excluded from the runtime ZIP.
 Local mock protocol and blocked-behavior routing checks pass. This does not
 prove game visibility, complete generation-safe prediction, or actual Companion
 acceptance. The successful prediction case remains blocked by earlier gates.
+The exact xenoforming input remains a mandatory raw-save blocker: current-DLL
+UI paths provide gated color or severity categories, not the exact numeric
+level used by the population formula. Mock protocol success does not alter that
+denial. A visible-input plus explicit-assumption mode would be a separate,
+unimplemented policy seam.

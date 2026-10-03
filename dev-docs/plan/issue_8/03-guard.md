@@ -39,7 +39,10 @@ Broad input approval can disclose derived hidden state; preserve default behavio
 
 ## Progress
 
-Not activated: execution closure, current-build mechanics, visibility and a production input predicate remain unproved.
+Not activated: broader source closure, current-build mechanics, visibility and
+a production input predicate remain unproved. Strict raw-save projection
+requires exact xenoforming, which the inspected current-DLL UI does not expose
+as a number; this is a mandatory denial, not a safe-default inference.
 
 Registry metadata references `fair-play-projection-v1` separately from the
 unchanged visibility-dependent classification. Application/MCP capabilities
@@ -56,6 +59,11 @@ Do not build an unused alternate calculator or fake successful projection.
 
 Pre-handler denial and default compatibility tests pass. Approval remains
 blocked; fixture parity and `allow_unverified` do not bypass the evidence gate.
+Setter regressions establish only local post-setter behavior; canonical A/B
+runs do not exercise the setter callbacks, whose full closure is not approved. Exact
+xenoforming remains denied for raw-save projection. Any later visible-input
+plus explicit-assumption path needs its own policy and evidence; it is not
+implemented or approved here.
 Current-DLL findings and instrumented execution blockers are reproducible via
 `tools/audit_projection_reads.py` with an explicitly supplied assembly. Review
 findings expire on source/build changes and cannot serve as approval packets.

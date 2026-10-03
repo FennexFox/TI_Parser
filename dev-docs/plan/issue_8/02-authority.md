@@ -23,9 +23,20 @@ occupation refresh, shared priority validity, live monthly rest inputs, and
 supported monthly control-point transitions. Changed registry rules carry
 incremented revisions and partial current-build provenance. Missing source
 inputs and unsupported mutations remain explicit stops. The bounded monthly
-population loop now follows the inspected population, live-PCGDP, GDP-floor,
-education-clamp and output-cache order. The downstream `ModifyGDP`/
-`PossiblePriorityValidationChange` callback closure remains unapproved.
+population loop now follows population update, live-PCGDP read, GDP floor,
+education bounds, economy-score refresh and output-cache refresh. Targeted
+setters stage Mission Control revalidation against post-setter GDP or education.
+Where a positive GDP change reaches the funding check, unresolved membership or
+federated pooled-funding state stops before mutation; the supported
+non-federated path remains explicit. Canonical callback A/B branches were not
+taken, so full `ModifyGDP`/`PossiblePriorityValidationChange` callback closure
+remains unapproved. The exact xenoforming value remains mandatory and not
+exposed as an exact number by the inspected current-DLL UI. The entity-visibility
+predicate is intel-gated below stage 3 (zero is hidden; ownership does not
+bypass it), while the UI exposes gated color or severity categories. Strict
+raw-save projection remains denied. A future visible-input plus
+explicit-assumption extension is a separate, unimplemented policy seam, not an
+exception to this gate.
 Mechanics repair does not grant visibility or production-policy acceptance.
 The final bounded audit confirms parity but leaves source closure incomplete.
 
@@ -70,20 +81,22 @@ structural closure or visibility evidence; phase 3 remains blocked.
 
 ## Outcomes / Retrospective
 
-The current bounded source audit confirms complete A/B output, status and
-coverage parity, unchanged inputs/catalogs, and zero mutations. Its static
-checklist and execution closure remain incomplete. The scoped review supplement
+The current bounded source audit confirms completed A/B trials with output,
+status and coverage parity, unchanged inputs/catalogs, and zero mutations. The
+executed trial closure is bounded; the static checklist and broader source
+closure remain incomplete. The scoped review supplement
 is [recorded here](../../projection_execution_evidence.json), with the policy
 decision in [the maintained interoperability
 audit](../../fairplay_interoperability.md#bounded-execution-closure-and-current-build-findings).
 
-The current local repairs cover monthly cohesion/unrest inputs, CP diversity,
-GDP-weighted occupation, priority validity, supported CP-type transitions, and
-related contribution/effect paths. Changed registry rules have partial
-current-build provenance; this does not certify transitive effects or full
-monthly execution. The GDP-setter callback closure remains unapproved pending
-independent audit. Visibility is still unapproved for exact
-xenoforming, growth modifiers, raw history/rest values and preparation reads.
+The current local repairs include monthly cohesion/unrest inputs, CP diversity,
+GDP-weighted occupation, priority validity, supported CP-type transitions,
+monthly population setter order, and bounded GDP/education/Welfare setters.
+Changed registry rules have partial current-build provenance; this does not
+certify transitive effects or full monthly execution. Callback A/B remains
+untaken, and full GDP-setter callback closure remains unapproved. Visibility is
+still unapproved for exact xenoforming, growth modifiers, raw history/rest
+values and preparation reads.
 The fair-play guard remains disabled: structural closure is incomplete,
 visibility is unapproved, and actual Companion acceptance is out of scope.
 This follow-up records bounded repairs and blockers, not authority acceptance;

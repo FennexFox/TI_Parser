@@ -47,4 +47,10 @@ A local server or branch is sufficient; no public release requirement.
 
 ## Outcomes / Retrospective
 
-Acceptance is pending the evidence and checks above; implementation completion is not release acceptance.
+Acceptance is pending the evidence and checks above; implementation completion
+is not release acceptance. Exact xenoforming is not exposed as an exact value by
+the inspected current-DLL UI, so strict raw-save projection remains denied.
+Canonical A/B runs do not exercise the setter callbacks, whose full closure
+remains unapproved. A future visible-input
+plus explicit-assumption extension is a distinct, unimplemented policy path and
+does not satisfy or bypass these acceptance gates.

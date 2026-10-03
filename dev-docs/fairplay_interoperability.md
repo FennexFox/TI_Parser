@@ -195,9 +195,14 @@ acceptance. Changed rules carry partial
 current-build provenance. See the
 [mechanics audit](nation_projection_mechanics_audit.md).
 
-Decisive visibility blockers include exact regional `xenoformingLevel`, whose
-`VisibleToFaction` predicate requires intel below stage 3 and does not grant an
-ownership bypass; saved `annualPopGrowthModifier`; raw GDP-history tracker and
+Decisive visibility blockers include exact regional `xenoformingLevel`. Its
+`VisibleToFaction` predicate requires intel below stage 3, returns false for
+zero, and does not grant an ownership bypass. The current map uses a gated
+color gradient and light/heavy/severe descriptions, not an exact numerical
+readout; its color saturates above stage 3. The regional growth formula still
+consumes the exact level. Discovery, a zero fixture value, and full CP ownership
+therefore cannot certify this operand. Other blockers include saved
+`annualPopGrowthModifier`; raw GDP-history tracker and
 rest caches; and unconditional councilor, mission, faction-effect and topbar
 preparation. UI annual growth/rest values are aggregates, not proof of all raw
 constituents. National statistics and progress have formatted-value evidence;
@@ -232,10 +237,34 @@ The current route stays visibility-dependent and globally blocked. No unused
 alternate calculator or fabricated successful prediction is introduced while
 the authority gate remains open.
 
+### Deferred visible-input and explicit-assumption projection
+
+The selected contract continues to reject undisclosed exact operands. A future
+extension may use visible inputs and explicitly declared assumptions, but it is
+not implemented or approved by this audit. Keep that work separate from granting
+permission to the existing raw-save adapter.
+
+The extension seam is input construction: prepare a `NationProjectionState` and
+`ProjectionContext` from an allowlisted, response-bound visible snapshot and
+declared scenario inputs, then reuse mechanics only where their dependencies
+and applicability have been reviewed. Do not initialize that state from hidden
+save fields and later mask them. Rounded observations, ranges, missing values
+and assumptions must retain their distinct provenance; an undisclosed value
+must not silently become zero or a guessed point estimate.
+
+Before implementation, separately define the allowed input domain, treatment of
+uncertainty and branching, and public result contract. Results must distinguish
+observation from conditional simulation, preserve incomplete/unsupported paths,
+and avoid claiming exactness or authoritative game outcomes from assumptions.
+Subject receipts and generation checks must bind the input snapshot, policy and
+assumptions as well as the result. Such an extension needs its own reviewed
+policy scope and acceptance tests; it cannot enable the pending raw-save policy
+by relabelling its inputs.
+
 | Evidence layer | Current evidence | What it establishes |
 | --- | --- | --- |
-| Save/parser | `handle_nation_projection` (`ti_parser_application.py:464`), `extract_nation_projection_state` (`ti_parser_projection_adapter.py:565`), `calculate_nation_projection` (`:953`), `_state_snapshot` (`ti_parser_nation_projection.py:2187`), `projection_output` (`:3839`) | Which save fields, factions, CP owners, public-opinion/market values, regions, and output diagnostics the implementation can read or produce. |
-| DLL/templates | No issue-specific visibility trace for these source reads | Authoritative player visibility remains unknown. Parser state presence does not establish what the player can see. |
+| Save/parser | `handle_nation_projection` in `ti_parser_application.py`; `extract_nation_projection_state` and `calculate_nation_projection` in `ti_parser_projection_adapter.py`; `_state_snapshot` and `projection_output` in `ti_parser_nation_projection.py` | Which save fields, factions, CP owners, public-opinion/market values, regions, and output diagnostics the implementation can read or produce. |
+| DLL/templates/UI | Current-build xenoforming discovery, map-color, tooltip and growth call paths; other operands remain unproved | Shows why the exact level is not certified by visible discovery or stage information. It does not approve the remaining source closure. |
 | Scenario assumptions | A fully player-owned nation, candidate plans A/B, 180-day horizon | Defines the requested smoke scenario; it does not establish mechanics parity or information visibility. |
 
 ## Registry inventory audit

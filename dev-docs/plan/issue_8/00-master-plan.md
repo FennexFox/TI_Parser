@@ -44,6 +44,16 @@ Actual Companion/TI/Codex prediction acceptance remains open. See phase files
 for evidence and the [routing record](routing-evidence.json) for synthetic
 client observations; this plan is retained while acceptance gates are unresolved.
 
+The active objective is readiness to enter actual Companion acceptance, not
+completion of that external acceptance. Readiness requires a genuinely approved
+guarded projection, a proven production predicate, current-build mechanics and
+input visibility, and generation-safe mock/Codex integration. Passing blocked
+protocol tests alone cannot satisfy it. Current work closes observed rule/helper
+records and setter/revalidation paths while rechecking exact raw-input UI
+disclosure. If a mandatory hidden operand has no permitted source, preserve the
+denial and the unmet readiness requirement; do not replace it with an estimate,
+zero fixture assumption, or metadata-only approval.
+
 ## TI Parser Follow-up Order
 
 1. Establish actual A/B execution closure: per-trial source reads, preflight,

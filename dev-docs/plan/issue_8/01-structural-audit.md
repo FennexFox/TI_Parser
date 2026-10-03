@@ -43,15 +43,17 @@ Audit instrumentation is developer-only; ordinary runtime behavior must be uncha
 ## Progress
 
 Implemented developer-only save/catalog payload tracing and copy/normalization
-tests. The controlled ModernScenario fixture has six player-owned CPs; both
-180-day A/B paths complete with exact baseline/traced result, status and
-coverage parity. Input/catalog hashes stay unchanged, index aliases remain
-intact and no raw-container mutations are recorded.
+tests. The controlled ModernScenario A/B fixture completes with baseline/traced
+result, status and coverage parity. Input/catalog hashes stay unchanged, index
+aliases remain intact and no raw-container mutations are recorded. This bounded
+The observed fixture execution edges are closed by source-bound helper returns
+and execution records. This does not establish complete source-read coverage
+or production-domain closure: unobserved static candidates remain blockers.
 
 The explicit DLL audit returns exit 2: structural completeness is incomplete
 while the refreshed build comparison is match. Catalog decode/manifest validation,
 plain index-container accesses and unexplained normalization paths remain
-unresolved. Five bounded source-to-derived chains now have static mappings;
+unresolved. A bounded set of source-to-derived chains has static mappings;
 these establish structural roles only. Each candidate records source location
 and fingerprint, consumer, destination, evidence layer, visibility, build
 applicability and blocking status. Dynamic/static discrepancies, unobserved
@@ -59,9 +61,10 @@ static candidates and unclassified visibility remain explicit blockers.
 
 ## Decision log
 
-Canonical audit checkpoints are `[0, 180]`, matching the original initial/180-day
-comparison. `[30, 90, 180]` is not the approved canonical audit shape.
-A/B pips are audit fixtures only; no advisors does not imply no councilor reads.
+The canonical endpoint comparison follows the original initial/terminal
+checkpoint design; the proposed intermediate-checkpoint variant is not the
+approved audit shape. A/B pips are audit fixtures only; no advisors does not
+imply no councilor reads.
 
 Observed preparation includes councilor_summary_maps, projection_advisor_profiles
 and calculate_topbar despite advisors being empty. No preparation optimization
@@ -71,3 +74,7 @@ was applied because complete dependency closure has not been established.
 
 Instrumentation and parity checks pass; structural acceptance remains open.
 Do not infer visibility from parity, absent hidden-read events or DLL identity.
+The exact xenoforming value remains a mandatory blocker: the inspected current
+DLL UI exposes gated color/severity information, not the exact numeric operand
+used by annual population growth. No raw-save projection is authorized by this
+structural audit.

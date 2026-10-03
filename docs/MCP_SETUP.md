@@ -228,6 +228,12 @@ read-only child sandbox. A completed client run is recorded, not automatically
 accepted: review tool ownership, failed calls, and the answer's evidence. Mock
 routing success does not approve a prediction or prove actual Companion visibility.
 
+Exact regional xenoforming is a required population-growth operand, but the
+reviewed game UI exposes gated color and severity cues rather than that exact
+value. The raw-save prediction therefore remains blocked. A future projection
+using visible inputs and explicit assumptions requires its own input contract
+and policy review; that alternative is not implemented or approved.
+
 Current guarded projection remains disabled: the bounded execution review found
 unclosed rule/source paths, current-DLL mechanics differences and required
 intel-gated or unresolved raw inputs. Connecting two servers, selecting a wholly

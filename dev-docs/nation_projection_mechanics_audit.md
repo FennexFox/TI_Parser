@@ -18,22 +18,42 @@ rules now carries the current hash with partial status; unchanged historical
 rules retain their old hash and are not certified for the refreshed build.
 
 The current-build review covers `nation.priority.knowledge.complete` (revision
-2), `nation.priority.welfare.complete`, `nation.priority.welfare.colony-trigger`
-and `nation.priority.welfare.decolonization`. Knowledge uses
+3), `nation.priority.welfare.complete` (revision 3),
+`nation.priority.welfare.inequality` (revision 2),
+`nation.priority.validation-trigger` (revision 2), and the bounded
+`nation.ip.economy-score` (revision 2) / `nation.population.monthly-growth`
+(revision 3) setter paths, alongside the previously scoped
+`nation.priority.welfare.colony-trigger` and
+`nation.priority.welfare.decolonization`. Knowledge uses
 `TINationState.OnKnowledgePriorityComplete`, the education/cohesion change
 properties, population scaling, `AddToEducation` and `AddToCohesion`.
 `AddToEducation` clamps completion updates to `[1, 255]`; the former parser
 lower bound of zero and missing upper bound were corrected. Initialization's
 separate clamp is not evidence for completion behavior.
 
+The setter review is partial. `ModifyGDP` applies the total-population GDP
+floor and recomputes economy score; when its positive-change Mission Control or
+non-federated funding gate triggers, CP validation is staged against post-setter
+GDP. `AddToEducation` clamps to `[1, 255]` and stages validation against the
+post-setter value only for a positive increase at the Mission Control cap.
+When the Mission Control trigger does not short-circuit the funding check,
+unresolved membership or federated pooled-funding state stops before GDP
+mutation; the supported non-federated path remains explicit.
+Targeted regressions cover these local setter contracts, including Welfare's
+inequality overflow through cohesion/unrest setters and the monthly population
+prefix. They do not establish complete callback closure: canonical callback A/B
+branches were not taken, and the full `PossiblePriorityValidationChange`
+downstream closure remains unapproved.
+
 The Welfare coordinator calls inequality before colony selection.
 `CandidateDecolonizeRegions`/`GetNextDecolonizeRegion` provide the deterministic
 candidate path; `OnDecolonizeRegionPriorityComplete` handles threshold removal,
 counter reset and permanent decolonization. The registry now cites these actual
-symbols. Welfare inequality effects and decolonization downstream recalculation
-retain their historical hashes because their full effect/call closure has not
-been re-audited. The coordinator's current evidence does not certify its child
-rules by inheritance.
+symbols. Welfare inequality has a partial current-build binding for the bounded
+inequality/overflow setters; decolonization downstream recalculation retains
+its historical hash because its full effect/call closure has not been
+re-audited. The coordinator's current evidence does not certify its child rules
+by inheritance.
 
 The call-order claims below describe the historical reviewed build unless a
 rule has explicit current-build evidence. See [catalogs](catalogs.md) for the
@@ -67,10 +87,12 @@ KnowledgeSector and FinancialSector consumers. Government/Unity legitimize
 branches use their cached availability and update it only at the modeled
 hostile-claim setter/cache boundary. The bounded monthly population loop applies
 mean-input population growth before reading live regional PCGDP, then applies
-the current total-population GDP floor, bounded education update, economy-score
-refresh and final regional GDP-cache refresh. This remains an expected-path
-repair; it does not close the whole `MonthlyNationUpdate` method or the
-downstream `ModifyGDP`/`PossiblePriorityValidationChange` callback closure.
+the current total-population GDP floor, `[1, 255]` education bounds, economy
+score refresh and final regional GDP-cache refresh. The regional getter is read
+after the population update. A callback blocker preserves the population
+prefix and stops before GDP mutation. This remains an expected-path repair; it
+does not close the whole `MonthlyNationUpdate` method or the downstream
+`ModifyGDP`/`PossiblePriorityValidationChange` callback closure.
 
 Changed rule contracts are recorded as **partial** current-build evidence,
 with implementation revisions incremented; this does not certify every
@@ -81,6 +103,16 @@ unchanged rules with historical source hashes remain historical. The new
 CP-count mutation. See [scoped findings](projection_execution_evidence.json)
 and [interoperability acceptance](fairplay_interoperability.md#bounded-execution-closure-and-current-build-findings).
 Parser/catalog/closure changes invalidate earlier acceptance evidence.
+
+The exact xenoforming operand remains a mandatory visibility blocker for strict
+raw-save projection. In the reviewed current DLL, the entity-visibility
+predicate is intel-gated below stage 3, returns false at zero, and has no
+ownership bypass; that predicate does not disclose the exact numeric operand.
+Inspected UI paths expose gated color or severity categories, not the exact
+level. This does not prove universal UI absence. Any future
+visible-input plus explicit-assumption path is a separate, unimplemented policy
+seam and does not authorize raw-save projection; see
+[interoperability](fairplay_interoperability.md#bounded-execution-closure-and-current-build-findings).
 
 
 The reviewed DLL call order includes monthly nation work at month-day 1 00:00,
@@ -104,13 +136,13 @@ outside the declared set is an error, not an implicit downgrade.
 | Rule ID | Audit | Coverage | Primary DLL symbol |
 | --- | --- | --- | --- |
 | `nation.ip.base` | partial | exact | `TINationState.SetBaseInvestmentPoints_month` |
-| `nation.ip.economy-score` | verified | exact | `TINationState.ModifyGDP` |
+| `nation.ip.economy-score` | partial | exact | `TINationState.ModifyGDP` |
 | `nation.ip.control-point-allocation` | verified | exact | `TINationState.ControlPointWeightsTotalToPriorityIP` |
 | `nation.ip.priority-bonus` | partial | exact | `TINationState.ControlPointPriorityBonuses_Uncached` |
 | `nation.ip.control-point-default-economy` | verified | exact | `TIControlPoint.RecordAndFixControlPointValues` |
 | `nation.priority.validity` | partial | exact | `TINationState.ValidPriority` |
 | `nation.priority.completion-order` | verified | exact | `TINationState.ProcessPrioritySpending` |
-| `nation.priority.knowledge.complete` | verified | exact | `TINationState.OnKnowledgePriorityComplete` |
+| `nation.priority.knowledge.complete` | partial | exact | `TINationState.OnKnowledgePriorityComplete` |
 | `nation.priority.government.complete` | partial | exact | `TINationState.OnGovernmentPriorityComplete` |
 | `nation.priority.government.legitimize` | partial | exact | `TINationState.GetNextRegionToLegitimizeClaim` |
 | `nation.priority.economy.complete` | verified | exact | `TINationState.OnEconomyPriorityComplete` |
@@ -127,8 +159,8 @@ outside the declared set is an error, not an implicit downgrade.
 | `nation.priority.unity.legitimize` | partial | exact | `TINationState.OnLegitimizeClaimPriorityComplete` |
 | `nation.cohesion.public-opinion` | verified | exact | `TINationState.publicOpinionImpactOnCohesion` |
 | `nation.priority.funding.complete` | verified | exact | `TINationState.OnFundingPriorityComplete` |
-| `nation.priority.welfare.complete` | verified | exact | `TINationState.OnWelfarePriorityComplete` |
-| `nation.priority.welfare.inequality` | verified | exact | `TINationState.welfarePriorityInequalityChange` |
+| `nation.priority.welfare.complete` | partial | exact | `TINationState.OnWelfarePriorityComplete` |
+| `nation.priority.welfare.inequality` | partial | exact | `TINationState.welfarePriorityInequalityChange` |
 | `nation.priority.welfare.colony-trigger` | verified | exact | `TINationState.GetNextDecolonizeRegion` |
 | `nation.priority.welfare.decolonization` | verified | exact | `TINationState.OnDecolonizeRegionPriorityComplete` |
 | `nation.priority.welfare.decolonization-downstream` | verified | exact | `TINationState.CacheRegionValues` |
@@ -141,8 +173,8 @@ outside the declared set is an error, not an implicit downgrade.
 | `nation.priority.build-navy.market` | verified | conditional | `TIGlobalValuesState.ModifyMarketValuesForArmyPriority` |
 | `nation.asset.army.maintenance` | verified | exact | `TINationState.SetBaseInvestmentPoints_month` |
 | `nation.effect.context-expiration` | partial | exact | `TIFactionState.RemoveExpiredEffectContexts` |
-| `nation.priority.validation-trigger` | verified | exact | `TINationState.PossiblePriorityValidationChange` |
-| `nation.periodic.region-cache` | verified | exact | `TINationState.CacheRegionValues` |
+| `nation.priority.validation-trigger` | partial | exact | `TINationState.PossiblePriorityValidationChange` |
+| `nation.periodic.region-cache` | partial | exact | `TINationState.CacheRegionValues` |
 | `nation.periodic.cohesion` | partial | exact | `TINationState.GetMonthlyCohesionMovement` |
 | `nation.periodic.unrest` | partial | exact | `TINationState.GetMonthlyUnrestMovement` |
 | `nation.periodic.derived-cache` | partial | exact | `TINationState.cohesionRestState` and `TINationState.unrestRestState` |
