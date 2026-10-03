@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import audit_projection_reads as audit
 from projection_audit_dependencies import execution_closure, reconcile, source_inventory
+from projection_audit_dependencies import dependency_append_sites, source_control_flow_context
 from collections import Counter
 from ti_parser_catalogs import RuntimeCatalogs
 
@@ -199,6 +200,32 @@ def test_audit_runs_both_180_day_trials_with_real_catalogs_and_exact_trace_parit
         assert "nation.priority.welfare.complete" in trial["executedRuleIds"]
         assert trial["executionRecordCount"] > len(trial["executedRuleIds"])
         assert trial["blockers"]
+        welfare_edges = [row for row in trial["runtimeDependencyEdges"]
+                         if row["from"] == "nation.priority.welfare.complete"
+                         and row["to"] == "nation.priority.welfare.inequality"]
+        assert welfare_edges
+        assert all(row["sourceControlFlow"]["sourceMapped"] for row in welfare_edges)
+        assert all(row["sourceControlFlow"]["siteKind"] == "rule-reference" for row in welfare_edges)
+        expected_helpers = {
+            "_base_ip": "nation.ip.base",
+            "_annual_population_growth": "nation.population.annual-growth",
+            "_live_cohesion_rest": "nation.periodic.cohesion",
+            "_live_unrest_rest": "nation.periodic.unrest",
+        }
+        calculation_helpers = [row for row in trial["sourceBoundHelperExecutions"]
+                               if row["stage"] == "projection-calculation"]
+        for helper_name, rule_id in expected_helpers.items():
+            events = [row for row in calculation_helpers if row["helper"] == helper_name]
+            assert events
+            assert all(row["sourceBound"] is True for row in events)
+            assert all(row["coverageClaim"] == "none" and row["returnValueRecorded"] is False for row in events)
+            assert all(row["callSiteContext"]["sourceMapped"] and row["returnSite"]["sourceMapped"]
+                       for row in events)
+            edge = next(row for row in trial["runtimeDependencyEdgeEvidence"]
+                        if row["to"] == rule_id)
+            assert edge["status"] == "helper-invocation-returned"
+            assert any(row["helper"] == helper_name for row in edge["returnedHelperEvidence"])
+            assert rule_id not in trial["executedRuleIds"]
 
 
 def _closure_source(*edges, references=()):
@@ -240,6 +267,177 @@ def test_execution_closure_fingerprint_binds_edges_and_required_predicates():
     changed = execution_closure(executions, source, {"a": 1, "b": 1}, required_predicates={"days": 181})
     assert first["complete"] is True
     assert first["fingerprint"] != changed["fingerprint"]
+
+
+def test_rule_reference_only_does_not_resolve_missing_dependency_execution():
+    location = {"file": "tools/ti_parser_example.py", "line": 5, "sha256": "a" * 64}
+    source = {
+        "registeredLiteralEdges": [{"from": "parent", "to": "child", "consumer": "ti_parser_example.calculate",
+                                     "sourceLocation": location, "branchContext": []}],
+        "ruleReferences": [{"ruleId": "child", "consumer": "ti_parser_example.calculate",
+                            "sourceLocation": location, "branchContext": []}],
+        "dynamicDependencyAppendSites": [],
+        "sourceFileSha256": {"tools/ti_parser_example.py": "a" * 64},
+    }
+    reference = {"ruleId": "child", "consumer": "ti_parser_example.calculate", "sourceLocation": location,
+                 "stage": "projection-calculation", "callPathNearestConsumerFirst": ["ti_parser_example.calculate"]}
+
+    result = execution_closure(
+        [{"ruleId": "parent", "dependencies": ["child"]}], source, {"parent": 1, "child": 1},
+        required_predicates={"days": 180}, runtime_rule_references=[reference], runtime_dependency_edges=[],
+        runtime_helper_executions=[], helper_rule_bindings={},
+    )
+
+    assert result["executedRuleIds"] == ["parent"]
+    assert "dependency-not-recorded" in {row["kind"] for row in result["blockers"]}
+    assert result["runtimeDependencyEdgeEvidence"][0]["status"] == "rule-reference-observed"
+
+
+def test_source_bound_returned_helper_call_resolves_only_its_static_dependency_edge():
+    edge_location = {"file": "tools/ti_parser_example.py", "line": 5, "sha256": "a" * 64}
+    helper_location = {"file": "tools/ti_parser_helper.py", "line": 10, "sha256": "b" * 64}
+    source = {
+        "registeredLiteralEdges": [{"from": "parent", "to": "child", "consumer": "ti_parser_example.calculate",
+                                     "sourceLocation": edge_location, "branchContext": []}],
+        "ruleReferences": [{"ruleId": "child", "consumer": "ti_parser_example.calculate",
+                            "sourceLocation": edge_location, "branchContext": []}],
+        "dynamicDependencyAppendSites": [],
+        "sourceFileSha256": {"tools/ti_parser_example.py": "a" * 64,
+                              "tools/ti_parser_helper.py": "b" * 64},
+    }
+    reference = {"ruleId": "child", "consumer": "ti_parser_example.calculate", "sourceLocation": edge_location,
+                 "stage": "projection-calculation"}
+    helper = {
+        "helper": "calculate_child", "helperRuleIds": ["child"], "stage": "projection-calculation",
+        "caller": "ti_parser_example.calculate", "helperSourceLocation": helper_location,
+        "callSite": edge_location,
+        "returnSite": {"sourceMapped": True, "sourceLocation": helper_location,
+                       "siteKind": "return", "function": "calculate_child",
+                       "branchContext": [{"predicate": "state.enabled", "arm": "body",
+                                          "outcome": "observed-return-site"}],
+                       "returnExpression": "state.value"},
+        "observedReturnLocation": helper_location,
+        "callSiteContext": {"sourceMapped": True, "siteKind": "call", "function": "calculate",
+                            "calleeName": "calculate_child", "sourceLocation": edge_location,
+                            "branchContext": []},
+        "returnedNormallyWithFiniteNumber": True, "returnKind": "finite-number", "coverageClaim": "none",
+    }
+
+    result = execution_closure(
+        [{"ruleId": "parent", "dependencies": ["child"]}], source, {"parent": 1, "child": 1},
+        required_predicates={"days": 180}, runtime_rule_references=[reference], runtime_dependency_edges=[],
+        runtime_helper_executions=[helper], helper_rule_bindings={"calculate_child": ("child",)},
+    )
+
+    assert result["complete"] is True
+    assert result["executedRuleIds"] == ["parent"]
+    assert result["runtimeDependencyEdgeEvidence"][0]["status"] == "helper-invocation-returned"
+    assert result["runtimeDependencyEdgeEvidence"][0]["returnedHelperEvidence"][0]["coverageClaim"] == "none"
+
+
+def test_helper_return_does_not_close_an_edge_from_another_callsite():
+    edge_location = {"file": "tools/ti_parser_example.py", "line": 5, "sha256": "a" * 64}
+    helper_location = {"file": "tools/ti_parser_helper.py", "line": 10, "sha256": "b" * 64}
+    other_call_location = {"file": "tools/ti_parser_other.py", "line": 12, "sha256": "c" * 64}
+    source = {
+        "registeredLiteralEdges": [{"from": "parent", "to": "child", "consumer": "ti_parser_example.calculate",
+                                     "sourceLocation": edge_location, "branchContext": []}],
+        "ruleReferences": [], "dynamicDependencyAppendSites": [],
+        "sourceFileSha256": {"tools/ti_parser_example.py": "a" * 64,
+                              "tools/ti_parser_helper.py": "b" * 64,
+                              "tools/ti_parser_other.py": "c" * 64},
+    }
+    helper = {
+        "helper": "calculate_child", "helperRuleIds": ["child"], "stage": "projection-calculation",
+        "caller": "ti_parser_example.calculate", "helperSourceLocation": helper_location,
+        "callSite": other_call_location,
+        "callSiteContext": {"sourceMapped": True, "siteKind": "call", "function": "calculate",
+                            "calleeName": "calculate_child", "sourceLocation": other_call_location,
+                            "branchContext": []},
+        "returnSite": {"sourceMapped": True, "siteKind": "return", "function": "calculate_child",
+                       "sourceLocation": helper_location, "branchContext": [],
+                       "returnExpression": "state.value"},
+        "observedReturnLocation": helper_location,
+        "returnedNormallyWithFiniteNumber": True, "returnKind": "finite-number", "coverageClaim": "none",
+    }
+
+    result = execution_closure(
+        [{"ruleId": "parent", "dependencies": ["child"]}], source, {"parent": 1, "child": 1},
+        required_predicates={"days": 180}, runtime_rule_references=[], runtime_dependency_edges=[],
+        runtime_helper_executions=[helper], helper_rule_bindings={"calculate_child": ("child",)},
+    )
+
+    assert "dependency-not-recorded" in {row["kind"] for row in result["blockers"]}
+    assert result["runtimeDependencyEdgeEvidence"][0]["returnedHelperEvidence"] == []
+
+
+def test_dynamic_dependency_append_is_edge_evidence_without_helper_execution_proof():
+    location = {"file": "tools/ti_parser_example.py", "line": 9, "sha256": "c" * 64}
+    source = {
+        "registeredLiteralEdges": [],
+        "ruleReferences": [{"ruleId": "child", "consumer": "ti_parser_example.calculate",
+                            "sourceLocation": location, "branchContext": []}],
+        "dynamicDependencyAppendSites": [{"module": "ti_parser_example", "function": "calculate", "ruleName": "CHILD", "line": 9,
+                                           "sourceLocation": location}],
+        "sourceFileSha256": {"tools/ti_parser_example.py": "c" * 64},
+    }
+    reference = {"ruleId": "child", "consumer": "ti_parser_example.calculate", "sourceLocation": location,
+                 "stage": "projection-calculation"}
+    edge = {"from": "parent", "to": "child", "ruleName": "CHILD", "module": "ti_parser_example", "function": "calculate",
+            "consumer": "ti_parser_example.calculate", "sourceLocation": location,
+            "sourceControlFlow": {"sourceMapped": True, "siteKind": "rule-reference", "function": "calculate",
+                                  "calleeName": "CHILD", "sourceLocation": location, "branchContext": []},
+            "stage": "projection-calculation"}
+
+    result = execution_closure(
+        [{"ruleId": "parent", "dependencies": ["child"]}], source, {"parent": 1, "child": 1},
+        required_predicates={"days": 180}, runtime_rule_references=[reference], runtime_dependency_edges=[edge],
+        runtime_helper_executions=[], helper_rule_bindings={},
+    )
+
+    kinds = {row["kind"] for row in result["blockers"]}
+    assert "unreconciled-dynamic-edge" not in kinds
+    assert "dependency-not-recorded" in kinds
+    assert result["runtimeDependencyEdgeEvidence"][0]["status"] == "dynamic-source-edge-observed"
+
+
+def test_dynamic_dependency_append_inventory_and_call_return_context_are_source_hashed(tmp_path):
+    (tmp_path / "ti_parser_example.py").write_text(
+        "def calculate(execution, state):\n"
+        "    if state.enabled:\n"
+        "        execution['dependencies'].append(Rules.CHILD.id)\n"
+        "        return state.value\n",
+        encoding="utf-8",
+    )
+    sites = dependency_append_sites(tmp_path)
+    assert len(sites) == 1
+    assert sites[0]["line"] == 3
+    assert sites[0]["branchContext"] == [{"line": 2, "predicate": "state.enabled", "arm": "body",
+                                           "outcome": "unproven"}]
+    context = source_control_flow_context(tmp_path, "ti_parser_example", "calculate", 4, "return")
+    assert context["sourceMapped"] is True
+    assert context["siteKind"] == "return"
+    assert context["function"] == "calculate"
+    assert context["returnExpression"] == "state.value"
+    assert context["branchContext"] == [{"line": 2, "predicate": "state.enabled", "arm": "body",
+                                          "outcome": "observed-return-site"}]
+
+
+def test_rule_reference_context_records_observed_branch_without_claiming_execution(tmp_path):
+    (tmp_path / "ti_parser_example.py").write_text(
+        "def calculate(state):\n"
+        "    if state.enabled:\n"
+        "        return Rules.CHILD.id\n",
+        encoding="utf-8",
+    )
+    context = source_control_flow_context(tmp_path, "ti_parser_example", "calculate", 3,
+                                          "rule-reference", "CHILD")
+    assert context["sourceMapped"] is True
+    assert context["siteKind"] == "rule-reference"
+    assert context["function"] == "calculate"
+    assert context["calleeName"] == "CHILD"
+    assert context["branchContext"] == [{"line": 2, "predicate": "state.enabled", "arm": "body",
+                                          "outcome": "observed-rule-reference"}]
 
 
 def test_static_non_observation_keeps_branch_predicates_unproven(tmp_path):

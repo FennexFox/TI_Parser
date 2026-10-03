@@ -16,6 +16,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -35,7 +36,8 @@ import ti_parser_topbar as topbar_layer
 import ti_save_parser as parser
 from projection_audit_evidence import review_evidence
 from projection_audit_dependencies import reconcile, source_inventory
-from projection_audit_dependencies import execution_closure, rule_source_inventory
+from projection_audit_dependencies import dependency_append_sites, execution_closure, rule_source_inventory
+from projection_audit_dependencies import source_control_flow_context
 from ti_parser_mechanics import REGISTRY, Rules
 from ti_parser_catalogs import RuntimeCatalogs, canonical_json_bytes, file_sha256, runtime_catalog_scope
 
@@ -57,6 +59,15 @@ STATIC_CALL_CHECKLIST = (
     ("ti_parser_nation_projection", "projection_output", "execution and output"),
     ("ti_parser_nation_projection", "run_projection", "simulation"),
 )
+# Runtime calls that can discharge otherwise-missing helper dependencies only
+# when the call and its numeric return are source-bound. Their rule metadata
+# never becomes a synthetic ruleExecution or coverage claim.
+EXECUTION_HELPER_RULE_BINDINGS = {
+    "_base_ip": ("nation.ip.base",),
+    "_annual_population_growth": ("nation.population.annual-growth",),
+    "_live_cohesion_rest": ("nation.periodic.cohesion",),
+    "_live_unrest_rest": ("nation.periodic.unrest",),
+}
 STATIC_MAPPING_CHECKLIST = (
     ("*.Value.controlPointPriorities", "projection control-point pips"),
     ("*.Value.diversityBonus", "projection diversity cache"),
@@ -174,6 +185,38 @@ class ReadTracker:
         self.active_trial: ReadTracker | None = None
         self.rule_executions: list[dict[str, Any]] = []
         self.execution_result: dict[str, Any] = {}
+        self.runtime_rule_reference_events: dict[str, dict[str, Any]] = {}
+        self.runtime_dependency_edge_events: dict[str, dict[str, Any]] = {}
+        self.runtime_helper_execution_events: dict[str, dict[str, Any]] = {}
+        self.rule_reference_trace_installed = False
+
+    def _record_runtime_event(self, field: str, row: dict[str, Any]) -> None:
+        key = json.dumps(row, sort_keys=True, separators=(",", ":"))
+        events = getattr(self, field)
+        if key not in events:
+            events[key] = {**row, "count": 0}
+        events[key]["count"] += 1
+
+    def record_rule_reference(self, row: dict[str, Any]) -> None:
+        sinks = [self]
+        if self.active_trial is not None and self.active_trial is not self:
+            sinks.append(self.active_trial)
+        for sink in sinks:
+            sink._record_runtime_event("runtime_rule_reference_events", row)
+
+    def record_dependency_edge(self, row: dict[str, Any]) -> None:
+        sinks = [self]
+        if self.active_trial is not None and self.active_trial is not self:
+            sinks.append(self.active_trial)
+        for sink in sinks:
+            sink._record_runtime_event("runtime_dependency_edge_events", row)
+
+    def record_helper_execution(self, row: dict[str, Any]) -> None:
+        sinks = [self]
+        if self.active_trial is not None and self.active_trial is not self:
+            sinks.append(self.active_trial)
+        for sink in sinks:
+            sink._record_runtime_event("runtime_helper_execution_events", row)
 
     def safe_path(self, path: str) -> str:
         return path or "$"
@@ -251,6 +294,9 @@ class ReadTracker:
             "reads": reads,
             "plainContainerEscapes": escapes,
             "rawContainerMutationCount": self.mutations,
+            "runtimeRuleReferences": list(self.runtime_rule_reference_events.values()),
+            "runtimeDependencyEdges": list(self.runtime_dependency_edge_events.values()),
+            "runtimeHelperExecutions": list(self.runtime_helper_execution_events.values()),
         }
 
 
@@ -591,22 +637,169 @@ def _plan(name: str, positions: list[int], knowledge: int, welfare: int) -> dict
 @contextmanager
 def _profile_calls(tracker: ReadTracker):
     old_profile = sys.getprofile()
+    active_helpers: dict[int, dict[str, Any]] = {}
 
-    def profile(frame, event, _arg):
+    def tool_location(frame: Any, line: int) -> dict[str, Any] | None:
+        path = Path(frame.f_code.co_filename).resolve()
+        try:
+            relative = path.relative_to(ROOT).as_posix()
+        except ValueError:
+            return None
+        if not relative.startswith("tools/"):
+            return None
+        return {"file": relative, "line": line, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+    def profile(frame, event, arg):
         if event == "call":
             module = str(frame.f_globals.get("__name__", ""))
             if module.startswith("ti_parser_"):
                 tracker.call_counts[(module, frame.f_code.co_name)] += 1
                 if tracker.active_trial is not None:
                     tracker.active_trial.call_counts[(module, frame.f_code.co_name)] += 1
+                helper_name = frame.f_code.co_name
+                rule_ids = EXECUTION_HELPER_RULE_BINDINGS.get(helper_name)
+                if module == "ti_parser_nation_projection" and rule_ids:
+                    caller = frame.f_back
+                    callsite = tool_location(caller, caller.f_lineno) if caller is not None else None
+                    caller_module = str(caller.f_globals.get("__name__", "")) if caller is not None else ""
+                    caller_consumer = f"{caller_module}.{caller.f_code.co_name}" if caller is not None else None
+                    call_context = source_control_flow_context(
+                        TOOLS, caller_module,
+                        caller.f_code.co_name if caller is not None else "", caller.f_lineno if caller is not None else -1,
+                        "call", helper_name,
+                    ) if caller is not None and caller_module.startswith("ti_parser_") else {"sourceMapped": False}
+                    helper_location = tool_location(frame, frame.f_code.co_firstlineno)
+                    active_helpers[id(frame)] = {
+                        "helper": helper_name,
+                        "helperRuleIds": list(rule_ids),
+                        "stage": tracker.stage_name,
+                        "caller": caller_consumer,
+                        "callSite": callsite,
+                        "callSiteContext": call_context,
+                        "helperSourceLocation": helper_location,
+                        "callPathNearestConsumerFirst": [
+                            f"{frame.f_globals.get('__name__', '')}.{frame.f_code.co_name}",
+                            *([caller_consumer] if caller_consumer else []),
+                        ],
+                    }
+        elif event == "return":
+            helper = active_helpers.pop(id(frame), None)
+            if helper is not None:
+                module = str(frame.f_globals.get("__name__", ""))
+                return_location = tool_location(frame, frame.f_lineno)
+                return_context = source_control_flow_context(
+                    TOOLS, module, frame.f_code.co_name,
+                    frame.f_lineno, "return",
+                )
+                numeric = isinstance(arg, (int, float)) and not isinstance(arg, bool)
+                finite = numeric and math.isfinite(arg)
+                helper.update({
+                    "returnSite": return_context,
+                    "observedReturnLocation": return_location,
+                    "returnedNormallyWithFiniteNumber": bool(finite),
+                    "returnKind": "finite-number" if finite else "non-finite-number" if numeric else "non-numeric-or-exception",
+                    "returnValueRecorded": False,
+                    "coverageClaim": "none",
+                })
+                tracker.record_helper_execution(helper)
         if old_profile is not None:
-            old_profile(frame, event, _arg)
+            old_profile(frame, event, arg)
 
     sys.setprofile(profile)
     try:
         yield
     finally:
         sys.setprofile(old_profile)
+
+
+class _TracedRuleNamespace:
+    """Transparent temporary proxy that records evaluated ``Rules.X`` accesses."""
+
+    def __init__(self, rules: Any, tracker: ReadTracker, append_sites: set[tuple[str, str, int, str]]) -> None:
+        self._rules = rules
+        self._tracker = tracker
+        self._append_sites = append_sites
+
+    def __getattr__(self, name: str) -> Any:
+        value = getattr(self._rules, name)
+        identifier = getattr(value, "id", None)
+        frame = sys._getframe(1)
+        module = str(frame.f_globals.get("__name__", ""))
+        if isinstance(identifier, str) and module.startswith("ti_parser_"):
+            path = Path(frame.f_code.co_filename).resolve()
+            try:
+                relative = path.relative_to(ROOT).as_posix()
+            except ValueError:
+                relative = ""
+            if relative.startswith("tools/"):
+                location = {"file": relative, "line": frame.f_lineno,
+                            "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                call_path = []
+                caller = frame
+                for _ in range(12):
+                    if caller is None:
+                        break
+                    caller_module = str(caller.f_globals.get("__name__", ""))
+                    if caller_module.startswith("ti_parser_"):
+                        call_path.append(f"{caller_module}.{caller.f_code.co_name}")
+                    caller = caller.f_back
+                consumer = f"{module}.{frame.f_code.co_name}"
+                source_context = source_control_flow_context(
+                    TOOLS, module, frame.f_code.co_name, frame.f_lineno,
+                    "rule-reference", name,
+                )
+                self._tracker.record_rule_reference({
+                    "ruleId": identifier,
+                    "ruleName": name,
+                    "consumer": consumer,
+                    "sourceLocation": location,
+                    "sourceControlFlow": source_context,
+                    "stage": self._tracker.stage_name,
+                    "callPathNearestConsumerFirst": call_path,
+                })
+
+                source_site = (module, frame.f_code.co_name, frame.f_lineno)
+                execution = frame.f_locals.get("execution")
+                parent_id = execution.get("ruleId") if isinstance(execution, dict) else None
+                append_site = (*source_site, name)
+                if append_site in self._append_sites and isinstance(parent_id, str):
+                    self._tracker.record_dependency_edge({
+                        "from": parent_id,
+                        "to": identifier,
+                        "ruleName": name,
+                        "module": module,
+                        "function": frame.f_code.co_name,
+                        "consumer": consumer,
+                        "sourceLocation": location,
+                        "sourceControlFlow": source_context,
+                        "stage": self._tracker.stage_name,
+                        "callPathNearestConsumerFirst": call_path,
+                    })
+        return value
+
+
+@contextmanager
+def _instrument_rule_references(tracker: ReadTracker):
+    """Trace actual rule attribute reads and dynamic dependency appends temporarily."""
+    append_sites = {(row["module"], row["function"], row["line"], row["ruleName"])
+                    for row in dependency_append_sites(TOOLS)}
+    proxy = _TracedRuleNamespace(Rules, tracker, append_sites)
+    patched: list[tuple[Any, Any]] = []
+    for module in tuple(sys.modules.values()):
+        if module is None or not str(getattr(module, "__name__", "")).startswith("ti_parser_"):
+            continue
+        namespace = vars(module)
+        if namespace.get("Rules") is Rules:
+            patched.append((module, Rules))
+            namespace["Rules"] = proxy
+    tracker.rule_reference_trace_installed = True
+    if tracker.active_trial is not None:
+        tracker.active_trial.rule_reference_trace_installed = True
+    try:
+        yield
+    finally:
+        for module, original in patched:
+            vars(module)["Rules"] = original
 
 
 def _run_traced(indexed: core.IndexedState, tracker: ReadTracker, nation: str, faction: str | None, plan: dict[str, Any]) -> dict[str, Any]:
@@ -628,7 +821,7 @@ def _run_traced(indexed: core.IndexedState, tracker: ReadTracker, nation: str, f
                                  ("status", "coverage", "metricCoverage", "runtimeStop", "missingMechanicRules", "missingDependencies")}
         return result
 
-    with _profile_calls(tracker):
+    with _instrument_rule_references(tracker), _profile_calls(tracker):
         projection.projection_output = staged_output
         projection.run_projection = staged_run
         try:
@@ -871,7 +1064,20 @@ def audit_projection_reads(
     for name, trial_tracker in trial_trackers.items():
         source = rule_source_inventory(TOOLS, trial_tracker.call_counts, Rules)
         closures[name] = execution_closure(trial_tracker.rule_executions, source, REGISTRY,
-                                          required_predicates=required_predicates)
+                                          required_predicates=required_predicates,
+                                          runtime_rule_references=(
+                                              list(trial_tracker.runtime_rule_reference_events.values())
+                                              if trial_tracker.rule_reference_trace_installed else None
+                                          ),
+                                          runtime_dependency_edges=(
+                                              list(trial_tracker.runtime_dependency_edge_events.values())
+                                              if trial_tracker.rule_reference_trace_installed else None
+                                          ),
+                                          runtime_helper_executions=(
+                                              list(trial_tracker.runtime_helper_execution_events.values())
+                                              if trial_tracker.rule_reference_trace_installed else None
+                                          ),
+                                          helper_rule_bindings=EXECUTION_HELPER_RULE_BINDINGS)
         closures[name]["authoritativeExecutionResult"] = trial_tracker.execution_result
     closure_report = {"trials": closures, "requiredDomainPredicates": required_predicates,
                       "complete": all(row["complete"] for row in closures.values()),
