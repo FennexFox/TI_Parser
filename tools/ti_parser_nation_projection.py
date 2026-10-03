@@ -172,6 +172,8 @@ class RegionProjectionState:
     occupation_fraction: float | None = None
     fully_occupied: bool | None = None
     mission_control_cap: int | None = None
+    anti_space_defenses: bool | None = None
+    num_sto_fighters: int | None = None
     welfare_colony_counter: int | None = None
     economy_region_counters: dict[str, int] = field(default_factory=dict)
     adjacent_region_ids: tuple[int, ...] = ()
@@ -272,6 +274,11 @@ class NationProjectionState:
     current_quarter: int = 0
     pcgdp_tracker: dict[int, float] = field(default_factory=dict)
     military: bool = False
+    cached_can_accumulate_legitimize: bool | None = None
+    cached_can_accumulate_decontaminate: bool | None = None
+    best_current_sustainability_value: float | None = None
+    max_military_tech_level: float | None = None
+    policy_no_nukes: bool | None = None
     space_flight_program: bool = False
     federation_space_program: bool | None = False
     nuclear_program: bool = False
@@ -280,6 +287,7 @@ class NationProjectionState:
     num_control_points_unclamped: int | None = None
     legitimize_counter: float = 0.0
     hostile_region_ids: set[int] = field(default_factory=set)
+    hostile_region_ids_complete: bool = False
     executive_faction_id: int | None = None
     public_opinion_context: dict[str, Any] = field(default_factory=dict)
     public_opinion: dict[str, float] = field(default_factory=dict)
@@ -582,6 +590,8 @@ def _apply_effect_context(
                 affected_metrics=affected_metrics,
                 mechanic="effectContext",
             )
+        if row.get("strValue") not in {None, ""}:
+            continue
         operation = row.get("operation")
         value = row.get("value")
         if operation not in {"Additive", "Multiplicative", "SetToFixedValue", "IncreaseToValue", "DecreaseToValue"}:
@@ -810,7 +820,16 @@ def _priority_valid(state: NationProjectionState, priority: str, context: Projec
     per_capita_gdp = state.gdp / (state.population_millions * 1_000_000.0) if state.population_millions else 0.0
     result = evaluate_priority_validity(priority, {
         "democracy": state.democracy,
-        "hasHostileRegion": any(region_id in state.regions for region_id in state.hostile_region_ids),
+        "canAccumulateLegitimizeClaimTriggers": state.cached_can_accumulate_legitimize,
+        "canAccumulateDecontaminateTriggers": state.cached_can_accumulate_decontaminate,
+        "sustainability": state.sustainability,
+        "bestCurrentSustainabilityValue": state.best_current_sustainability_value,
+        "militaryTechLevel": state.military_tech,
+        "maxMilitaryTechLevel": state.max_military_tech_level,
+        "policy_noNukes": state.policy_no_nukes,
+        "completeAntiSpaceDefenses": all(region.anti_space_defenses for region in state.regions.values()) if state.regions and all(isinstance(region.anti_space_defenses, bool) for region in state.regions.values()) else None,
+        "rawBoostPerYear_dekatons": sum(region.boost_per_year for region in state.regions.values()),
+        "hasSTOFighterCapacity": any(region.num_sto_fighters < (min(64, max(1, math.ceil(region.boost_per_year / 12.0 / 4.0))) if region.boost_per_year / 12.0 >= 1.0 else 0) for region in state.regions.values()) if state.regions and all(isinstance(region.num_sto_fighters, int) and not isinstance(region.num_sto_fighters, bool) for region in state.regions.values()) else None,
         "fundingYear": state.funding_year,
         "gdp": state.gdp,
         "spaceFlightProgram": state.space_flight_program,
@@ -868,14 +887,22 @@ def _record_and_fix_control_point(
     cp.total_weight = sum(effective.values())
     cp.num_priorities_with_weight = len(effective)
     cp.diversity_bonus_cache = {
-        priority: _diversity_bonus(cp, priority, effective, context) for priority in effective
+        priority: _diversity_bonus(state, cp, priority, effective, context) for priority in effective
     }
     return effective
 
 
-def _diversity_bonus(cp: ControlPointProjectionState, priority: str, effective: Mapping[str, int], context: ProjectionContext) -> float:
+def _diversity_bonus(
+    state: NationProjectionState,
+    cp: ControlPointProjectionState,
+    priority: str,
+    effective: Mapping[str, int],
+    context: ProjectionContext,
+) -> float:
     total = sum(effective.values())
     if total <= 0 or len(effective) <= 1:
+        return 0.0
+    if _national_priority_bonus(state, priority, context) + cp.priority_bonuses.get(priority, 0.0) <= -1.0:
         return 0.0
     return sum(float(context.diversity_bonuses.get(other, 0.0)) * pip / total for other, pip in effective.items() if other != priority)
 
@@ -950,6 +977,9 @@ def _refresh_region_cache(state: NationProjectionState, context: ProjectionConte
     state.cached_can_accumulate_core_oil = bool(oil_candidates) and not state.policy_no_oil_development
     state.cached_can_accumulate_core_mining = bool(mining_candidates) and not state.policy_no_mineral_development
     state.cached_can_accumulate_core_economy = bool(core_candidates)
+    state.cached_can_accumulate_legitimize = (
+        bool(state.hostile_region_ids) if state.hostile_region_ids_complete else None
+    )
     return {
         "miningRegions": state.cached_num_mining_regions,
         "oilRegions": state.cached_num_oil_regions,
@@ -974,14 +1004,84 @@ def _army_maintenance(state: NationProjectionState, context: ProjectionContext) 
     return total
 
 
-def _base_ip(state: NationProjectionState, context: ProjectionContext | None = None) -> float:
+def _occupation_factor(state: NationProjectionState, context: ProjectionContext) -> float:
+    if not state.regions:
+        raise ProjectionRuntimeStop(
+            "Base investment points require regional occupation state",
+            rule_ids=(Rules.NATION_IP_BASE.id,),
+            dependencies=({"field": "nation.regions", "source": "save-reference"},),
+            affected_metrics=("nation.baseInvestmentPointsMonth",),
+        )
+
+    weighted_occupations: list[tuple[float, float]] = []
+    for region in state.regions.values():
+        if (
+            region.colony is None
+            or region.core_economic_region is None
+            or region.resource_region is None
+            or region.oil_region is None
+            or region.occupation_fraction is None
+        ):
+            raise ProjectionRuntimeStop(
+                "Base investment points require complete regional GDP weights and occupation values",
+                rule_ids=(Rules.NATION_IP_BASE.id,),
+                dependencies=({"field": "region.gdpWeightInputs/occupation", "source": f"save.region.{region.id}"},),
+                affected_metrics=("nation.baseInvestmentPointsMonth",),
+            )
+        if (
+            not isinstance(region.population_millions, (int, float))
+            or isinstance(region.population_millions, bool)
+            or not math.isfinite(region.population_millions)
+            or region.population_millions < 0.0
+            or not isinstance(region.occupation_fraction, (int, float))
+            or isinstance(region.occupation_fraction, bool)
+            or not math.isfinite(region.occupation_fraction)
+            or not 0.0 <= region.occupation_fraction <= 1.0
+        ):
+            raise ProjectionRuntimeStop(
+                "Base investment points require valid regional population and occupation values",
+                rule_ids=(Rules.NATION_IP_BASE.id,),
+                dependencies=({"field": "region.populationInMillions/occupations", "source": f"save.region.{region.id}"},),
+                affected_metrics=("nation.baseInvestmentPointsMonth",),
+            )
+
+        weight = float(region.population_millions)
+        if region.core_economic_region:
+            weight *= _global(context, "coreEcoRegionGDPModifier")
+        if region.resource_region or region.oil_region:
+            weight *= _global(context, "coreResourceRegionGDPModifier")
+        if region.colony:
+            weight *= _global(context, "colonyRegionGDPModifier")
+        if not math.isfinite(weight) or weight < 0.0:
+            raise ProjectionRuntimeStop(
+                "Base investment points require valid regional GDP weights",
+                rule_ids=(Rules.NATION_IP_BASE.id,),
+                dependencies=({"field": "region.gdpWeightInputs", "source": f"save.region.{region.id}"},),
+                affected_metrics=("nation.baseInvestmentPointsMonth",),
+            )
+        weighted_occupations.append((weight, float(region.occupation_fraction)))
+
+    total_weight = sum(weight for weight, _ in weighted_occupations)
+    if not math.isfinite(total_weight) or total_weight <= 0.0:
+        raise ProjectionRuntimeStop(
+            "Base investment points require a positive total regional GDP weight",
+            rule_ids=(Rules.NATION_IP_BASE.id,),
+            dependencies=({"field": "nation.regions.gdpWeightInputs", "source": "save-reference"},),
+            affected_metrics=("nation.baseInvestmentPointsMonth",),
+        )
+    occupation_penalty = sum(weight / total_weight * occupation for weight, occupation in weighted_occupations)
+    return 1.0 - occupation_penalty
+
+
+def _base_ip(state: NationProjectionState, context: ProjectionContext) -> float:
     admin = adviser_attribute_bonus_from_values([advisor.administration for advisor in state.advisors])
+    occupation = _occupation_factor(state, context)
     unrest_factor = 1.0 - max(state.unrest - 2.0, 0.0) / 10.0
-    maintenance = _army_maintenance(state, context) if context is not None else state.army_maintenance
-    value = max(state.economy_score * (1.0 + admin) * state.occupation_factor * unrest_factor - maintenance, 0.0)
+    maintenance = _army_maintenance(state, context)
+    value = max(state.economy_score * (1.0 + admin) * occupation * unrest_factor - maintenance, 0.0)
     state.metric_tracker.record(
         "nation.baseInvestmentPointsMonth",
-        inputs=("internal.economyScore", "nation.unrest", "nation.armies", "internal.advisorAdministration"),
+        inputs=("internal.economyScore", "nation.unrest", "nation.armies", "internal.advisorAdministration", "region.gdpWeightInputs", "region.occupation"),
         rule_ids=(Rules.NATION_IP_BASE.id, Rules.NATION_ASSET_ARMY_MAINTENANCE.id),
     )
     return value
@@ -1521,6 +1621,77 @@ def _apply_economy_region_branch(
     return branch, target, transformed, candidate_count
 
 
+def _require_legitimize_completion_inputs(
+    state: NationProjectionState,
+    priority: str,
+    context: ProjectionContext,
+) -> None:
+    if priority not in {"Government", "Unity"}:
+        return
+    rule_id = (
+        Rules.NATION_PRIORITY_GOVERNMENT_LEGITIMIZE.id
+        if priority == "Government"
+        else Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id
+    )
+    if state.cached_can_accumulate_legitimize is None:
+        raise ProjectionRuntimeStop(
+            "Cached legitimize-claim availability is required before priority completion",
+            rule_ids=(Rules.NATION_PRIORITY_VALIDITY.id, rule_id),
+            dependencies=({
+                "field": "canAccumulateLegitimizeClaimTriggers",
+                "source": "save.TINationState.cachedValidity",
+            },),
+            affected_metrics=("internal.legitimizeCounter", "internal.hostileClaims"),
+            phase="priorityCompletion",
+            priority=priority,
+            mechanic="OnGovernmentPriorityComplete" if priority == "Government" else "OnUnityPriorityComplete",
+        )
+    if not state.cached_can_accumulate_legitimize:
+        return
+
+    threshold = _global(context, "numPrioritiesForLegitimize")
+    if state.legitimize_counter + 1.0 < threshold:
+        return
+    if not state.hostile_region_ids_complete:
+        raise ProjectionRuntimeStop(
+            "Complete hostile-region state is required to select a legitimize target",
+            rule_ids=(rule_id,),
+            dependencies=({
+                "field": "hostileClaims/regions",
+                "source": "save.TINationState",
+            },),
+            affected_metrics=("internal.legitimizeCounter", "internal.hostileClaims"),
+            phase="priorityCompletion",
+            priority=priority,
+            mechanic="OnLegitimizeClaimPriorityComplete",
+        )
+    if _next_legitimize_region(state) is None:
+        raise ProjectionRuntimeStop(
+            "Cached legitimize availability has no resolvable hostile-region target",
+            rule_ids=(Rules.NATION_PRIORITY_VALIDITY.id, rule_id),
+            dependencies=({
+                "field": "hostileClaims/regions",
+                "source": "save.TINationState",
+            },),
+            affected_metrics=("internal.legitimizeCounter", "internal.hostileClaims"),
+            phase="priorityCompletion",
+            priority=priority,
+            mechanic="OnLegitimizeClaimPriorityComplete",
+        )
+
+
+def _remove_hostile_claim(state: NationProjectionState, region_id: int) -> None:
+    """Apply the modeled RemoveHostileClaim setter and its cached-gate update."""
+
+    state.hostile_region_ids.remove(region_id)
+    if state.hostile_region_ids:
+        state.cached_can_accumulate_legitimize = True
+    elif state.hostile_region_ids_complete:
+        state.cached_can_accumulate_legitimize = False
+    else:
+        state.cached_can_accumulate_legitimize = None
+
+
 def _apply_completion(
     state: NationProjectionState,
     priority: str,
@@ -1530,6 +1701,7 @@ def _apply_completion(
     trace: list[dict[str, Any]] | None = None,
     unity_public_opinion_policy: str = "failClosed",
 ) -> dict[str, Any]:
+    _require_legitimize_completion_inputs(state, priority, context)
     scale = _population_scaling(state, context)
     progress_metric = f"nation.priorityProgress.{priority}"
     metric_inputs = [progress_metric]
@@ -1743,14 +1915,14 @@ def _apply_completion(
             state.democracy = min(10.0, state.democracy + scale * _global(context, "governmentPriorityDemocracyIncrease") * state.education / 10.0)
             metric_inputs.extend(("internal.populationScaling", "nation.education"))
             metric_outputs.append("nation.democracy")
-        if state.hostile_region_ids:
+        if state.cached_can_accumulate_legitimize:
             used.add(Rules.NATION_PRIORITY_GOVERNMENT_LEGITIMIZE.id)
             state.legitimize_counter += 1.0
             threshold = _global(context, "numPrioritiesForLegitimize")
             if state.legitimize_counter >= threshold:
                 target = _next_legitimize_region(state)
                 if target is not None:
-                    state.hostile_region_ids.remove(target.id)
+                    _remove_hostile_claim(state, target.id)
                     state.legitimize_counter = 0.0
                     execution["removedHostileClaimRegionId"] = target.id
                     if trace is not None:
@@ -1898,7 +2070,7 @@ def _apply_completion(
         metric_inputs.extend(("internal.populationScaling", "nation.education", "nation.democracy"))
         metric_outputs.append("nation.education")
 
-        if state.hostile_region_ids:
+        if state.cached_can_accumulate_legitimize:
             used.add(Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id)
             execution["dependencies"].append(Rules.NATION_PRIORITY_UNITY_LEGITIMIZE.id)
             state.legitimize_counter += 1.0
@@ -1906,7 +2078,7 @@ def _apply_completion(
             if state.legitimize_counter >= _global(context, "numPrioritiesForLegitimize"):
                 target_region = _next_legitimize_region(state)
                 if target_region is not None:
-                    state.hostile_region_ids.remove(target_region.id)
+                    _remove_hostile_claim(state, target_region.id)
                     state.legitimize_counter = 0.0
                     removed_region_id = target_region.id
                     execution["removedHostileClaimRegionId"] = target_region.id
@@ -2075,10 +2247,189 @@ def _apply_completion(
     return execution
 
 
+def _refresh_control_point_types(
+    state: NationProjectionState,
+    context: ProjectionContext,
+) -> dict[int, str | None]:
+    """Recompute current-build control-point types from the live nation state.
+
+    Synthetic scenario states have no complete war/rival input set, so their
+    caller-supplied sector flags remain the contribution fallback. Source-backed
+    states must provide every dependency consumed by the selected DLL branch.
+    Candidate types are collected before any control point is changed.
+    """
+    if state.rest_state_context.get("sourceBacked") is not True:
+        return {cp.id: cp.control_point_type for cp in state.control_points.values()}
+
+    def stop(field: str, reason: str) -> None:
+        raise ProjectionRuntimeStop(
+            reason,
+            rule_ids=(Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id,),
+            dependencies=({"field": field, "source": "save.TINationState"},),
+            affected_metrics=("factionContribution.research", "factionContribution.funding"),
+            phase="monthlyUpdate",
+            mechanic="SetControlPointType",
+        )
+
+    used_inputs: set[str] = set()
+
+    def number(value: Any, field: str) -> float:
+        used_inputs.add({"nation.GDP": "nation.gdp", "nation.populationInMillions": "nation.population"}.get(field, field))
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+            stop(field, "Control-point types require a finite numeric input")
+        return float(value)
+
+    alien = state.rest_state_context.get("alienNation")
+    if not isinstance(alien, bool):
+        stop("alienNation", "Control-point types require the target nation type")
+    if not state.control_points:
+        stop("nation.controlPoints", "Control-point types require at least one control point")
+    count = state.num_control_points
+    if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+        stop("nation.numControlPoints", "Control-point types require a positive control-point count")
+
+    candidates: dict[int, str] = {}
+    ids: set[int] = set()
+    positions: set[int] = set()
+
+    def enemy_with_control_point_count(minimum: int) -> bool:
+        used_inputs.add("internal.heldFixedRelations")
+        relations = state.rest_state_context
+        by_id: dict[int, int] = {}
+        for name in ("wars", "rivals"):
+            rows = relations.get(name)
+            if not isinstance(rows, list):
+                stop(f"{name}.numControlPoints", "Control-point types require resolved war and rival inputs")
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    stop(f"{name}.numControlPoints", "Control-point relation row is invalid")
+                enemy_id = row.get("id")
+                enemy_count = row.get("numControlPoints")
+                if not isinstance(enemy_id, int) or isinstance(enemy_id, bool):
+                    stop(f"{name}.id", "Control-point relation identity is unresolved")
+                if not isinstance(enemy_count, int) or isinstance(enemy_count, bool) or enemy_count < 0:
+                    stop(f"{name}.numControlPoints", "Control-point relation count is invalid")
+                previous = by_id.setdefault(enemy_id, enemy_count)
+                if previous != enemy_count:
+                    stop(f"{name}.numControlPoints", "Duplicate enemy rows disagree on control-point count")
+        return any(enemy_count >= minimum for enemy_count in by_id.values())
+
+    def resource_region_count() -> int:
+        if not state.regions:
+            stop("nation.regions", "Control-point types require region resource status")
+        used_inputs.add("internal.regionDailyCache")
+        resource_count = 0
+        for region in state.regions.values():
+            if region.resource_region is None or region.oil_region is None:
+                stop(f"region.{region.id}.resourceRegion/oilRegion", "Control-point types require region resource status")
+            resource_count += int(region.resource_region or region.oil_region)
+        return resource_count
+
+    def per_capita_gdp() -> float:
+        population = number(state.population_millions, "nation.populationInMillions")
+        gdp = number(state.gdp, "nation.GDP")
+        return gdp / (population * 1_000_000.0) if population else 0.0
+
+    def control_point_type(rank: int, current: str | None) -> str:
+        if alien:
+            return "Alien"
+        if rank == 0:
+            return "Executive"
+        if rank == 1:
+            democracy = number(state.democracy, "nation.democracy")
+            if democracy >= 5.0:
+                return "Legislature"
+            education = number(state.education, "nation.education")
+            if education >= 6.0:
+                cohesion = number(state.cohesion, "nation.cohesion")
+                return "TheParty" if cohesion >= 7.0 else "Oligarchs"
+            return "Aristocracy"
+        if rank == 2:
+            democracy = number(state.democracy, "nation.democracy")
+            if democracy >= 5.0:
+                return "MassMedia" if number(state.education, "nation.education") >= 7.0 else "Religion"
+            return "SecurityApparatus"
+        if rank == 3:
+            if number(state.democracy, "nation.democracy") < 4.0:
+                return "NationalIndustries"
+            if number(state.inequality, "nation.inequality") < 3.5:
+                pcgdp = per_capita_gdp()
+                education = number(state.education, "nation.education")
+                if pcgdp > 10_000.0 and education > 7.0:
+                    return "TradeUnions"
+            return "Corporations"
+        if rank == 4:
+            cohesion = number(state.cohesion, "nation.cohesion")
+            if cohesion > 6.0:
+                return "Bureaucracy"
+            if cohesion > 3.0:
+                return "RegionalAuthorities"
+            if cohesion > 1.0 or number(state.unrest, "nation.unrest") < 7.0:
+                return "IdentityBlocs"
+            return "Warlords"
+        if rank == 5:
+            democracy = number(state.democracy, "nation.democracy")
+            education = number(state.education, "nation.education")
+            if democracy > 9.0 and education > 9.0:
+                return "KnowledgeSector"
+            if number(state.cohesion, "nation.cohesion") > 6.0 and enemy_with_control_point_count(count):
+                return "DefenseSector"
+            if democracy > 6.0 and education > 7.0:
+                return "FinancialSector"
+            if resource_region_count() > 0:
+                return "ExtractiveSector"
+            return "AgriculturalSector"
+        if current is None:
+            stop("controlPoints.positionInNation", f"Control-point type rank {rank} has no current-build rule")
+        return current
+
+    for cp in state.control_points.values():
+        if not isinstance(cp.id, int) or isinstance(cp.id, bool) or cp.id in ids:
+            stop("controlPoints.ID", "Control-point identities must be present and unique")
+        ids.add(cp.id)
+        if not isinstance(cp.position, int) or isinstance(cp.position, bool) or cp.position in positions:
+            stop("controlPoints.positionInNation", "Control-point positions must be present and unique")
+        if not 0 <= cp.position < count:
+            stop("controlPoints.positionInNation", "Control-point position lies outside the nation count")
+        positions.add(cp.position)
+        rank = count - cp.position - 1
+        candidates[cp.id] = control_point_type(rank, cp.control_point_type)
+
+    if len(candidates) != len(state.control_points):
+        stop("controlPoints.ID", "Control-point type candidates are incomplete")
+    for cp in state.control_points.values():
+        cp.control_point_type = candidates[cp.id]
+    state.metric_tracker.record(
+        "internal.controlPointTypes", inputs=tuple(sorted(used_inputs)),
+        rule_ids=(Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id,),
+        provenance=("heldFixedWorldContext",) if "internal.heldFixedRelations" in used_inputs else (),
+    )
+    return candidates
+
+
 def _contribution(state: NationProjectionState, context: ProjectionContext, used: set[str] | None = None) -> dict[str, float | int]:
     if used is not None:
         used.add(Rules.NATION_FACTION_CONTRIBUTION.id)
     owned = [cp for cp in state.control_points.values() if cp.owner_faction_id == context.faction_id and not cp.benefits_disabled]
+    source_backed = state.rest_state_context.get("sourceBacked") is True
+    if source_backed and any(cp.control_point_type is None for cp in owned):
+        raise ProjectionRuntimeStop(
+            "Faction contribution requires current control-point types",
+            rule_ids=(Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id,),
+            dependencies=({"field": "controlPoints.controlPointType", "source": "monthlyUpdate.SetControlPointType"},),
+            affected_metrics=("factionContribution.research", "factionContribution.funding"),
+        )
+    has_typed_owned_points = any(cp.control_point_type is not None for cp in owned)
+    knowledge_sector_owned = (
+        any(cp.control_point_type == "KnowledgeSector" for cp in owned)
+        if has_typed_owned_points or source_backed
+        else context.knowledge_sector_owned
+    )
+    financial_sector_owned = (
+        any(cp.control_point_type == "FinancialSector" for cp in owned)
+        if has_typed_owned_points or source_backed
+        else context.financial_sector_owned
+    )
     positions = [cp.position for cp in owned]
     sciences = [advisor.science for advisor in state.advisors]
     research = nation_monthly_research_from_values(
@@ -2091,12 +2442,12 @@ def _contribution(state: NationProjectionState, context: ProjectionContext, used
         num_control_points=state.num_control_points,
         advisor_sciences=sciences,
     )
-    research *= context.knowledge_sector_bonus if context.knowledge_sector_owned else 1.0
+    research *= context.knowledge_sector_bonus if knowledge_sector_owned else 1.0
     research *= context.research_effect_factor
     funding_pool = context.initial_funding_pool_year + state.funding_year - context.initial_own_funding_year
     return {
         "research": proportional_cp_contribution(research, len(owned), state.num_control_points),
-        "funding": proportional_cp_contribution(funding_pool / 12.0, len(owned), state.num_control_points, sector_bonus=context.financial_sector_bonus if context.financial_sector_owned else 1.0),
+        "funding": proportional_cp_contribution(funding_pool / 12.0, len(owned), state.num_control_points, sector_bonus=context.financial_sector_bonus if financial_sector_owned else 1.0),
         "boost": proportional_cp_contribution(context.initial_boost_pool_year / 12.0, len(owned), state.num_control_points),
         "missionControl": mission_control_contribution_from_values(state.mission_control, positions, state.num_control_points),
     }
@@ -2246,6 +2597,7 @@ def _seed_metric_evidence(state: NationProjectionState, context: ProjectionConte
     tracker.ensure("internal.economyScore", rule_ids=(Rules.NATION_IP_ECONOMY_SCORE.id,))
     tracker.ensure("internal.populationScaling")
     tracker.ensure("internal.hostileClaims")
+    tracker.ensure("internal.controlPointTypes")
     _refresh_advisor_evidence(state)
     _refresh_public_metric_evidence(state, context)
 
@@ -2290,12 +2642,12 @@ def _refresh_public_metric_evidence(state: NationProjectionState, context: Proje
     )
     tracker.record(
         "factionContribution.research",
-        inputs=("nation.research",),
+        inputs=("nation.research", "internal.controlPointTypes"),
         rule_ids=(Rules.NATION_FACTION_CONTRIBUTION.id,),
     )
     tracker.record(
         "factionContribution.funding",
-        inputs=("nation.funding",),
+        inputs=("nation.funding", "internal.controlPointTypes"),
         rule_ids=(Rules.NATION_FACTION_CONTRIBUTION.id,),
     )
     tracker.record(
@@ -2488,6 +2840,7 @@ def _run_investment_transaction(
     _refresh_advisor_evidence(state)
     _refresh_economy_score(state, context, used)
     base_ip = _base_ip(state, context)
+    state.rest_state_context["ownBaseInvestmentPointsMonth"] = base_ip
     region_cache = _refresh_region_cache(state, context)
     used.add(Rules.NATION_PERIODIC_REGION_CACHE.id)
     rule_executions.append({
@@ -2825,25 +3178,70 @@ def _run_monthly_transaction(
             },
         )
     state.num_control_points_unclamped = max(round((state.gdp / 1_000_000_000.0) ** _global(context, "controlPointCountScaling") / _global(context, "controlPointScalingDivisor")), 1)
-    if state.cohesion < state.cohesion_rest:
-        state.cohesion += min(_global(context, "maxMonthlyCohesionIncrease_normal"), state.cohesion_rest - state.cohesion)
-    elif state.cohesion > state.cohesion_rest:
+    monthly_inputs = state.rest_state_context
+    monthly_trace: list[dict[str, Any]] = []
+
+    def stop_monthly(reason: str, phase: str, *, dependencies: Iterable[Mapping[str, Any]] = ()) -> ProjectionRuntimeStop:
+        return ProjectionRuntimeStop(
+            reason, rule_ids=(Rules.NATION_PERIODIC_COHESION.id,), dependencies=dependencies,
+            affected_metrics=("nation.democracy", "nation.cohesion", "nation.unrest", "nation.population", "nation.gdp"),
+            phase=phase, mechanic="MonthlyNationUpdate", authoritative_state=copy.deepcopy(state),
+            unsupported_next_step={"mechanic": "MonthlyNationUpdate", "phase": phase, "ruleIds": [Rules.NATION_PERIODIC_COHESION.id]},
+            attempted_transaction={"kind": "monthly", "phaseTrace": list(monthly_trace), "mechanicRules": sorted(used), "ruleExecutions": []},
+        )
+
+    if not isinstance(monthly_inputs.get("alienNation"), bool) or not isinstance(monthly_inputs.get("wars"), list):
+        raise stop_monthly("Monthly democracy source inputs are incomplete", "beforeMonthlyDemocracy", dependencies=({"field": "alienNation/wars", "source": "save.TINationState"},))
+    if not monthly_inputs["alienNation"]:
+        delta = 0.0
+        if monthly_inputs["wars"]:
+            delta = -0.01 * _population_scaling(state, context)
+        else:
+            neighbors = monthly_inputs.get("neighbors")
+            if not isinstance(neighbors, list):
+                raise stop_monthly("Monthly democracy adjacency inputs are incomplete", "beforeNeighborDemocracy", dependencies=({"field": "adjacentNations", "source": "save.TINationState"},))
+            if neighbors and all(not row["atWar"] and row["democracy"] > state.democracy for row in neighbors):
+                delta = _global(context, "basePassiveDemocracyIncreaseFromNeighbor") * _population_scaling(state, context)
+        if delta:
+            state.democracy = min(10.0, max(0.0, state.democracy + delta))
+            state.metric_tracker.record("nation.democracy", inputs=("nation.democracy", "nation.population"),
+                                        rule_ids=(Rules.NATION_PERIODIC_COHESION.id,), provenance=("heldFixedWorldContext",))
+            monthly_trace.append({"phase": "monthly.democracy", "delta": delta, "democracy": state.democracy})
+        if state.cohesion < 4.0:
+            raise stop_monthly("Monthly low-cohesion democracy requires a stochastic draw", "beforeLowCohesionDemocracy")
+        eyes = monthly_inputs.get("alienHabSurveillanceStrength")
+        if not isinstance(eyes, (int, float)) or isinstance(eyes, bool) or not math.isfinite(eyes):
+            raise stop_monthly("Monthly abduction surveillance input is unavailable", "beforeMonthlyAbductions", dependencies=({"field": "AlienHabSurveillanceStrength", "source": "save.TIFactionState"},))
+        if eyes > 0:
+            raise stop_monthly("Monthly abductions require unsupported stochastic region mutations", "beforeMonthlyAbductions")
+    try:
+        live_cohesion_rest = _live_cohesion_rest(state, context)
+    except ProjectionRuntimeStop as exc:
+        raise stop_monthly(exc.reason, "beforeCohesionMovement", dependencies=exc.dependencies) from exc
+    if state.cohesion < live_cohesion_rest:
+        state.cohesion += min(_global(context, "maxMonthlyCohesionIncrease_normal"), live_cohesion_rest - state.cohesion)
+    elif state.cohesion > live_cohesion_rest:
         normal = max(0.0, state.inequality - 3.0) ** 2 / 10.0
         cap = min(max(normal, _global(context, "maxMonthlyCohesionDecrease_normal")), _global(context, "maxMonthlyCohesionDecrease_cap"))
-        state.cohesion -= min(cap, state.cohesion - state.cohesion_rest)
-    if state.unrest < state.unrest_rest:
+        state.cohesion -= min(cap, state.cohesion - live_cohesion_rest)
+    # GetMonthlyUnrestMovement calls the live getter AFTER AddToCohesion.
+    try:
+        live_unrest_rest = _live_unrest_rest(state, context)
+    except ProjectionRuntimeStop as exc:
+        raise stop_monthly(exc.reason, "beforeUnrestMovement", dependencies=exc.dependencies) from exc
+    if state.unrest < live_unrest_rest:
         limit = _global(context, "maxMonthlyUnrestMovement_rapidIncrease") if state.cohesion == 0 else _global(context, "maxMonthlyUnrestMovement_normal")
-        state.unrest += min(limit, state.unrest_rest - state.unrest)
-    elif state.unrest > state.unrest_rest:
-        state.unrest -= min(_global(context, "maxMonthlyUnrestMovement_normal"), state.unrest - state.unrest_rest)
+        state.unrest += min(limit, live_unrest_rest - state.unrest)
+    elif state.unrest > live_unrest_rest:
+        state.unrest -= min(_global(context, "maxMonthlyUnrestMovement_normal"), state.unrest - live_unrest_rest)
     state.metric_tracker.record(
         "nation.cohesion",
-        inputs=("nation.cohesion", "nation.cohesionRest", "nation.inequality"),
+        inputs=("nation.cohesion", "nation.inequality", "nation.democracy", "nation.education", "nation.population", "nation.perCapitaGdp", "internal.publicOpinionCohesionImpact"),
         rule_ids=(Rules.NATION_PERIODIC_COHESION.id,),
     )
     state.metric_tracker.record(
         "nation.unrest",
-        inputs=("nation.unrest", "nation.unrestRest", "nation.cohesion"),
+        inputs=("nation.unrest", "nation.cohesion", "nation.perCapitaGdp", "nation.democracy", "nation.armies"),
         rule_ids=(Rules.NATION_PERIODIC_UNREST.id,),
     )
     population_rows = []
@@ -2853,12 +3251,18 @@ def _run_monthly_transaction(
         old = region.population_millions
         new = max(old * (1.0 + monthly_rate), 0.001)
         delta = new - old
-        regional_gdp = _region_gdp_value(state, region, context)
-        regional_pcgdp = regional_gdp / (region.population_millions * 1_000_000.0) if region.population_millions else 0.0
+        # GrowPopulationByMonth mutates population before reading the live
+        # regionalPerCapitaGDP getter. That getter observes the new regional
+        # GDP weight, the current national GDP, and the new regional population.
+        old_national_gdp = state.gdp
         region.population_millions = new
-        gdp_delta = regional_pcgdp * delta * 1_000_000.0
-        state.gdp += gdp_delta
-        region.gdp = regional_gdp + gdp_delta
+        regional_gdp = _region_gdp_value(state, region, context)
+        regional_pcgdp = regional_gdp / (new * 1_000_000.0) if new else 0.0
+        requested_gdp_delta = regional_pcgdp * delta * 1_000_000.0
+        # ModifyGDP applies its floor after the region's population mutation.
+        gdp_floor = state.population_millions * 1_000_000.0 * 100.0
+        state.gdp = max(state.gdp + requested_gdp_delta, gdp_floor)
+        gdp_delta = state.gdp - old_national_gdp
         population_metric = f"region.{region.id}.population"
         gdp_metric = f"region.{region.id}.gdp"
         state.metric_tracker.record(
@@ -2875,7 +3279,8 @@ def _run_monthly_transaction(
             rule_ids=(Rules.NATION_POPULATION_MONTHLY_GROWTH.id,),
         )
         if delta < 0:
-            state.education += max(-0.005, min(0.0, delta / 100.0))
+            education_delta = max(-0.005, min(0.0, delta / 100.0))
+            state.education = min(255.0, max(1.0, state.education + education_delta))
             state.metric_tracker.record(
                 "nation.education",
                 inputs=("nation.education", population_metric),
@@ -2890,6 +3295,10 @@ def _run_monthly_transaction(
             "populationDeltaMillions": delta,
             "gdpDelta": gdp_delta,
         })
+    # Region GDP is a live national-GDP share in the game, not a per-region
+    # cached increment. Refresh every output cache after the ordered mutations.
+    for region in state.regions.values():
+        region.gdp = _region_gdp_value(state, region, context)
     state.population_mean_path = True
     region_population_metrics = tuple(f"region.{region.id}.population" for region in state.regions.values())
     region_gdp_metrics = tuple(f"region.{region.id}.gdp" for region in state.regions.values())
@@ -2909,6 +3318,25 @@ def _run_monthly_transaction(
         rule_ids=(Rules.NATION_IP_ECONOMY_SCORE.id,),
     )
     _refresh_economy_score(state, context, used)
+    type_executions: list[dict[str, Any]] = []
+    if state.rest_state_context.get("sourceBacked") is True:
+        try:
+            cp_types = _refresh_control_point_types(state, context)
+        except ProjectionRuntimeStop as exc:
+            stopped = stop_monthly(exc.reason, "beforeControlPointTypeMutation", dependencies=exc.dependencies)
+            stopped.rule_ids = (Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id,)
+            stopped.affected_metrics = exc.affected_metrics
+            stopped.unsupported_next_step["ruleIds"] = list(stopped.rule_ids)
+            raise stopped from exc
+        used.add(Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id)
+        type_executions.append({
+            "ruleId": Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id,
+            "effectiveCoverage": "exact",
+            "provenance": "dllReimplementation", "dependencies": [],
+            "inputs": sorted(state.metric_tracker.evidence["internal.controlPointTypes"].depends_on),
+            "outputs": ["internal.controlPointTypes"],
+        })
+        monthly_trace.append({"phase": "monthly.controlPointTypes", "types": cp_types})
     if quarterly:
         state.current_quarter += 1
         state.pcgdp_tracker[state.current_quarter] = state.gdp / (state.population_millions * 1_000_000.0) if state.population_millions else 0.0
@@ -2929,6 +3357,7 @@ def _run_monthly_transaction(
         "populationUpdates": population_rows,
         "quarterlyTrackerUpdated": quarterly,
         "phaseTrace": [
+            *monthly_trace,
             {
                 "phase": "monthly.controlPointsAndMovement",
                 "currentControlPointCount": state.num_control_points,
@@ -2949,6 +3378,7 @@ def _run_monthly_transaction(
             }] if quarterly else []),
         ],
         "ruleExecutions": [
+            *type_executions,
             {
                 "ruleId": Rules.NATION_PERIODIC_CONTROL_POINTS.id,
                 "effectiveCoverage": "exact",
@@ -2984,9 +3414,15 @@ def _hostile_claim_population_fraction(state: NationProjectionState) -> float:
 
 def _public_opinion_cohesion_impact(state: NationProjectionState, context: ProjectionContext) -> float:
     if not state.public_opinion or not context.ideology_templates:
+        if state.rest_state_context.get("sourceBacked"):
+            raise ProjectionRuntimeStop("Live cohesion public-opinion inputs are incomplete", dependencies=({"field": "publicOpinion/ideologyTemplates", "source": "save/catalog"},))
         return 0.0
     active = _active_human_ideologies(state, context)
-    coordinates = {name: (x, y, z) for name, x, y, z in active}
+    coordinates = {row["ideology"]: coords for row in context.ideology_templates.values()
+                   if isinstance(row, Mapping) and isinstance(row.get("ideology"), str)
+                   and (coords := _ideology_coordinates(row)) is not None}
+    if set(state.public_opinion) - set(coordinates):
+        raise ProjectionRuntimeStop("Public opinion refers to an unresolved ideology", dependencies=({"field": "ideologyCoordinates", "source": "nationDevelopment.ideologyTemplates"},))
     mean = tuple(
         sum(coordinates[name][axis] * state.public_opinion.get(name, 0.0) for name in coordinates)
         for axis in range(3)
@@ -3013,7 +3449,7 @@ def _public_opinion_cohesion_impact(state: NationProjectionState, context: Proje
         try:
             _ideology, owner_coordinates = _faction_ideology_target(cp.owner_faction_id, context)
         except ProjectionRuntimeStop:
-            if state.public_opinion_expected_transition:
+            if state.public_opinion_expected_transition or state.rest_state_context.get("sourceBacked"):
                 raise
             continue
         for axis in range(3):
@@ -3027,7 +3463,7 @@ def _public_opinion_cohesion_impact(state: NationProjectionState, context: Proje
     return dispersion + elite_divide
 
 
-def _cohesion_dynamic_impact(state: NationProjectionState, context: ProjectionContext) -> float:
+def _cohesion_dynamic_impact(state: NationProjectionState, context: ProjectionContext, public_impact: float | None = None) -> float:
     inequality = min(1.0, 0.5 + state.education / 20.0) * (
         -state.inequality * _global(context, "inequalityCohesionMultiplier")
         - max(0.0, state.inequality - _global(context, "severeInequality"))
@@ -3037,13 +3473,15 @@ def _cohesion_dynamic_impact(state: NationProjectionState, context: ProjectionCo
     ))
     pcgdp = state.gdp / (state.population_millions * 1_000_000.0) if state.population_millions else 0.0
     recent = [value for quarter, value in state.pcgdp_tracker.items() if quarter >= state.current_quarter - 40]
+    if not recent and state.rest_state_context.get("sourceBacked"):
+        raise ProjectionRuntimeStop("Live cohesion has no PCGDP tracker within the source quarter window", dependencies=({"field": "tracker_PCGDP_ByQuarter", "source": "save.TINationState"},))
     maximum = max(recent + [100.0])
     pcgdp_impact = (1.0 - pcgdp / maximum) * -state.inequality if pcgdp < maximum else 0.0
     hostile_total = _hostile_claim_population_fraction(state) * _global(context, "maxCombinedImpactFromHostileClaims")
     hostile = -hostile_total * state.democracy / 10.0
     autocracy = ((3.5 ** 1.285) - (state.democracy ** 1.285)) * ((10.0 - state.unrest) / 10.0) if state.democracy <= 3.5 else 0.0
     anocracy = 2.0 * abs(5.0 - state.democracy) - 3.0 if 3.5 < state.democracy <= 6.5 else 0.0
-    return inequality + population + pcgdp_impact + hostile + autocracy + anocracy + _public_opinion_cohesion_impact(state, context)
+    return inequality + population + pcgdp_impact + hostile + autocracy + anocracy + (_public_opinion_cohesion_impact(state, context) if public_impact is None else public_impact)
 
 
 def _democracy_cohesion_transform(original: float, democracy: float) -> float:
@@ -3056,11 +3494,99 @@ def _democracy_cohesion_transform(original: float, democracy: float) -> float:
 def _own_army_unrest_impact(state: NationProjectionState, context: ProjectionContext) -> float:
     denominator = max(len(state.regions) ** (1.0 - _global(context, "controlPointIPScaling")), 1.0)
     region_ids = set(state.regions)
-    return sum(
-        -army.strength * 0.5 * (10.0 - state.democracy) / denominator
-        for army in state.standard_armies
-        if army.current_region_id in region_ids
-    )
+    source_backed = state.rest_state_context.get("sourceBacked") is True
+    own_base_ip = state.rest_state_context.get("ownBaseInvestmentPointsMonth")
+    if source_backed and any(army.current_region_id in region_ids for army in state.armies) and not isinstance(own_base_ip, (int, float)):
+        raise ProjectionRuntimeStop("Own army unrest requires the saved base-IP cache", dependencies=({"field": "baseInvestmentPoints_month", "source": "save.TINationState"},))
+    rows = [
+        {"strength": army.strength, "currentRegionId": army.current_region_id,
+         "factionId": army.faction_id, "armyType": army.army_type,
+         "homeBaseInvestmentPointsMonth": own_base_ip if source_backed else _base_ip(state, context)}
+        for army in (state.armies if source_backed else state.standard_armies)
+        if not source_backed or not state.rest_state_context.get("alienNation") or army.army_type in {"Human", "AlienInvader"}
+    ]
+    rows.extend(state.rest_state_context.get("alliedArmies", []))
+    total = 0.0
+    for row in rows:
+        if row["currentRegionId"] not in region_ids:
+            continue
+        if row["armyType"] != "AlienInvader" and row["homeBaseInvestmentPointsMonth"] <= 0:
+            continue
+        faction_id = row["factionId"]
+        if source_backed and faction_id is not None and faction_id not in state.faction_effect_contexts:
+            raise ProjectionRuntimeStop("Army unrest faction effects are unresolved", dependencies=({"field": str(faction_id), "source": "save.TIEffectsState.factionEffects"},))
+        for name in state.faction_effect_contexts.get(faction_id, {}).get("ArmyUnrestReductionImpact", []):
+            if "strValue" not in context.effect_templates.get(name, {}):
+                raise ProjectionRuntimeStop("Army unrest effect filter input is unavailable", dependencies=({"field": f"{name}.strValue", "source": "effectsCatalog"},))
+        total -= row["strength"] * 0.5 * (10.0 - state.democracy) / denominator
+        # The DLL applies effects to the running sum after EACH eligible army.
+        total = _apply_effect_context(state, context, faction_id, "ArmyUnrestReductionImpact", total,
+                                      rule_id=Rules.NATION_PERIODIC_UNREST.id,
+                                      affected_metrics=("nation.unrestRest", "nation.unrest"))
+    return total
+
+
+def _cohesion_fixed_impact(state: NationProjectionState, context: ProjectionContext) -> float:
+    inputs = state.rest_state_context
+    if inputs.get("sourceBacked") is not True:
+        values = (inputs.get("cohesionFixedImpact"),)
+        if not all(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) for value in values):
+            raise ProjectionRuntimeStop("Live resting-state source inputs are incomplete", rule_ids=(Rules.NATION_PERIODIC_DERIVED_CACHE.id,),
+                                        dependencies=({"field": "restStateContext", "source": "projection"},),
+                                        affected_metrics=("nation.cohesionRest", "nation.unrestRest"))
+        return float(values[0])
+    if not state.regions:
+        return state.cohesion
+    capital = next((region for region in state.regions.values() if region.capital), None)
+    if capital is None:
+        raise ProjectionRuntimeStop("Cohesion resting state has no resolved capital", dependencies=({"field": "capital", "source": "save.TINationState"},))
+    radius = inputs["spaceBodyRadiusKm"]
+    weighted_distance = 0.0
+    for region in state.regions.values():
+        lat1, lat2 = math.radians(capital.latitude), math.radians(region.latitude)
+        angle = math.sin((lat2 - lat1) / 2.0) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(math.radians(region.longitude - capital.longitude) / 2.0) ** 2
+        angle = min(1.0, max(0.0, angle))
+        weighted_distance += radius * 2.0 * math.atan2(math.sqrt(angle), math.sqrt(1.0 - angle)) * region.population_millions
+    distance = weighted_distance / state.population_millions if state.population_millions else 0.0
+    regions_impact = max(_global(context, "maxDistanceImpactOnCohesion"), math.trunc(-distance * _global(context, "cohesionImpactPerKMtoPopCenter") * 100.0) / 100.0)
+    wars_impact = min(3.0, sum(row["extant"] and (state.democracy < 6.0 or row["democracy"] < 6.0) for row in inputs["wars"]))
+    rivals_impact = min(max(0.0, 3.0 - wars_impact), 0.5 * sum(row["numControlPoints"] >= state.num_control_points - 1 and (state.democracy < 6.0 or row["democracy"] < 6.0) for row in inputs["rivals"]))
+    return 16.0 + regions_impact + wars_impact + rivals_impact
+
+
+def _unrest_fixed_impact(state: NationProjectionState) -> float:
+    if state.rest_state_context.get("sourceBacked"):
+        xeno_impact = -sum(region.xenoforming_level / 20.0 for region in state.regions.values()) / len(state.regions) if state.rest_state_context["alienNation"] and state.regions else 0.0
+        return 10.5 + xeno_impact
+    value = state.rest_state_context.get("unrestFixedImpact")
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+        raise ProjectionRuntimeStop("Live resting-state source inputs are incomplete", rule_ids=(Rules.NATION_PERIODIC_UNREST.id,),
+                                    dependencies=({"field": "unrestFixedImpact", "source": "projection.restStateContext"},), affected_metrics=("nation.unrestRest",))
+    return float(value)
+
+
+def _rest_fixed_impacts(state: NationProjectionState, context: ProjectionContext) -> tuple[float, float]:
+    return _cohesion_fixed_impact(state, context), _unrest_fixed_impact(state)
+
+
+def _live_cohesion_rest(state: NationProjectionState, context: ProjectionContext, public_impact: float | None = None) -> float:
+    if state.rest_state_context.get("sourceBacked") is True and not state.regions:
+        return state.cohesion
+    fixed_cohesion = _cohesion_fixed_impact(state, context)
+    raw_cohesion = fixed_cohesion + _cohesion_dynamic_impact(state, context, public_impact)
+    return min(10.0, max(0.0, _democracy_cohesion_transform(raw_cohesion, state.democracy)))
+
+
+def _live_unrest_rest(state: NationProjectionState, context: ProjectionContext) -> float:
+    if state.rest_state_context.get("sourceBacked") is True and not state.regions:
+        return 0.0
+    fixed_unrest = _unrest_fixed_impact(state)
+    divisor = state.rest_state_context.get("pcgdpToReduceUnrestBy1")
+    if not isinstance(divisor, (int, float)) or isinstance(divisor, bool) or not math.isfinite(divisor) or divisor <= 0:
+        raise ProjectionRuntimeStop("Resting unrest PCGDP divisor is unavailable", dependencies=({"field": "fixedPCGDPToReduceUnrestBy1", "source": "save.TIGlobalValuesState"},))
+    pcgdp = state.gdp / (state.population_millions * 1_000_000.0) if state.population_millions else 0.0
+    hostile = _hostile_claim_population_fraction(state) * _global(context, "maxCombinedImpactFromHostileClaims") * (1.0 - state.democracy / 10.0)
+    return min(10.0, max(0.0, fixed_unrest - state.cohesion - pcgdp / divisor + _own_army_unrest_impact(state, context) + hostile))
 
 
 def _refresh_rest_caches(
@@ -3076,34 +3602,17 @@ def _refresh_rest_caches(
         Rules.NATION_PERIODIC_UNREST.id,
         Rules.NATION_COHESION_PUBLIC_OPINION.id,
     }
-    fixed_cohesion = state.rest_state_context.get("cohesionFixedImpact")
-    fixed_unrest = state.rest_state_context.get("unrestFixedImpact")
-    unrest_divisor = state.rest_state_context.get("pcgdpToReduceUnrestBy1")
-    if not all(isinstance(value, (int, float)) for value in (fixed_cohesion, fixed_unrest, unrest_divisor)) or float(unrest_divisor) <= 0:
-        raise ProjectionRuntimeStop(
-            "Daily resting-state cache inputs are incomplete",
-            rule_ids=(Rules.NATION_PERIODIC_DERIVED_CACHE.id,),
-            dependencies=(
-                {"field": "cohesionFixedImpact", "source": "projection.restStateContext"},
-                {"field": "unrestFixedImpact", "source": "projection.restStateContext"},
-                {"field": "pcgdpToReduceUnrestBy1", "source": "save.TIGlobalValuesState"},
-            ),
-            affected_metrics=("nation.cohesionRest", "nation.unrestRest"),
-        )
     public_impact = _public_opinion_cohesion_impact(state, context)
+    cohesion_rest = _live_cohesion_rest(state, context, public_impact)
+    unrest_rest = _live_unrest_rest(state, context)
     public_metrics = tuple(f"nation.publicOpinion.{ideology}" for ideology in state.public_opinion)
     state.metric_tracker.record(
         "internal.publicOpinionCohesionImpact",
         inputs=public_metrics,
         rule_ids=(Rules.NATION_COHESION_PUBLIC_OPINION.id,),
     )
-    raw_cohesion = float(fixed_cohesion) + _cohesion_dynamic_impact(state, context)
-    state.cohesion_rest = min(10.0, max(0.0, _democracy_cohesion_transform(raw_cohesion, state.democracy)))
-    pcgdp = state.gdp / (state.population_millions * 1_000_000.0) if state.population_millions else 0.0
-    hostile_total = _hostile_claim_population_fraction(state) * _global(context, "maxCombinedImpactFromHostileClaims")
-    hostile_unrest = hostile_total * (1.0 - state.democracy / 10.0)
-    raw_unrest = float(fixed_unrest) - state.cohesion - pcgdp / float(unrest_divisor) + _own_army_unrest_impact(state, context) + hostile_unrest
-    state.unrest_rest = min(10.0, max(0.0, raw_unrest))
+    state.cohesion_rest = cohesion_rest
+    state.unrest_rest = unrest_rest
     state.metric_tracker.record(
         "nation.cohesionRest",
         inputs=(
@@ -3116,6 +3625,7 @@ def _refresh_rest_caches(
             Rules.NATION_PERIODIC_COHESION.id,
             Rules.NATION_COHESION_PUBLIC_OPINION.id,
         ),
+        provenance=(state.rest_state_context.get("provenance", "scenarioAssumption"),),
     )
     state.metric_tracker.record(
         "nation.unrestRest",
@@ -3124,6 +3634,7 @@ def _refresh_rest_caches(
             "internal.hostileClaims",
         ),
         rule_ids=(Rules.NATION_PERIODIC_DERIVED_CACHE.id, Rules.NATION_PERIODIC_UNREST.id),
+        provenance=(state.rest_state_context.get("provenance", "scenarioAssumption"),),
     )
     return {
         "kind": "derivedCache",
@@ -3141,7 +3652,7 @@ def _refresh_rest_caches(
             {
                 "ruleId": Rules.NATION_PERIODIC_DERIVED_CACHE.id,
                 "effectiveCoverage": "exact",
-                "provenance": "dllReimplementation",
+                "provenance": "dllReimplementation" if state.rest_state_context.get("sourceBacked") else "scenarioAssumption",
                 "dependencies": [Rules.NATION_PERIODIC_COHESION.id, Rules.NATION_PERIODIC_UNREST.id],
                 "inputs": [
                     "nation.inequality", "nation.education", "nation.population", "nation.perCapitaGdp",
@@ -3169,30 +3680,12 @@ def calibrate_rest_state_context(
     *,
     pcgdp_to_reduce_unrest_by_one: float,
 ) -> None:
-    """Anchor held-fixed external rest-state terms to the serialized daily caches."""
+    """Attach the source divisor without inverting lossy serialized caches.
 
-    cached = state.cohesion_rest
-    if state.democracy > 6.5:
-        shift = abs((6.5 - state.democracy) / 2.0)
-        if cached < 5.0:
-            pre_democracy = cached - shift
-        elif cached > 5.0:
-            pre_democracy = cached + shift
-        else:
-            pre_democracy = 5.0
-    else:
-        pre_democracy = cached
-    state.rest_state_context["cohesionFixedImpact"] = pre_democracy - _cohesion_dynamic_impact(state, context)
-    pcgdp = state.gdp / (state.population_millions * 1_000_000.0) if state.population_millions else 0.0
-    hostile_total = _hostile_claim_population_fraction(state) * _global(context, "maxCombinedImpactFromHostileClaims")
-    hostile_unrest = hostile_total * (1.0 - state.democracy / 10.0)
-    own_army = _own_army_unrest_impact(state, context)
-    if 0.0 < state.unrest_rest < 10.0:
-        fixed_unrest = state.unrest_rest + state.cohesion + pcgdp / pcgdp_to_reduce_unrest_by_one - own_army - hostile_unrest
-    else:
-        fixed_unrest = 10.5
+    The compatibility entrypoint accepts explicitly supplied scenario terms;
+    source-backed extraction supplies the full inputs before this call.
+    """
     state.rest_state_context.update({
-        "unrestFixedImpact": fixed_unrest,
         "pcgdpToReduceUnrestBy1": pcgdp_to_reduce_unrest_by_one,
         "provenance": "heldFixedWorldContext",
     })
@@ -3600,6 +4093,7 @@ def run_projection(
                 queued_advisors = tuple(working.advisor_policy or ())
                 queued_phase_at = moment
                 working.advisors = ()
+                working.rest_state_context["ownBaseInvestmentPointsMonth"] = _base_ip(working, context)
                 _refresh_advisor_evidence(working)
                 transaction = {
                     "kind": "advisorMissionPhase",
@@ -3618,6 +4112,7 @@ def run_projection(
                 }
             elif kind == "advisorResolution":
                 working.advisors = queued_advisors
+                working.rest_state_context["ownBaseInvestmentPointsMonth"] = _base_ip(working, context)
                 _refresh_advisor_evidence(working)
                 schedule = working.advisor_mission_schedule
                 cost_each = schedule.influence_cost if schedule is not None else 0.0

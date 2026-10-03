@@ -7,8 +7,7 @@ from typing import Any, Mapping
 
 
 ALWAYS_VALID_PRIORITIES = frozenset({
-    "Economy", "Welfare", "Environment", "Knowledge", "Unity", "Oppression",
-    "Spoils", "LaunchFacilities", "Military",
+    "Economy", "Welfare", "Knowledge", "Unity", "Spoils",
 })
 
 # Audited from TINationState.canBuildNavy in Assembly-CSharp.dll.  These are
@@ -96,14 +95,77 @@ def evaluate_priority_validity(priority: str, view: Mapping[str, Any]) -> Priori
         return PriorityValidityResult(True, "always valid for an existing nation")
     if priority == "Government":
         democracy = _number(view, "democracy")
-        hostile = _boolean(view, "hasHostileRegion")
-        if democracy is None or hostile is None:
+        can_legitimize = _boolean(view, "canAccumulateLegitimizeClaimTriggers")
+        if democracy is not None and democracy < 10.0:
+            return PriorityValidityResult(True, "democracy is below the cap")
+        if can_legitimize is True:
+            return PriorityValidityResult(True, "cached legitimize-claim triggers are available")
+        if democracy is None or can_legitimize is None:
             return _unknown(*(
-                field for field, value in (("democracy", democracy), ("hasHostileRegion", hostile))
-                if value is None
+                field for field, value in (
+                    ("democracy", democracy),
+                    ("canAccumulateLegitimizeClaimTriggers", can_legitimize),
+                ) if value is None
             ))
-        valid = democracy < 10.0 or hostile
-        return PriorityValidityResult(valid, "below democracy cap or hostile-region legitimize target exists" if valid else "democracy is capped and no legitimize target exists")
+        return PriorityValidityResult(False, "democracy is capped and cached legitimize-claim triggers are unavailable")
+    if priority == "Environment":
+        sustainability = _number(view, "sustainability")
+        best_sustainability = _number(view, "bestCurrentSustainabilityValue")
+        can_decontaminate = _boolean(view, "canAccumulateDecontaminateTriggers")
+        if can_decontaminate is True:
+            return PriorityValidityResult(True, "cached decontaminate triggers are available")
+        if sustainability is not None and sustainability <= 0.0:
+            return PriorityValidityResult(True, "sustainability is at or below zero")
+        if sustainability is not None and best_sustainability is not None and sustainability > best_sustainability:
+            return PriorityValidityResult(True, "sustainability is above the current best value")
+        if sustainability is None or best_sustainability is None or can_decontaminate is None:
+            return _unknown(*(
+                field for field, value in (
+                    ("sustainability", sustainability),
+                    ("bestCurrentSustainabilityValue", best_sustainability),
+                    ("canAccumulateDecontaminateTriggers", can_decontaminate),
+                ) if value is None
+            ))
+        return PriorityValidityResult(False, "sustainability is at its current best and no cached decontaminate trigger is available")
+    if priority == "Oppression":
+        military = _boolean(view, "military")
+        return _unknown("military") if military is None else PriorityValidityResult(
+            military,
+            "military capability exists" if military else "military capability is absent",
+        )
+    if priority == "Military":
+        military = _boolean(view, "military")
+        if military is False:
+            return PriorityValidityResult(False, "military capability is absent")
+        if military is None:
+            return _unknown("military")
+        current = _number(view, "militaryTechLevel")
+        maximum = _number(view, "maxMilitaryTechLevel")
+        if current is None or maximum is None:
+            return _unknown(*(
+                field for field, value in (
+                    ("militaryTechLevel", current),
+                    ("maxMilitaryTechLevel", maximum),
+                ) if value is None
+            ))
+        valid = current < maximum
+        return PriorityValidityResult(valid, "military technology is below its cap" if valid else "military technology reached its cap")
+    if priority == "LaunchFacilities":
+        program = _boolean(view, "spaceFlightProgram")
+        federation = _boolean(view, "federationSpaceProgram")
+        if program is True or federation is True:
+            return PriorityValidityResult(True, "the nation or federation has a space program")
+        if program is None or federation is None:
+            return _unknown(*(
+                field for field, value in (
+                    ("spaceFlightProgram", program),
+                    ("federationSpaceProgram", federation),
+                ) if value is None
+            ))
+        return PriorityValidityResult(
+            federation,
+            "federation has a space program" if federation else "neither nation nor federation has a space program",
+        )
     if priority == "Funding":
         funding = _number(view, "fundingYear")
         gdp = _number(view, "gdp")
@@ -115,25 +177,45 @@ def evaluate_priority_validity(priority: str, view: Mapping[str, Any]) -> Priori
         return PriorityValidityResult(valid, "funding remains below its GDP-derived cap" if valid else "funding reached its GDP-derived cap")
     if priority == "MissionControl":
         program = _boolean(view, "spaceFlightProgram")
-        federation = _boolean(view, "federationSpaceProgram")
-        if federation is True:
-            program = True
-        elif program is False and federation is None:
-            return _unknown("federationSpaceProgram")
         candidate = _boolean(view, "missionControlHasCapacity")
-        if program is None or candidate is None:
-            return _unknown(*(
-                field for field, value in (("spaceFlightProgram", program), ("missionControlHasCapacity", candidate))
-                if value is None
-            ))
-        valid = program and candidate
-        return PriorityValidityResult(valid, "spaceflight exists and regional MC capacity remains" if valid else "spaceflight or regional MC capacity is unavailable")
+        if candidate is False:
+            return PriorityValidityResult(False, "regional mission-control capacity is full")
+        if program is False:
+            federation = _boolean(view, "federationSpaceProgram")
+            if federation is False:
+                return PriorityValidityResult(False, "spaceflight is unavailable to the nation and federation")
+            if federation is None:
+                return _unknown("federationSpaceProgram")
+        elif program is None:
+            federation = _boolean(view, "federationSpaceProgram")
+            if federation is not True:
+                return _unknown(*(
+                    field for field, value in (
+                        ("spaceFlightProgram", program),
+                        ("federationSpaceProgram", federation),
+                    ) if value is None
+                ))
+        if candidate is None:
+            return _unknown("missionControlHasCapacity")
+        return PriorityValidityResult(
+            candidate,
+            "regional mission-control capacity remains" if candidate else "regional mission-control capacity is full",
+        )
     if priority == "Military_BuildArmy":
+        military = _boolean(view, "military")
         allowed = _number(view, "allowedArmies")
         current = _number(view, "currentArmies")
-        if allowed is None or current is None:
+        if military is False:
+            return PriorityValidityResult(False, "military capability is absent")
+        if allowed is not None and current is not None and allowed <= current:
+            return PriorityValidityResult(False, "army capacity is full")
+        if military is None or allowed is None or current is None:
             return _unknown(*(
-                field for field, value in (("allowedArmies", allowed), ("currentArmies", current)) if value is None
+                field for field, value in (
+                    ("military", military),
+                    ("allowedArmies", allowed),
+                    ("currentArmies", current),
+                ) if value is None
             ))
         valid = allowed > current
         return PriorityValidityResult(valid, "army capacity remains" if valid else "army capacity is full")
@@ -152,33 +234,76 @@ def evaluate_priority_validity(priority: str, view: Mapping[str, Any]) -> Priori
     if priority == "Military_InitiateNuclearProgram":
         military = _boolean(view, "military")
         nuclear = _boolean(view, "nuclearProgram")
-        if military is None or nuclear is None:
+        no_nukes = _boolean(view, "policy_noNukes")
+        if military is False or nuclear is True or no_nukes is True:
+            reason = (
+                "military capability is absent" if military is False else
+                "a nuclear program already exists" if nuclear is True else
+                "no-nukes policy blocks initiation"
+            )
+            return PriorityValidityResult(False, reason)
+        if military is None or nuclear is None or no_nukes is None:
             return _unknown(*(
-                field for field, value in (("military", military), ("nuclearProgram", nuclear)) if value is None
+                field for field, value in (
+                    ("military", military),
+                    ("nuclearProgram", nuclear),
+                    ("policy_noNukes", no_nukes),
+                ) if value is None
             ))
-        valid = military and not nuclear
-        return PriorityValidityResult(valid, "military exists and nuclear program is absent" if valid else "military prerequisite or nuclear-program state blocks initiation")
+        return PriorityValidityResult(True, "military exists, no nuclear program exists, and policy permits nukes")
     if priority == "Military_BuildNuclearWeapons":
         nuclear = _boolean(view, "nuclearProgram")
-        return _unknown("nuclearProgram") if nuclear is None else PriorityValidityResult(nuclear, "nuclear program exists" if nuclear else "nuclear program is absent")
+        no_nukes = _boolean(view, "policy_noNukes")
+        if nuclear is False or no_nukes is True:
+            return PriorityValidityResult(False, "nuclear program or policy blocks weapon construction")
+        if nuclear is None or no_nukes is None:
+            return _unknown(*(
+                field for field, value in (
+                    ("nuclearProgram", nuclear), ("policy_noNukes", no_nukes),
+                ) if value is None
+            ))
+        return PriorityValidityResult(True, "nuclear program exists and policy permits nukes")
     if priority == "Military_BuildSpaceDefenses":
         military = _boolean(view, "military")
         capability = _boolean(view, "canBuildSpaceDefenses")
-        if military is None or capability is None:
+        complete = _boolean(view, "completeAntiSpaceDefenses")
+        if military is False or capability is False or complete is True:
+            reason = (
+                "military capability is absent" if military is False else
+                "space-defense capability is absent" if capability is False else
+                "all regions have anti-space defenses"
+            )
+            return PriorityValidityResult(False, reason)
+        if military is None or capability is None or complete is None:
             return _unknown(*(
-                field for field, value in (("military", military), ("canBuildSpaceDefenses", capability)) if value is None
+                field for field, value in (
+                    ("military", military),
+                    ("canBuildSpaceDefenses", capability),
+                    ("completeAntiSpaceDefenses", complete),
+                ) if value is None
             ))
-        valid = military and capability
-        return PriorityValidityResult(valid, "space-defense prerequisites are satisfied" if valid else "space-defense prerequisites are not satisfied")
+        return PriorityValidityResult(True, "at least one region lacks anti-space defenses")
     if priority == "Military_BuildSTOSquadron":
         military = _boolean(view, "military")
         capability = _boolean(view, "canBuildSTO")
-        boost = _boolean(view, "hasBoostRegion")
-        if military is None or capability is None or boost is None:
+        boost = _number(view, "rawBoostPerYear_dekatons")
+        capacity = _boolean(view, "hasSTOFighterCapacity")
+        if military is False or capability is False or (boost is not None and boost <= 0.0) or capacity is False:
+            reason = (
+                "military capability is absent" if military is False else
+                "STO capability is absent" if capability is False else
+                "nation has no annual boost" if boost is not None and boost <= 0.0 else
+                "no region has STO fighter capacity"
+            )
+            return PriorityValidityResult(False, reason)
+        if military is None or capability is None or boost is None or capacity is None:
             return _unknown(*(
-                field for field, value in (("military", military), ("canBuildSTO", capability), ("hasBoostRegion", boost))
-                if value is None
+                field for field, value in (
+                    ("military", military),
+                    ("canBuildSTO", capability),
+                    ("rawBoostPerYear_dekatons", boost),
+                    ("hasSTOFighterCapacity", capacity),
+                ) if value is None
             ))
-        valid = military and capability and boost
-        return PriorityValidityResult(valid, "STO prerequisites are satisfied" if valid else "STO prerequisites are not satisfied")
+        return PriorityValidityResult(True, "all STO squadron prerequisites are satisfied")
     return _unknown("priority", reason=f"priority validity is not modeled: {priority}")

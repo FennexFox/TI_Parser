@@ -103,6 +103,13 @@ order-0 resolution time. Advise succeeds automatically and `MoveToTarget` moves
 on assignment, so modeled travel time is zero. Future resource availability,
 target invalidation, detention, and competing orders are held fixed.
 
+Monthly cohesion uses a live resting target after supported democracy changes;
+unrest recomputes its live target after cohesion changes. Serialized clamped
+rest caches are not inverted to guess source inputs. Missing required source
+state, low-cohesion stochastic democracy and nonzero surveillance-abduction
+branches stop before the unsupported mutation. Priority validity uses the
+current DLL's cached gates and capabilities; unavailable inputs remain unknown.
+
 Unity requires the explicit plan opt-in
 `stochasticPolicy.unityPublicOpinion: "meanPath"`. Population uses deterministic
 mean inputs; Unity uses sequential conditional expected transitions. Both can

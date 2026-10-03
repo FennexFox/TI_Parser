@@ -115,13 +115,14 @@ COVERAGE_RESOLVERS = {
 
 class Rules:
     NATION_IP_BASE = MechanicRule(
-        "nation.ip.base", 1,
+        "nation.ip.base", 2,
         "Nation monthly base investment points, including Advisor and army/navy maintenance.",
-        "verified", "exact",
+        "partial", "exact",
         ("TINationState.SetBaseInvestmentPoints_month",),
         ("TINationState.DailyNationUpdate", "TINationState.AddAdvisingCouncilor"),
         ("nationDevelopment.globalConfig.nationalInvestmentArmyFactor*",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_advisor_base_ip_and_rank_decay",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_IP_ECONOMY_SCORE = MechanicRule(
         "nation.ip.economy-score", 1,
@@ -142,13 +143,14 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_one_tick_control_point_allocation",),
     )
     NATION_IP_PRIORITY_BONUS = MechanicRule(
-        "nation.ip.priority-bonus", 1,
+        "nation.ip.priority-bonus", 2,
         "Apply owner, diversity and national priority bonuses after each CP share is calculated.",
-        "verified", "exact",
+        "partial", "exact",
         ("TINationState.ControlPointPriorityBonuses_Uncached", "TIControlPoint.RecordAndFixControlPointValues", "TIFactionState.SumPriorityBonuses"),
         ("TINationState.ControlPointWeightsTotalToPriorityIP",),
         ("nationDevelopment.diversityBonuses",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_diversity_and_owner_priority_bonus",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY = MechanicRule(
         "nation.ip.control-point-default-economy", 1,
@@ -160,12 +162,13 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_invalid_only_control_point_persistently_falls_back_to_raw_economy",),
     )
     NATION_PRIORITY_VALIDITY = MechanicRule(
-        "nation.priority.validity", 1,
+        "nation.priority.validity", 2,
         "Evaluate priority validity from live nation and region state whenever the DLL revalidates CP values.",
-        "verified", "exact",
+        "partial", "exact",
         ("TINationState.ValidPriority", "TIControlPoint.RecordAndFixControlPointValues"),
         ("TINationState.DailyNationUpdate", "TIControlPoint.SetControlPointPriority"),
         test_ids=("tests.test_nation_validity.NationPriorityValidityTests.test_government_cap_requires_hostile_region",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_COMPLETION_ORDER = MechanicRule(
         "nation.priority.completion-order", 1,
@@ -186,17 +189,18 @@ class Rules:
         source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_GOVERNMENT_COMPLETE = MechanicRule(
-        "nation.priority.government.complete", 2,
+        "nation.priority.government.complete", 3,
         "Apply Government democracy below the cap or Knowledge plus legitimize handling at the cap.",
-        "verified", "exact",
+        "partial", "exact",
         ("TINationState.OnGovernmentPriorityComplete", "TINationState.governmentPriorityDemocracyChange"),
         data_dependencies=("nationDevelopment.globalConfig.governmentPriorityDemocracyIncrease",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_government_completion_below_cap",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_GOVERNMENT_LEGITIMIZE = MechanicRule(
-        "nation.priority.government.legitimize", 1,
+        "nation.priority.government.legitimize", 2,
         "Accumulate cap-democracy legitimize triggers and deterministically remove a hostile-region claim.",
-        "verified", "exact",
+        "partial", "exact",
         (
             "TINationState.OnGovernmentPriorityComplete",
             "TINationState.canAccumulateLegitimizeClaimTriggers",
@@ -207,15 +211,17 @@ class Rules:
             "nationDevelopment.regions.*.adjacency",
         ),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_government_at_cap_applies_knowledge_and_legitimizes_claim",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_UNITY_COMPLETE = MechanicRule(
-        "nation.priority.unity.complete", 3,
+        "nation.priority.unity.complete", 4,
         "Apply Unity only when its public-opinion side effect and resting-cohesion dependency are projected.",
-        "verified", "expected",
+        "partial", "expected",
         ("TINationState.OnUnityPriorityComplete", "TINationState.unityPriorityCohesionChange", "TINationState.unityPriorityEducationChange"),
         data_dependencies=("nationDevelopment.globalConfig.unityBaseCohesionChange", "nationDevelopment.globalConfig.unityMinCohesionChange", "nationDevelopment.globalConfig.unityPriorityEducationChange"),
         deterministic=False,
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_unity_sequential_expected_transition_and_direct_effects",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_UNITY_PUBLIC_OPINION = MechanicRule(
         "nation.priority.unity.public-opinion", 2,
@@ -248,11 +254,12 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_unity_sequential_expected_transition_and_direct_effects",),
     )
     NATION_PRIORITY_UNITY_LEGITIMIZE = MechanicRule(
-        "nation.priority.unity.legitimize", 2,
+        "nation.priority.unity.legitimize", 3,
         "Apply Unity's hostile-claim legitimize counter and deterministic claim removal.",
-        "verified", "exact",
+        "partial", "exact",
         ("TINationState.OnUnityPriorityComplete", "TINationState.OnLegitimizeClaimPriorityComplete"),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_unity_legitimize_removes_deterministic_claim",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_COHESION_PUBLIC_OPINION = MechanicRule(
         "nation.cohesion.public-opinion", 2,
@@ -332,11 +339,12 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionSchedulerTests.test_daily_region_cache_refreshes_before_allocation",),
     )
     NATION_EFFECT_CONTEXT_EXPIRATION = MechanicRule(
-        "nation.effect.context-expiration", 1,
+        "nation.effect.context-expiration", 2,
         "Remove saved faction effects at the audited semi-monthly boundary after daily bonus caching.",
-        "verified", "exact",
+        "partial", "exact",
         ("FactionPeriodicUpdate.OnMonthlyUpdate", "FactionPeriodicUpdate.OnMidMonthlyUpdate", "TIEffectsState.GlobalCheckForRemoveEffects"),
         test_ids=("tests.test_nation_projection.NationProjectionSchedulerTests.test_daily_priority_bonus_cache_precedes_effect_expiry",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_VALIDATION_TRIGGER = MechanicRule(
         "nation.priority.validation-trigger", 1,
@@ -518,28 +526,31 @@ class Rules:
         "pending", "unsupported", ("TINationState.OnSpaceFlightProgramPriorityComplete",),
     )
     NATION_PERIODIC_COHESION = MechanicRule(
-        "nation.periodic.cohesion", 1,
-        "Move cohesion toward its cached resting value during the monthly nation update.",
-        "verified", "exact",
+        "nation.periodic.cohesion", 2,
+        "Move cohesion toward its live resting value after supported monthly democracy work.",
+        "partial", "exact",
         ("TINationState.MonthlyNationUpdate", "TINationState.GetMonthlyCohesionMovement"),
         data_dependencies=("nationDevelopment.globalConfig.maxMonthlyCohesion*",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_monthly_cohesion_and_unrest",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PERIODIC_UNREST = MechanicRule(
-        "nation.periodic.unrest", 1,
-        "Move unrest toward its cached resting value during the monthly nation update.",
-        "verified", "exact",
+        "nation.periodic.unrest", 2,
+        "Recompute the live unrest target after the monthly cohesion mutation.",
+        "partial", "exact",
         ("TINationState.MonthlyNationUpdate", "TINationState.GetMonthlyUnrestMovement"),
         data_dependencies=("nationDevelopment.globalConfig.maxMonthlyUnrestMovement*",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_monthly_cohesion_and_unrest",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PERIODIC_DERIVED_CACHE = MechanicRule(
-        "nation.periodic.derived-cache", 1,
-        "Refresh daily region/priority caches and the 12:00 cohesion/unrest resting-state cache at DLL boundaries.",
-        "verified", "exact",
-        ("TINationState.CacheRegionValues", "TINationState.DailyNationUpdate2"),
-        ("TINationState.DailyNationUpdate", "TINationState.NationPeriodicUpdate"),
+        "nation.periodic.derived-cache", 2,
+        "Refresh resting values from explicit source inputs; never invert serialized clamped caches.",
+        "partial", "exact",
+        ("TINationState.cohesionRestState", "TINationState.unrestRestState"),
+        ("TINationState.MonthlyNationUpdate",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_daily_rest_cache_matches_literal_formula",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PERIODIC_CONTROL_POINTS = MechanicRule(
         "nation.periodic.control-points", 1,
@@ -550,6 +561,15 @@ class Rules:
         coverage_mode="conditional",
         allowed_coverages=CoverageResolvers.PERIODIC_CONTROL_POINTS.allowed_coverages,
         coverage_resolver_id=CoverageResolvers.PERIODIC_CONTROL_POINTS.id,
+    )
+    NATION_PERIODIC_CONTROL_POINT_TYPES = MechanicRule(
+        "nation.periodic.control-point-types", 1,
+        "Recompute control-point types after monthly movement and regional population updates.",
+        "partial", "exact",
+        ("TINationState.UpdateControlPointTypes", "TIControlPoint.SetControlPointType"),
+        ("TINationState.MonthlyNationUpdate",),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_monthly_cohesion_and_unrest",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PERIODIC_POPULATION = MechanicRule(
         "nation.periodic.population", 2,
@@ -573,11 +593,12 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_population_formula_uses_deterministic_mean_input_not_trajectory_expectation",),
     )
     NATION_POPULATION_MONTHLY_GROWTH = MechanicRule(
-        "nation.population.monthly-growth", 1,
-        "Apply monthly compound growth with uniform jitter replaced by its zero mean input and population floor.",
-        "verified", "expected",
+        "nation.population.monthly-growth", 2,
+        "Apply mean-input monthly population growth, then live regional GDP and bounded education updates in DLL order.",
+        "partial", "expected",
         ("TIRegionState.GrowPopulationByMonth",),
         data_dependencies=("nationDevelopment.daysPerYear",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
         deterministic=False,
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_monthly_population_expected",),
     )
@@ -618,11 +639,12 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_repeated_advise_uses_phase_clear_and_expected_resolution",),
     )
     NATION_FACTION_CONTRIBUTION = MechanicRule(
-        "nation.faction-contribution", 1,
+        "nation.faction-contribution", 2,
         "Convert the target nation's totals to the selected faction's active CP share.",
-        "verified", "exact",
+        "partial", "exact",
         ("TINationState.GetMonthlyResearchFromControlPoint", "TINationState.GetMonthlyMoneyIncomeFromControlPoint", "TINationState.GetMonthlyBoostIncomeFromControlPoint", "TINationState.GetMissionControlFromControlPoint"),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_funding_completion_and_contribution",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
 
 
@@ -682,6 +704,7 @@ REGISTRY = {rule.id: rule for rule in (
     Rules.NATION_PERIODIC_UNREST,
     Rules.NATION_PERIODIC_DERIVED_CACHE,
     Rules.NATION_PERIODIC_CONTROL_POINTS,
+    Rules.NATION_PERIODIC_CONTROL_POINT_TYPES,
     Rules.NATION_PERIODIC_POPULATION,
     Rules.NATION_POPULATION_ANNUAL_GROWTH,
     Rules.NATION_POPULATION_MONTHLY_GROWTH,

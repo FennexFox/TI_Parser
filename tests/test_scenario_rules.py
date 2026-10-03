@@ -192,6 +192,67 @@ class ScenarioRuleTests(unittest.TestCase):
         self.assertIsNone(unknown_diagnostics["consistent"])
         self.assertIn("MissionControl", unknown_diagnostics["unknownPriorities"])
 
+    def test_nation_ui_current_build_validity_preserves_missing_cached_inputs(self):
+        indexed = self._build_indexed("BrokenEarthScenario")
+        nation = core.state_value_by_id(indexed, 21)
+        control_point = core.state_value_by_id(indexed, 31)
+        region = core.state_value_by_id(indexed, 41)
+        assert nation is not None and control_point is not None and region is not None
+        nation.update({
+            "democracy": 10.0,
+            "hostileClaims": [{"value": 41}],
+            "sustainability": 1.0,
+            "military": True,
+            "militaryTechLevel": 5.0,
+            "maxMilitaryTechLevel": 5.0,
+            "spaceFlightProgram": False,
+            "nuclearProgram": False,
+            "canBuildSpaceDefenses": True,
+            "canBuildSTOSquadrons": True,
+        })
+        region.update({
+            "antiSpaceDefenses": True,
+            "boostPerYear_dekatons": 12.0,
+            "boostPerMonth_dekatons": 1.0,
+            "numSTOFighters": 0,
+        })
+        control_point["controlPointPriorities"] = {
+            "Government": 1,
+            "Environment": 1,
+            "Oppression": 1,
+            "Military": 1,
+            "LaunchFacilities": 1,
+            "Military_InitiateNuclearProgram": 1,
+            "Military_BuildNuclearWeapons": 1,
+            "Military_BuildSpaceDefenses": 1,
+            "Military_BuildSTOSquadron": 1,
+        }
+
+        development = ti.calculation_catalogs(indexed, "nation-ui").nation_development
+        validity = ti._nation_ui_priority_validity(
+            indexed,
+            nation,
+            development,
+            population=100.0,
+            allowed_armies=1,
+            current_armies=0,
+            army_count=0,
+            navy_count=0,
+            per_capita_gdp=10_000.0,
+        )
+
+        self.assertIsNone(validity["Government"].valid)
+        self.assertEqual(validity["Government"].dependencies[0]["field"], "canAccumulateLegitimizeClaimTriggers")
+        self.assertIsNone(validity["Environment"].valid)
+        self.assertFalse(validity["Military"].valid)
+        self.assertTrue(validity["Oppression"].valid)
+        self.assertFalse(validity["LaunchFacilities"].valid)
+        self.assertIsNone(validity["Military_InitiateNuclearProgram"].valid)
+        self.assertEqual(validity["Military_InitiateNuclearProgram"].dependencies[0]["field"], "policy_noNukes")
+        self.assertFalse(validity["Military_BuildNuclearWeapons"].valid)
+        self.assertFalse(validity["Military_BuildSpaceDefenses"].valid)
+        self.assertTrue(validity["Military_BuildSTOSquadron"].valid)
+
     def test_navy_capacity_survives_no_convertible_armies(self):
         indexed = self._build_indexed("BrokenEarthScenario")
         nation = core.state_value_by_id(indexed, 21)

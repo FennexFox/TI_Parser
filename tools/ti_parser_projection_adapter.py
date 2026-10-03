@@ -26,9 +26,11 @@ from ti_parser_core import (
     find_faction_state,
     first_value,
     load_hab_module_catalog,
+    load_location_catalog,
     match_raw_state,
     raw_state_id,
     ref_id,
+    resolve_ref,
     scenario_template_name,
     state_value_by_id,
     type_entries,
@@ -548,18 +550,218 @@ def _serialized_numeric_tracker(
     return result
 
 
-def _region_occupation_fraction(region: dict[str, Any]) -> float:
+def _region_occupation_fraction(region: dict[str, Any], indexed: IndexedState,
+                                nation: dict[str, Any], nation_id: int) -> float:
+    """Current DLL max of summed enemy-alliance occupation for each war.
+
+    Invalid/unresolved source returns NaN so the adapter's dependency gate
+    rejects it. No individual-occupier maximum substitutes for an alliance.
+    """
     occupations = region.get("occupations")
+    if occupations == {} or occupations == []:
+        return 0.0
     if not isinstance(occupations, list):
-        return 0.0 if occupations == {} else math.nan
-    values = [
-        float(row["Value"])
-        for row in occupations
-        if isinstance(row, dict)
-        and isinstance(row.get("Value"), (int, float))
-        and not isinstance(row.get("Value"), bool)
-    ]
-    return min(1.0, max(values, default=0.0))
+        return math.nan
+    values: dict[int, float] = {}
+    for row in occupations:
+        if not isinstance(row, dict):
+            return math.nan
+        key, value = ref_id(row.get("Key")), row.get("Value")
+        if key is None or key in values or not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
+            return math.nan
+        values[key] = float(value)
+    wars = nation.get("currentWarStates")
+    if not isinstance(wars, list):
+        return math.nan
+    maximum = 0.0
+    for war_ref in wars:
+        resolved = resolve_ref(indexed, war_ref)
+        if resolved is None or resolved[1] != "TIWarState":
+            return math.nan
+        war = resolved[2]
+        alliances = []
+        for name in ("_attackingAlliance", "_defendingAlliance"):
+            members = war.get(name)
+            if not isinstance(members, list):
+                return math.nan
+            ids = []
+            for member in members:
+                found = resolve_ref(indexed, member)
+                if found is None or found[1] != "TINationState":
+                    return math.nan
+                ids.append(ref_id(member))
+            if len(ids) != len(set(ids)):
+                return math.nan
+            alliances.append(ids)
+        attack, defend = alliances
+        if set(attack) & set(defend):
+            return math.nan
+        enemy = defend if nation_id in attack else attack if nation_id in defend else []
+        maximum = max(maximum, sum(values.get(member, 0.0) for member in enemy))
+    return min(1.0, maximum)
+
+
+def _extract_projection_rest_inputs(
+    indexed: IndexedState,
+    nation: dict[str, Any],
+    state: nation_projection_layer.NationProjectionState,
+    development: dict[str, Any],
+) -> dict[str, Any]:
+    """Extract getter inputs directly; clamped UI caches cannot identify them."""
+    rule_id = Rules.NATION_PERIODIC_DERIVED_CACHE.id
+
+    def missing(field: str, reason: str, *, source: str = "save-reference") -> CalculationDependencyError:
+        return _projection_dependency_error(indexed, source=source, field=field, rule_id=rule_id, reason=reason)
+
+    def resolve(reference: Any, field: str) -> dict[str, Any]:
+        value = state_value_by_id(indexed, ref_id(reference))
+        if not isinstance(value, dict):
+            raise missing(field, "required resting-state reference cannot be resolved")
+        return value
+
+    def number(value: dict[str, Any], field: str) -> float:
+        return _required_projection_number(indexed, value, field, source="save-field", rule_id=rule_id)
+
+    def refs(value: dict[str, Any], field: str) -> list[Any]:
+        return _required_projection_list(indexed, value, field, source="save-field", rule_id=rule_id)
+
+    def relation_rows(field: str) -> list[dict[str, Any]]:
+        rows = []
+        seen = set()
+        for reference in refs(nation, field):
+            other_id = ref_id(reference)
+            other = resolve(reference, f"nation.{field}")
+            if field == "wars" and other_id in seen:
+                continue
+            seen.add(other_id)
+            rows.append({"id": other_id, "democracy": number(other, "democracy"),
+                         "extant": bool(refs(other, "regions")),
+                         "numControlPoints": len(refs(other, "controlPoints"))})
+        return rows
+
+    alien_nation = _required_projection_bool(indexed, nation, "alienNation", source="save-field", rule_id=rule_id)
+    public_opinion = _required_projection_mapping(indexed, nation, "publicOpinion", source="save-field", rule_id=Rules.NATION_COHESION_PUBLIC_OPINION.id)
+    if not public_opinion or len(state.public_opinion) != len(public_opinion) or not all(math.isfinite(value) and value >= 0 for value in state.public_opinion.values()):
+        raise missing("nation.publicOpinion", "live cohesion requires a complete numeric public-opinion mapping", source="save-field")
+    if not state.pcgdp_tracker:
+        raise missing("tracker_PCGDP_ByQuarter", "the live PCGDP cohesion getter requires a nonempty serialized tracker", source="save-field")
+    capital = next((region for region in state.regions.values() if region.capital), None)
+    if capital is None:
+        raise missing("nation.capital", "live cohesion requires a capital belonging to the target nation")
+    region_template = development["regionTemplates"][capital.template_name]
+    map_template = development["mapRegionTemplates"][region_template["mapRegionName"]]
+    if "solarBody" not in map_template:
+        raise missing("mapRegionTemplates.solarBody", "catalog omits the solar-body input required by the distance getter", source="catalog-field")
+    body_name = map_template["solarBody"]
+    if body_name is None:
+        body_name = "Earth"  # TIRegionState.solarBodyName's explicit source default.
+    if not isinstance(body_name, str) or not body_name:
+        raise missing("mapRegionTemplates.solarBody", "solar body must be a nonempty name or source null", source="catalog-field")
+    body_template = load_location_catalog().body_templates.get(body_name)
+    radius = _required_projection_number(indexed, {"meanRadius_km": (body_template or {}).get("meanRadius_km")}, "meanRadius_km", source="location-catalog-field", rule_id=rule_id)
+    allied_armies = []
+    for ally_ref in refs(nation, "allies"):
+        ally = resolve(ally_ref, "nation.allies")
+        ally_is_alien = _required_projection_bool(indexed, ally, "alienNation", source="save-field", rule_id=rule_id)
+        for army_ref in refs(ally, "armies"):
+            army = resolve(army_ref, "ally.armies")
+            army_type = _required_projection_army_type(indexed, army, "armyType", source="save-field", rule_id=rule_id)
+            if ally_is_alien and army_type == "AlienMegafauna":
+                continue
+            current_region_id = ref_id(army.get("currentRegion"))
+            resolve(army.get("currentRegion"), "ally.army.currentRegion")
+            if current_region_id not in state.regions:
+                continue
+            home_nation = resolve(army.get("homeNation"), "ally.army.homeNation")
+            allied_armies.append({"strength": number(army, "strength"), "armyType": army_type,
+                                  "factionId": ref_id(army.get("faction")), "currentRegionId": current_region_id,
+                                  "homeBaseInvestmentPointsMonth": number(home_nation, "baseInvestmentPoints_month")})
+    neighbors = None
+    raw_adjacency = nation.get("adjacentNations")
+    if raw_adjacency == {}:
+        raw_adjacency = []
+    if isinstance(raw_adjacency, list):
+        neighbors = []
+        for pair in raw_adjacency:
+            if not isinstance(pair, dict) or pair.get("Value") not in {"None", "FriendlyCrossingOnly", "FullAdjacency"}:
+                raise missing("nation.adjacentNations", "adjacency mapping contains an unsupported enum or malformed row", source="save-field")
+            other = resolve(pair.get("Key"), "nation.adjacentNations")
+            other_is_alien = _required_projection_bool(indexed, other, "alienNation", source="save-field", rule_id=rule_id)
+            if pair["Value"] == "FullAdjacency" and not other_is_alien and refs(other, "regions"):
+                neighbors.append({"democracy": number(other, "democracy"), "atWar": bool(refs(other, "wars"))})
+    own_base = nation.get("baseInvestmentPoints_month")
+    return {"sourceBacked": True, "provenance": "heldFixedWorldContext", "alienNation": alien_nation,
+            "rivals": relation_rows("rivals"), "wars": relation_rows("wars"), "neighbors": neighbors,
+            "spaceBodyRadiusKm": radius, "alliedArmies": allied_armies,
+            "ownBaseInvestmentPointsMonth": float(own_base) if isinstance(own_base, (int, float)) and not isinstance(own_base, bool) and math.isfinite(own_base) else None,
+            "pcgdpToReduceUnrestBy1": state.world_context["pcgdpToReduceUnrestBy1"],
+            "alienHabSurveillanceStrength": _projection_alien_hab_surveillance(indexed, development)}
+
+
+def _projection_alien_hab_surveillance(indexed: IndexedState, development: dict[str, Any]) -> float | None:
+    """Reconstruct AlienHabSurveillanceStrength; unresolved source stays unknown."""
+    templates = development.get("factionTemplates") or {}
+    aliens = [entry.get("Value") or {} for entry in type_entries(indexed, "TIFactionState")
+              if templates.get((entry.get("Value") or {}).get("templateName"), {}).get("isAlien") is True]
+    if len(aliens) != 1 or not isinstance(aliens[0].get("habSectors"), list):
+        return None
+    habs: dict[int, dict[str, Any]] = {}
+    for reference in aliens[0]["habSectors"]:
+        sector = state_value_by_id(indexed, ref_id(reference))
+        if not isinstance(sector, dict):
+            return None
+        hab_id = ref_id(sector.get("hab"))
+        hab = state_value_by_id(indexed, hab_id)
+        if hab_id is None or not isinstance(hab, dict):
+            return None
+        habs[hab_id] = hab
+    module_templates = load_hab_module_catalog() if habs else {}
+    total = 0.0
+    for hab in habs.values():
+        if hab.get("habType") == "Base":
+            continue
+        if hab.get("habType") != "Station":
+            return None
+        orbit = state_value_by_id(indexed, ref_id(hab.get("orbitState")))
+        body = state_value_by_id(indexed, ref_id((orbit or {}).get("barycenter")))
+        if not isinstance(body, dict) or not isinstance(body.get("templateName"), str):
+            return None
+        # GameStateManager.Earth resolves the unique Earth template state.
+        parent = state_value_by_id(indexed, ref_id(body.get("barycenter")))
+        if body["templateName"] != "Earth" and (parent or {}).get("templateName") != "Earth":
+            if body.get("barycenter") is not None and not isinstance(parent, dict):
+                return None
+            continue
+        if not isinstance(hab.get("sectors"), list):
+            return None
+        for sector_ref in hab["sectors"]:
+            sector = state_value_by_id(indexed, ref_id(sector_ref))
+            if not isinstance(sector, dict):
+                return None
+            if ref_id(sector.get("faction")) is None:
+                continue
+            if not isinstance(sector.get("habModules"), list):
+                return None
+            for module_ref in sector["habModules"]:
+                module = state_value_by_id(indexed, ref_id(module_ref))
+                if not isinstance(module, dict):
+                    return None
+                if not module.get("templateName"):
+                    continue
+                fields = ("constructionCompleted", "destroyed", "decommissioning", "powered")
+                if not all(isinstance(module.get(field), bool) for field in fields):
+                    return None
+                if not module["constructionCompleted"] or module["destroyed"] or module["decommissioning"] or not module["powered"]:
+                    continue
+                template = module_templates.get(module["templateName"])
+                if not isinstance(template, dict) or not isinstance(template.get("specialRules"), list):
+                    return None
+                if "AlienSurveillance" in template["specialRules"]:
+                    value = template.get("specialRulesValue")
+                    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+                        return None
+                    total += value
+    return total
 
 
 def extract_nation_projection_state(
@@ -651,14 +853,14 @@ def extract_nation_projection_state(
                 rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id,
                 reason="required xenoforming state reference cannot be resolved",
             )
-        occupation_fraction = _region_occupation_fraction(region)
+        occupation_fraction = _region_occupation_fraction(region, indexed, nation, nation_id)
         if not math.isfinite(occupation_fraction):
             raise _projection_dependency_error(
                 indexed,
                 source="save-field",
-                field=f"region.{region_id}.occupations",
+                field=f"region.{region_id}.occupations/currentWarStates/enemyAlliance",
                 rule_id=Rules.NATION_IP_BASE.id,
-                reason="occupation mapping is absent or invalid",
+                reason="occupation input or required war-alliance references are unavailable or invalid",
             )
         colony = _required_projection_bool(indexed, region, "colonyRegion", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id)
         permanent_colony = _required_projection_bool(indexed, region, "permanentlyDecolonized", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION.id)
@@ -719,6 +921,8 @@ def extract_nation_projection_state(
             fully_occupied=ref_id(region.get("leadOccupier")) is not None,
             mission_control_cap=None,
             welfare_colony_counter=int(_required_projection_number(indexed, region, "accumulatedDecolonizeTriggers", source="save-field", rule_id=Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id)),
+            anti_space_defenses=region.get("antiSpaceDefenses") if isinstance(region.get("antiSpaceDefenses"), bool) else None,
+            num_sto_fighters=int(region["numSTOFighters"]) if isinstance(region.get("numSTOFighters"), int) and not isinstance(region.get("numSTOFighters"), bool) else None,
             economy_region_counters={
                 key: int(_required_projection_number(
                     indexed,
@@ -861,7 +1065,16 @@ def extract_nation_projection_state(
         source="save-field",
         rule_id=Rules.NATION_PRIORITY_GOVERNMENT_LEGITIMIZE.id,
     )
-    hostile_ids = {region_id for region_id in (ref_id(value) for value in hostile_claim_refs) if region_id in regions}
+    hostile_ids = set()
+    for reference in hostile_claim_refs:
+        region_id = ref_id(reference)
+        resolved_claim = resolve_ref(indexed, reference)
+        if region_id is None or resolved_claim is None or resolved_claim[1] != "TIRegionState":
+            raise _projection_dependency_error(indexed, source="save-reference", field="nation.hostileClaims",
+                                               rule_id=Rules.NATION_PRIORITY_GOVERNMENT_LEGITIMIZE.id,
+                                               reason="hostile claim must resolve to a region state")
+        if region_id in regions:
+            hostile_ids.add(region_id)
     if not control_points:
         raise _projection_dependency_error(
             indexed,
@@ -919,6 +1132,7 @@ def extract_nation_projection_state(
         num_control_points_unclamped=int(_required_projection_number(indexed, nation, "numControlPoints_unclamped", source="save-field", rule_id=Rules.NATION_PERIODIC_CONTROL_POINTS.id)),
         legitimize_counter=as_float(nation.get("accumulatedLegitimizeClaimTriggers"), 0.0),
         hostile_region_ids=hostile_ids,
+        hostile_region_ids_complete=True,
         executive_faction_id=executive_cp.owner_faction_id,
         public_opinion=public_opinion,
         armies=armies,
@@ -947,6 +1161,11 @@ def extract_nation_projection_state(
         advisor_current_phase_assignments=phase_assignments,
         advisor_assignment_prepaid_ids=frozenset(prepaid_ids),
     )
+    state.rest_state_context = _extract_projection_rest_inputs(indexed, nation, state, development)
+    state.cached_can_accumulate_legitimize = nation.get("canAccumulateLegitimizeClaimTriggers") if isinstance(nation.get("canAccumulateLegitimizeClaimTriggers"), bool) else None
+    state.cached_can_accumulate_decontaminate = nation.get("canAccumulateDecontaminateTriggers") if isinstance(nation.get("canAccumulateDecontaminateTriggers"), bool) else None
+    state.max_military_tech_level = float(nation["maxMilitaryTechLevel"]) if isinstance(nation.get("maxMilitaryTechLevel"), (int, float)) and not isinstance(nation.get("maxMilitaryTechLevel"), bool) and math.isfinite(nation["maxMilitaryTechLevel"]) else None
+    state.policy_no_nukes = nation.get("policy_noNukes") if isinstance(nation.get("policy_noNukes"), bool) else None
     return state
 
 

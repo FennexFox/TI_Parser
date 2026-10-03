@@ -131,7 +131,11 @@ def state(*, pips=None, cp_count=1, progress=None, advisors=(), at=None, annual_
         military=True,
         space_flight_program=True,
         num_control_points_unclamped=cp_count,
-        rest_state_context={"cohesionFixedImpact": 12.0, "unrestFixedImpact": 10.5, "pcgdpToReduceUnrestBy1": 3_000.0},
+        rest_state_context={"cohesionFixedImpact": 20.0, "unrestFixedImpact": 10.5, "pcgdpToReduceUnrestBy1": 3_000.0,
+                            "provenance": "heldFixedWorldContext", "alienNation": False, "wars": [], "neighbors": [],
+                            "alienHabSurveillanceStrength": 0.0},
+        cached_can_accumulate_legitimize=False,
+        hostile_region_ids_complete=True,
         world_context={
             "temperatureAnomaly_C": 1.0,
             "endOfOil": False,
@@ -679,7 +683,9 @@ class NationProjectionTransactionTests(unittest.TestCase):
     def test_monthly_population_expected(self):
         initial = state(at=datetime(2030, 1, 31, 12), annual_growth=0.12)
         expected_population = 50.0 * (1.12 ** 0.0833333358168602)
-        expected_gdp = 1_000_000_000_000.0 + 20_000.0 * (expected_population - 50.0) * 1_000_000.0
+        expected_gdp = 1_000_000_000_000.0 + (
+            1_000_000_000_000.0 / (expected_population * 1_000_000.0)
+        ) * (expected_population - 50.0) * 1_000_000.0
         result = projection.run_projection(initial, projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)), context(), days=1)
         self.assertAlmostEqual(result["nationProjection"]["populationMillions"], expected_population)
         self.assertAlmostEqual(result["nationProjection"]["gdp"], expected_gdp)
@@ -789,6 +795,8 @@ class NationProjectionTransactionTests(unittest.TestCase):
         initial = state()
         initial.democracy = 10.0
         initial.hostile_region_ids = {1}
+        initial.cached_can_accumulate_legitimize = True
+        initial.cached_can_accumulate_legitimize = True
         used = set()
         event = projection._apply_completion(initial, "Government", context(), used)
         self.assertAlmostEqual(initial.education, 8.0 + 0.005 * 8.5 / 8.0)
