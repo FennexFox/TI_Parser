@@ -613,11 +613,11 @@ def _extract_projection_rest_inputs(
     def missing(field: str, reason: str, *, source: str = "save-reference") -> CalculationDependencyError:
         return _projection_dependency_error(indexed, source=source, field=field, rule_id=rule_id, reason=reason)
 
-    def resolve(reference: Any, field: str) -> dict[str, Any]:
-        value = state_value_by_id(indexed, ref_id(reference))
-        if not isinstance(value, dict):
-            raise missing(field, "required resting-state reference cannot be resolved")
-        return value
+    def resolve(reference: Any, field: str, expected_type: str = "TINationState") -> dict[str, Any]:
+        resolved = resolve_ref(indexed, reference)
+        if resolved is None or resolved[1] != expected_type:
+            raise missing(field, "required resting-state reference cannot resolve to its expected state type")
+        return resolved[2]
 
     def number(value: dict[str, Any], field: str) -> float:
         return _required_projection_number(indexed, value, field, source="save-field", rule_id=rule_id)
@@ -664,12 +664,12 @@ def _extract_projection_rest_inputs(
         ally = resolve(ally_ref, "nation.allies")
         ally_is_alien = _required_projection_bool(indexed, ally, "alienNation", source="save-field", rule_id=rule_id)
         for army_ref in refs(ally, "armies"):
-            army = resolve(army_ref, "ally.armies")
+            army = resolve(army_ref, "ally.armies", "TIArmyState")
             army_type = _required_projection_army_type(indexed, army, "armyType", source="save-field", rule_id=rule_id)
             if ally_is_alien and army_type == "AlienMegafauna":
                 continue
             current_region_id = ref_id(army.get("currentRegion"))
-            resolve(army.get("currentRegion"), "ally.army.currentRegion")
+            resolve(army.get("currentRegion"), "ally.army.currentRegion", "TIRegionState")
             if current_region_id not in state.regions:
                 continue
             home_nation = resolve(army.get("homeNation"), "ally.army.homeNation")
@@ -907,6 +907,10 @@ def extract_nation_projection_state(
             longitude=longitude,
             annual_population_growth_modifier=_required_projection_number(indexed, region, "annualPopGrowthModifier", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
             environment=environment,
+            # This raw-save path requires the exact, potentially undisclosed
+            # level. A future visible-input projection must build its inputs
+            # separately and label assumptions; substituting zero here, or
+            # deleting the level from output, cannot make this path fair-play.
             xenoforming_level=_required_projection_number(indexed, xeno, "xenoformingLevel", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id),
             nuclear_detonations=int(_required_projection_number(indexed, region, "nuclearDetonations", source="save-field", rule_id=Rules.NATION_POPULATION_ANNUAL_GROWTH.id)),
             colony=colony,
@@ -1162,6 +1166,21 @@ def extract_nation_projection_state(
         advisor_assignment_prepaid_ids=frozenset(prepaid_ids),
     )
     state.rest_state_context = _extract_projection_rest_inputs(indexed, nation, state, development)
+    # Missing membership is not evidence of the null federation reference.
+    state.in_federation = None
+    if "federation" in nation:
+        federation_reference = nation["federation"]
+        if federation_reference is None:
+            state.in_federation = False
+        else:
+            resolved_federation = resolve_ref(indexed, federation_reference)
+            if resolved_federation is None or resolved_federation[1] != "TIFederationState":
+                raise _projection_dependency_error(
+                    indexed, source="save-reference", field="nation.federation",
+                    rule_id=Rules.NATION_IP_ECONOMY_SCORE.id,
+                    reason="federation reference cannot resolve to a federation state",
+                )
+            state.in_federation = True
     state.cached_can_accumulate_legitimize = nation.get("canAccumulateLegitimizeClaimTriggers") if isinstance(nation.get("canAccumulateLegitimizeClaimTriggers"), bool) else None
     state.cached_can_accumulate_decontaminate = nation.get("canAccumulateDecontaminateTriggers") if isinstance(nation.get("canAccumulateDecontaminateTriggers"), bool) else None
     state.max_military_tech_level = float(nation["maxMilitaryTechLevel"]) if isinstance(nation.get("maxMilitaryTechLevel"), (int, float)) and not isinstance(nation.get("maxMilitaryTechLevel"), bool) and math.isfinite(nation["maxMilitaryTechLevel"]) else None

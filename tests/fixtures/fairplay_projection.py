@@ -97,6 +97,7 @@ def make_save_data() -> dict[str, object]:
                 education=12.0,
                 democracy=8.0,
                 alienNation=False,
+                federation=None,
                 cohesion=5.0,
                 cohesionRestState_dailyCache=5.0,
                 unrest=0.0,

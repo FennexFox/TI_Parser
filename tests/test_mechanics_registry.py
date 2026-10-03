@@ -26,6 +26,10 @@ class MechanicsRegistryTests(unittest.TestCase):
         historical_hash = "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5"
         reviewed = (
             Rules.NATION_IP_BASE,
+            Rules.NATION_IP_ECONOMY_SCORE,
+            Rules.NATION_PERIODIC_REGION_CACHE,
+            Rules.NATION_PRIORITY_VALIDATION_TRIGGER,
+            Rules.NATION_PRIORITY_WELFARE_INEQUALITY,
             Rules.NATION_IP_PRIORITY_BONUS,
             Rules.NATION_PRIORITY_VALIDITY,
             Rules.NATION_PERIODIC_COHESION,
@@ -48,7 +52,6 @@ class MechanicsRegistryTests(unittest.TestCase):
             with self.subTest(rule=rule.id):
                 self.assertEqual(rule.source_hash, current_hash)
         for rule in (
-            Rules.NATION_PRIORITY_WELFARE_INEQUALITY,
             Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM,
         ):
             with self.subTest(rule=rule.id):

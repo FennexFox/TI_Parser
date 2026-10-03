@@ -9,6 +9,7 @@ import calendar as calendar_module
 import copy
 import math
 import operator
+import struct
 from typing import Any, Callable, Iterable, Mapping
 
 from ti_parser_income import (
@@ -276,6 +277,7 @@ class NationProjectionState:
     military: bool = False
     cached_can_accumulate_legitimize: bool | None = None
     cached_can_accumulate_decontaminate: bool | None = None
+    cached_can_accumulate_decolonize: bool | None = None
     best_current_sustainability_value: float | None = None
     max_military_tech_level: float | None = None
     policy_no_nukes: bool | None = None
@@ -301,6 +303,7 @@ class NationProjectionState:
     metric_provenance: dict[str, set[str]] = field(default_factory=dict)
     metric_tracker: MetricDependencyTracker = field(default_factory=MetricDependencyTracker)
     federation_economy_bonus: float = 0.0
+    in_federation: bool | None = None
     cached_num_mining_regions: int = 0
     cached_num_oil_regions: int = 0
     cached_num_core_economic_regions: int = 0
@@ -892,6 +895,177 @@ def _record_and_fix_control_point(
     return effective
 
 
+def _mission_control_at_cap(state: NationProjectionState, context: ProjectionContext) -> bool:
+    """Evaluate the live current/max-MC getters used by nation setters."""
+
+    if not state.regions:
+        raise ProjectionRuntimeStop(
+            "Mission control setter gate requires regional state",
+            rule_ids=(Rules.NATION_PRIORITY_VALIDITY.id,),
+            dependencies=({"field": "nation.regions", "source": "save-reference"},),
+            affected_metrics=("nation.missionControl", "internal.controlPointWeightCache"),
+            phase="setterGate",
+        )
+    current = 0
+    maximum = 0
+    for region in state.regions.values():
+        if not isinstance(region.fully_occupied, bool) or not isinstance(region.mission_control, int) or isinstance(region.mission_control, bool):
+            raise ProjectionRuntimeStop(
+                "Mission control setter gate requires live region capacity inputs",
+                rule_ids=(Rules.NATION_PRIORITY_VALIDITY.id,),
+                dependencies=({"field": "region.fullyOccupied/missionControl", "source": f"save.region.{region.id}"},),
+                affected_metrics=("nation.missionControl", "internal.controlPointWeightCache"),
+                phase="setterGate",
+            )
+        if region.fully_occupied:
+            continue
+        current += region.mission_control
+        maximum += _region_mc_cap(state, region, context)
+    return current >= maximum
+
+
+def _source_float32(value: float) -> float:
+    return struct.unpack("<f", struct.pack("<f", value))[0]
+
+
+def _stage_control_point_validation(
+    state: NationProjectionState,
+    context: ProjectionContext,
+    *,
+    gdp_after: float | None = None,
+    education_after: float | None = None,
+) -> tuple[dict[int, ControlPointProjectionState], list[dict[str, Any]], set[int]]:
+    staged = copy.deepcopy(state)
+    if gdp_after is not None:
+        staged.gdp = gdp_after
+    if education_after is not None:
+        staged.education = education_after
+    staged_trace: list[dict[str, Any]] = []
+    defaulted: set[int] = set()
+    for cp in sorted(staged.control_points.values(), key=lambda value: value.position):
+        had_economy = cp.pips.get("Economy", 0) > 0
+        _record_and_fix_control_point(staged, cp, context, trace=staged_trace)
+        if cp.pips.get("Economy", 0) > 0 and not had_economy:
+            defaulted.add(cp.id)
+    return staged.control_points, staged_trace, defaulted
+
+
+def _modify_gdp(
+    state: NationProjectionState,
+    value: float,
+    context: ProjectionContext,
+    used: set[str],
+    *,
+    trace: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Apply ModifyGDP with its pre-mutation validation callback gate."""
+
+    before = state.gdp
+    gdp_after = max(state.gdp + value, state.population_millions * 1_000_000.0 * 100.0)
+    callback = False
+    assumptions: list[str] = []
+    if value > 0.0:
+        at_mc_cap = _mission_control_at_cap(state, context)
+        if at_mc_cap:
+            callback = True
+        elif state.in_federation is False:
+            funding_cap = _source_float32(0.004999999888241291 * (state.gdp / 1_000_000.0))
+            callback = state.funding_year >= funding_cap
+        elif state.in_federation is True or state.rest_state_context.get("sourceBacked") is True:
+            raise ProjectionRuntimeStop(
+                "Federated GDP setter funding gate cannot be proven",
+                rule_ids=(Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id,),
+                dependencies=({
+                    "field": "federation.MemberPooledResource_Year(Money)",
+                    "source": "save.TIFederationState",
+                },),
+                affected_metrics=("nation.gdp", "internal.controlPointWeightCache"),
+                phase="beforeModifyGDP",
+                mechanic="ModifyGDP",
+            )
+        else:
+            # Direct test/scenario states have no federation reference. Preserve
+            # their historical non-federated assumption and expose it in trace.
+            assumptions.append("in_federation=False; funding_year is the live setter input")
+            funding_cap = _source_float32(0.004999999888241291 * (state.gdp / 1_000_000.0))
+            callback = state.funding_year >= funding_cap
+
+        if callback:
+            # The callback is synchronous with ModifyGDP. Prove its entire CP
+            # refresh on a clone before the setter's GDP mutation is committed.
+            staged_cps, staged_trace, defaulted = _stage_control_point_validation(
+                state, context, gdp_after=gdp_after
+            )
+        else:
+            staged_cps, staged_trace, defaulted = {}, [], set()
+
+    state.gdp = gdp_after
+    _refresh_economy_score(state, context, used)
+    if trace is not None:
+        trace.append({"operation": "modifyGDP", "requestedDelta": value, "gdpBefore": before, "gdpAfter": state.gdp})
+        if assumptions:
+            trace.append({"operation": "scenarioAssumption", "setter": "ModifyGDP", "assumptions": assumptions})
+    if callback:
+        state.control_points = staged_cps
+        used.add(Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id)
+        if defaulted:
+            used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
+        if trace is not None:
+            trace.append({
+                "operation": "priorityValidationTrigger",
+                "priority": "ModifyGDP",
+                "reasons": ["positiveGdpWhileMissionControlOrFundingAtCap"],
+                "timing": "insideModifyGDP",
+            })
+            trace.extend(staged_trace)
+    return {
+        "callbackTriggered": callback,
+        "assumptions": assumptions,
+        "validationReasons": ["positiveGdpWhileMissionControlOrFundingAtCap"] if callback else [],
+    }
+
+
+def _add_to_education(
+    state: NationProjectionState,
+    value: float,
+    context: ProjectionContext,
+    used: set[str],
+    *,
+    trace: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Apply AddToEducation and its synchronous Mission Control callback."""
+
+    before = state.education
+    callback = value > 0.0 and _mission_control_at_cap(state, context)
+    education_after = min(255.0, max(1.0, state.education + value))
+    if callback:
+        staged_cps, staged_trace, defaulted = _stage_control_point_validation(
+            state, context, education_after=education_after
+        )
+    else:
+        staged_cps, staged_trace, defaulted = {}, [], set()
+    state.education = education_after
+    if trace is not None:
+        trace.append({"operation": "addToEducation", "requestedDelta": value, "educationBefore": before, "educationAfter": state.education})
+    if callback:
+        state.control_points = staged_cps
+        used.add(Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id)
+        if defaulted:
+            used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
+        if trace is not None:
+            trace.append({
+                "operation": "priorityValidationTrigger",
+                "priority": "AddToEducation",
+                "reasons": ["positiveEducationWhileMissionControlAtCap"],
+                "timing": "insideAddToEducation",
+            })
+            trace.extend(staged_trace)
+    return {
+        "callbackTriggered": callback,
+        "validationReasons": ["positiveEducationWhileMissionControlAtCap"] if callback else [],
+    }
+
+
 def _diversity_bonus(
     state: NationProjectionState,
     cp: ControlPointProjectionState,
@@ -909,6 +1083,17 @@ def _diversity_bonus(
 
 def _national_priority_bonus(state: NationProjectionState, priority: str, context: ProjectionContext) -> float:
     if priority == "Economy":
+        if state.rest_state_context.get("sourceBacked") is True:
+            if state.in_federation is not False:
+                raise ProjectionRuntimeStop(
+                    "Federation economy bonus cache cannot be refreshed from the available state",
+                    rule_ids=(Rules.NATION_PERIODIC_REGION_CACHE.id,),
+                    dependencies=({"field": "federation.ECOBonus", "source": "save.TIFederationState"},),
+                    affected_metrics=("nation.priorityProgress.Economy", "internal.controlPointWeightCache"),
+                    phase="dailyRegionCache",
+                    mechanic="CacheRegionValues",
+                )
+            return 0.0
         return state.federation_economy_bonus * _global(context, "federationGDPEconomyBonus")
     if priority in {"Military_BuildArmy", "Military_BuildNavy"}:
         return state.cached_num_mining_regions * _global(context, "coreMineralBuildMilitaryModifier")
@@ -980,6 +1165,9 @@ def _refresh_region_cache(state: NationProjectionState, context: ProjectionConte
     state.cached_can_accumulate_legitimize = (
         bool(state.hostile_region_ids) if state.hostile_region_ids_complete else None
     )
+    state.cached_can_accumulate_decolonize = any(region.colony is True for region in ordered)
+    if state.in_federation is False:
+        state.federation_economy_bonus = 0.0
     return {
         "miningRegions": state.cached_num_mining_regions,
         "oilRegions": state.cached_num_oil_regions,
@@ -987,6 +1175,8 @@ def _refresh_region_cache(state: NationProjectionState, context: ProjectionConte
         "canAccumulateCoreOil": state.cached_can_accumulate_core_oil,
         "canAccumulateCoreMining": state.cached_can_accumulate_core_mining,
         "canAccumulateCoreEconomy": state.cached_can_accumulate_core_economy,
+        "canAccumulateDecolonize": state.cached_can_accumulate_decolonize,
+        "federationEconomyBonus": state.federation_economy_bonus if state.in_federation is False else None,
     }
 
 
@@ -1757,20 +1947,9 @@ def _apply_completion(
             + state.education
         ) * scale
         gdp_delta = pcgdp_delta * state.population_millions * 1_000_000.0
-        mc_cap = sum(
-            _region_mc_cap(state, region, context)
-            for region in state.regions.values()
-            if region.fully_occupied is False
-        )
-        validation_needed = gdp_delta > 0.0 and (
-            state.mission_control >= mc_cap
-            or state.funding_year >= 0.005 * (state.gdp / 1_000_000.0)
-        )
-        state.gdp = max(
-            state.gdp + gdp_delta,
-            state.population_millions * 1_000_000.0 * 100.0,
-        )
-        _refresh_economy_score(state, context, used)
+        setter_result = _modify_gdp(state, gdp_delta, context, used, trace=trace)
+        if setter_result["assumptions"]:
+            execution["sourceAssumptions"] = setter_result["assumptions"]
         metric_inputs.extend(("internal.populationScaling", "nation.democracy", "nation.education", "internal.regionDailyCache"))
         metric_outputs.extend(("nation.gdp", "nation.perCapitaGdp"))
         execution["dependencies"].append(Rules.NATION_PRIORITY_ECONOMY_GDP.id)
@@ -1795,22 +1974,9 @@ def _apply_completion(
             "outputs": ["internal.economyScore", "nation.research", "nation.baseInvestmentPointsMonth"],
             "dailyRegionCachePreserved": True,
         })
-        if validation_needed:
-            execution["validationTriggers"] = ["positiveGdpWhileMissionControlOrFundingAtCap"]
+        if setter_result["callbackTriggered"]:
+            execution["validationTriggers"] = setter_result["validationReasons"]
             execution["validationApplied"] = True
-            used.add(Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id)
-            if trace is not None:
-                trace.append({
-                    "operation": "priorityValidationTrigger",
-                    "priority": priority,
-                    "reasons": list(execution["validationTriggers"]),
-                    "timing": "insideModifyGDP",
-                })
-            for cp in sorted(state.control_points.values(), key=lambda value: value.position):
-                before = cp.pips.get("Economy", 0)
-                _record_and_fix_control_point(state, cp, context, trace=trace)
-                if cp.pips.get("Economy", 0) and not before:
-                    used.add(Rules.NATION_IP_CONTROL_POINT_DEFAULT_ECONOMY.id)
 
         inequality_base = (
             _global(context, "economyPriorityInequalityIncrease")
@@ -1892,23 +2058,21 @@ def _apply_completion(
             change *= 8.5 / max(1.0, state.education)
         elif state.education >= 12.0:
             change *= 12.0 / max(1.0, state.education)
-        mission_control_was_at_cap = (
-            change > 0.0
-            and "MissionControl" in context.priorities
-            and not _priority_valid(state, "MissionControl", context)
-        )
-        state.education = min(255.0, max(1.0, state.education + scale * change))
-        state.cohesion = min(10.0, max(0.0, state.cohesion + scale * (0.01 if state.cohesion < 5 else -0.01 if state.cohesion > 5 else 0.0)))
+        education_result = _add_to_education(state, scale * change, context, used, trace=trace)
+        cohesion_delta = scale * (0.01 if state.cohesion < 5 else -0.01 if state.cohesion > 5 else 0.0)
+        _add_cohesion(state, cohesion_delta, context)
         metric_inputs.append("internal.populationScaling")
         metric_outputs.extend(("nation.education", "nation.cohesion"))
-        if mission_control_was_at_cap:
-            execution["validationTriggers"] = ["positiveEducationWhileMissionControlAtCap"]
+        if education_result["callbackTriggered"]:
+            execution["validationTriggers"] = education_result["validationReasons"]
+            execution["validationApplied"] = True
     elif priority == "Government":
         used.add(Rules.NATION_PRIORITY_GOVERNMENT_COMPLETE.id)
         if state.democracy >= 10.0:
             knowledge_execution = _apply_completion(state, "Knowledge", context, used, trace=trace)
             if knowledge_execution.get("validationTriggers"):
                 execution["validationTriggers"] = list(knowledge_execution["validationTriggers"])
+                execution["validationApplied"] = bool(knowledge_execution.get("validationApplied"))
             metric_inputs.append("internal.populationScaling")
             metric_outputs.extend(("nation.education", "nation.cohesion"))
         else:
@@ -1931,9 +2095,16 @@ def _apply_completion(
             execution["dependencies"].append(Rules.NATION_PRIORITY_GOVERNMENT_LEGITIMIZE.id)
     elif priority == "Welfare":
         used.update({Rules.NATION_PRIORITY_WELFARE_COMPLETE.id, Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id})
-        state.inequality = min(9.0, max(1.0, state.inequality + (_global(context, "welfarePriorityInequalityChange") + _welfare_modifier(state, context)) * scale))
+        inequality_delta = (_global(context, "welfarePriorityInequalityChange") + _welfare_modifier(state, context)) * scale
+        inequality_overshoot = state.inequality + inequality_delta - 9.0
+        state.inequality = min(9.0, max(1.0, state.inequality + inequality_delta))
+        if inequality_overshoot > 0.0:
+            _add_cohesion(state, -inequality_overshoot, context)
+            state.unrest = min(10.0, max(0.0, state.unrest + inequality_overshoot))
         metric_inputs.append("internal.populationScaling")
         metric_outputs.append("nation.inequality")
+        if inequality_overshoot > 0.0:
+            metric_outputs.extend(("nation.cohesion", "nation.unrest"))
         execution["dependencies"].append(Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id)
         child_executions.append({
             "ruleId": Rules.NATION_PRIORITY_WELFARE_INEQUALITY.id,
@@ -1941,10 +2112,28 @@ def _apply_completion(
             "provenance": "dllReimplementation",
             "dependencies": [],
             "inputs": list(metric_inputs),
-            "outputs": ["nation.inequality"],
+            "outputs": ["nation.inequality"] + (["nation.cohesion", "nation.unrest"] if inequality_overshoot > 0.0 else []),
+            "inequalityDelta": inequality_delta,
+            "overshoot": max(inequality_overshoot, 0.0),
         })
+        can_decolonize = state.cached_can_accumulate_decolonize
+        if can_decolonize is None:
+            if state.rest_state_context.get("sourceBacked") is True:
+                raise ProjectionRuntimeStop(
+                    "Welfare completion requires the daily decolonization candidate cache",
+                    rule_ids=(Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id,),
+                    dependencies=({"field": "canAccumulateDecolonizeTriggers", "source": "save.TINationState.CacheRegionValues"},),
+                    affected_metrics=("nation.population", "nation.missionControl", "nation.armies"),
+                    phase="priorityCompletion",
+                    priority=priority,
+                    mechanic="OnWelfarePriorityComplete",
+                )
+            can_decolonize = any(region.colony is True for region in state.regions.values())
+            execution.setdefault("sourceAssumptions", []).append(
+                "decolonization candidate cache recomputed from supplied direct-test regions"
+            )
         colonies = [region for region in state.regions.values() if region.colony is True]
-        if colonies:
+        if can_decolonize and colonies:
             used.add(Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id)
             execution["dependencies"].append(Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER.id)
             child_executions.append({
@@ -1988,6 +2177,9 @@ def _apply_completion(
                 target.colony = False
                 target.permanent_colony = True
                 target.welfare_colony_counter = 0
+                state.cached_can_accumulate_decolonize = any(
+                    region.colony is True for region in state.regions.values()
+                )
                 execution["decolonizedRegionId"] = target.id
                 colony_metric = f"region.{target.id}.colony"
                 metric_outputs.append(colony_metric)
@@ -3180,14 +3372,30 @@ def _run_monthly_transaction(
     state.num_control_points_unclamped = max(round((state.gdp / 1_000_000_000.0) ** _global(context, "controlPointCountScaling") / _global(context, "controlPointScalingDivisor")), 1)
     monthly_inputs = state.rest_state_context
     monthly_trace: list[dict[str, Any]] = []
+    mutation_trace: list[dict[str, Any]] = []
+    population_rows: list[dict[str, Any]] = []
+    population_prefix_metrics: list[str] = []
+    setter_executions: list[dict[str, Any]] = []
 
     def stop_monthly(reason: str, phase: str, *, dependencies: Iterable[Mapping[str, Any]] = ()) -> ProjectionRuntimeStop:
+        rule_executions: list[dict[str, Any]] = list(setter_executions)
+        if population_prefix_metrics:
+            rule_executions.append({
+                "ruleId": Rules.NATION_POPULATION_MONTHLY_GROWTH.id,
+                "effectiveCoverage": "expected",
+                "provenance": "meanPath",
+                "expectationGuarantee": False,
+                "dependencies": [Rules.NATION_POPULATION_ANNUAL_GROWTH.id],
+                "inputs": ["nation.education", "nation.cohesion", "nation.perCapitaGdp"],
+                "outputs": list(population_prefix_metrics),
+                "authoritativePrefix": True,
+            })
         return ProjectionRuntimeStop(
             reason, rule_ids=(Rules.NATION_PERIODIC_COHESION.id,), dependencies=dependencies,
             affected_metrics=("nation.democracy", "nation.cohesion", "nation.unrest", "nation.population", "nation.gdp"),
             phase=phase, mechanic="MonthlyNationUpdate", authoritative_state=copy.deepcopy(state),
             unsupported_next_step={"mechanic": "MonthlyNationUpdate", "phase": phase, "ruleIds": [Rules.NATION_PERIODIC_COHESION.id]},
-            attempted_transaction={"kind": "monthly", "phaseTrace": list(monthly_trace), "mechanicRules": sorted(used), "ruleExecutions": []},
+            attempted_transaction={"kind": "monthly", "phaseTrace": list(monthly_trace), "mutationTrace": list(mutation_trace), "populationUpdates": copy.deepcopy(population_rows), "mechanicRules": sorted(used), "ruleExecutions": rule_executions},
         )
 
     if not isinstance(monthly_inputs.get("alienNation"), bool) or not isinstance(monthly_inputs.get("wars"), list):
@@ -3244,7 +3452,6 @@ def _run_monthly_transaction(
         inputs=("nation.unrest", "nation.cohesion", "nation.perCapitaGdp", "nation.democracy", "nation.armies"),
         rule_ids=(Rules.NATION_PERIODIC_UNREST.id,),
     )
-    population_rows = []
     for region in sorted(state.regions.values(), key=lambda value: value.region_order):
         annual_growth = _annual_population_growth(state, region, context)
         monthly_rate = math.pow(1.0 + annual_growth, 0.0833333358168602) - 1.0
@@ -3256,13 +3463,7 @@ def _run_monthly_transaction(
         # GDP weight, the current national GDP, and the new regional population.
         old_national_gdp = state.gdp
         region.population_millions = new
-        regional_gdp = _region_gdp_value(state, region, context)
-        regional_pcgdp = regional_gdp / (new * 1_000_000.0) if new else 0.0
-        requested_gdp_delta = regional_pcgdp * delta * 1_000_000.0
-        # ModifyGDP applies its floor after the region's population mutation.
-        gdp_floor = state.population_millions * 1_000_000.0 * 100.0
-        state.gdp = max(state.gdp + requested_gdp_delta, gdp_floor)
-        gdp_delta = state.gdp - old_national_gdp
+        state.population_mean_path = True
         population_metric = f"region.{region.id}.population"
         gdp_metric = f"region.{region.id}.gdp"
         state.metric_tracker.record(
@@ -3273,6 +3474,56 @@ def _run_monthly_transaction(
             provenance=("meanPath", state.world_context_provenance),
             stochastic_treatments=("deterministicMeanInput",),
         )
+        population_prefix_metrics.append(population_metric)
+        state.metric_tracker.record(
+            "nation.population",
+            inputs=tuple(f"region.{item.id}.population" for item in state.regions.values()),
+            rule_ids=(Rules.NATION_POPULATION_ANNUAL_GROWTH.id, Rules.NATION_POPULATION_MONTHLY_GROWTH.id),
+            coverage="expected",
+            provenance=("meanPath", state.world_context_provenance),
+            stochastic_treatments=("deterministicMeanInput",),
+        )
+        population_row = {
+            "regionId": region.id,
+            "annualGrowth": annual_growth,
+            "monthlyRate": monthly_rate,
+            "jitterInput": 0.0,
+            "populationDeltaMillions": delta,
+            "gdpDelta": None,
+        }
+        population_rows.append(population_row)
+        mutation_trace.append({
+            "operation": "populationSetter",
+            "regionId": region.id,
+            "populationDeltaMillions": delta,
+            "populationMillions": new,
+            "coverage": "expected",
+        })
+        regional_gdp = _region_gdp_value(state, region, context)
+        regional_pcgdp = regional_gdp / (new * 1_000_000.0) if new else 0.0
+        requested_gdp_delta = regional_pcgdp * delta * 1_000_000.0
+        try:
+            setter_result = _modify_gdp(state, requested_gdp_delta, context, used, trace=mutation_trace)
+        except ProjectionRuntimeStop as exc:
+            stopped = stop_monthly(exc.reason, exc.phase or "beforeModifyGDP", dependencies=exc.dependencies)
+            stopped.rule_ids = exc.rule_ids or (Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id,)
+            stopped.mechanic = exc.mechanic or "ModifyGDP"
+            stopped.unsupported_next_step["mechanic"] = stopped.mechanic
+            stopped.unsupported_next_step["ruleIds"] = list(stopped.rule_ids)
+            raise stopped from exc
+        if setter_result["callbackTriggered"]:
+            setter_executions.append({
+                "ruleId": Rules.NATION_PRIORITY_VALIDATION_TRIGGER.id,
+                "effectiveCoverage": "exact",
+                "provenance": "dllReimplementation",
+                "dependencies": [Rules.NATION_POPULATION_MONTHLY_GROWTH.id],
+                "inputs": ["nation.gdp", "nation.missionControl", "nation.funding"],
+                "outputs": ["internal.controlPointWeightCache"],
+                "triggerReasons": setter_result["validationReasons"],
+                "timing": "insideModifyGDP",
+            })
+        gdp_delta = state.gdp - old_national_gdp
+        population_row["gdpDelta"] = gdp_delta
         state.metric_tracker.record(
             gdp_metric,
             inputs=(gdp_metric, population_metric, "nation.gdp"),
@@ -3280,32 +3531,26 @@ def _run_monthly_transaction(
         )
         if delta < 0:
             education_delta = max(-0.005, min(0.0, delta / 100.0))
-            state.education = min(255.0, max(1.0, state.education + education_delta))
+            _add_to_education(state, education_delta, context, used, trace=mutation_trace)
             state.metric_tracker.record(
                 "nation.education",
                 inputs=("nation.education", population_metric),
                 rule_ids=(Rules.NATION_POPULATION_MONTHLY_GROWTH.id,),
             )
         _refresh_economy_score(state, context, used)
-        population_rows.append({
-            "regionId": region.id,
-            "annualGrowth": annual_growth,
-            "monthlyRate": monthly_rate,
-            "jitterInput": 0.0,
-            "populationDeltaMillions": delta,
-            "gdpDelta": gdp_delta,
-        })
     # Region GDP is a live national-GDP share in the game, not a per-region
     # cached increment. Refresh every output cache after the ordered mutations.
     for region in state.regions.values():
         region.gdp = _region_gdp_value(state, region, context)
-    state.population_mean_path = True
     region_population_metrics = tuple(f"region.{region.id}.population" for region in state.regions.values())
     region_gdp_metrics = tuple(f"region.{region.id}.gdp" for region in state.regions.values())
     state.metric_tracker.record(
         "nation.population",
         inputs=region_population_metrics,
         rule_ids=(Rules.NATION_PERIODIC_POPULATION.id, Rules.NATION_POPULATION_MONTHLY_GROWTH.id),
+        coverage="expected",
+        provenance=("meanPath", state.world_context_provenance),
+        stochastic_treatments=("deterministicMeanInput",),
     )
     state.metric_tracker.record(
         "nation.gdp",
@@ -3355,6 +3600,7 @@ def _run_monthly_transaction(
         "provenance": "meanPath",
         "expectationGuarantee": False,
         "populationUpdates": population_rows,
+        "mutationTrace": mutation_trace,
         "quarterlyTrackerUpdated": quarterly,
         "phaseTrace": [
             *monthly_trace,
@@ -3379,6 +3625,7 @@ def _run_monthly_transaction(
         ],
         "ruleExecutions": [
             *type_executions,
+            *setter_executions,
             {
                 "ruleId": Rules.NATION_PERIODIC_CONTROL_POINTS.id,
                 "effectiveCoverage": "exact",

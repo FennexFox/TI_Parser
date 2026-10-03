@@ -125,13 +125,14 @@ class Rules:
         source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_IP_ECONOMY_SCORE = MechanicRule(
-        "nation.ip.economy-score", 1,
-        "Recompute the GDP-derived economy score immediately after GDP changes.",
-        "verified", "exact",
-        ("TINationState.ModifyGDP", "TINationState.SetEconomyScore"),
+        "nation.ip.economy-score", 2,
+        "Recompute GDP-derived economy score after the bounded ModifyGDP setter path.",
+        "partial", "exact",
+        ("TINationState.ModifyGDP"),
         ("TIRegionState.GrowPopulationByMonth", "TINationState.SetBaseInvestmentPoints_month"),
         ("nationDevelopment.globalConfig.controlPointIPScaling", "nationDevelopment.globalConfig.controlPointIPFactor"),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_economy_score_recomputes_from_literal_gdp",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_IP_CONTROL_POINT_ALLOCATION = MechanicRule(
         "nation.ip.control-point-allocation", 1,
@@ -180,9 +181,9 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_condition_waits_for_multi_completion_transaction",),
     )
     NATION_PRIORITY_KNOWLEDGE_COMPLETE = MechanicRule(
-        "nation.priority.knowledge.complete", 2,
-        "Apply Knowledge education and cohesion completion effects.",
-        "verified", "exact",
+        "nation.priority.knowledge.complete", 3,
+        "Apply Knowledge education/cohesion and the supported education-setter CP callback.",
+        "partial", "exact",
         ("TINationState.OnKnowledgePriorityComplete", "TINationState.knowledgePriorityEducationChange", "TINationState.knowledgePriorityCohesionChange", "TINationState.AddToEducation", "TINationState.AddToCohesion"),
         data_dependencies=("nationDevelopment.globalConfig.knowledgePriorityEducationIncrease", "nationDevelopment.globalConfig.populationBasedIPEffectScaling"),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_knowledge_completion", "tests.test_nation_projection.NationProjectionTransactionTests.test_knowledge_completion_clamps_education_at_dll_setter_boundaries"),
@@ -332,11 +333,12 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionEconomyTests.test_economy_region_branch_precedence_and_transition",),
     )
     NATION_PERIODIC_REGION_CACHE = MechanicRule(
-        "nation.periodic.region-cache", 1,
-        "Cache occupied-filtered resource/core region counts and Economy trigger availability before allocation.",
-        "verified", "exact",
+        "nation.periodic.region-cache", 2,
+        "Refresh occupied-filtered regional counts and supported candidate/non-federation caches before allocation.",
+        "partial", "exact",
         ("TINationState.CacheRegionValues", "TINationState.DailyNationUpdate"),
         test_ids=("tests.test_nation_projection.NationProjectionSchedulerTests.test_daily_region_cache_refreshes_before_allocation",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_EFFECT_CONTEXT_EXPIRATION = MechanicRule(
         "nation.effect.context-expiration", 2,
@@ -347,26 +349,28 @@ class Rules:
         source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_VALIDATION_TRIGGER = MechanicRule(
-        "nation.priority.validation-trigger", 1,
-        "Revalidate CP values only at audited setters and priority-validity change triggers.",
-        "verified", "exact",
-        ("TINationState.PossiblePriorityValidationChange", "TIControlPoint.SetControlPointPriority"),
+        "nation.priority.validation-trigger", 2,
+        "Evaluate pre-setter cap triggers and revalidate CP caches against post-setter state.",
+        "partial", "exact",
+        ("TINationState.PossiblePriorityValidationChange", "TINationState.ModifyGDP", "TINationState.AddToEducation", "TIControlPoint.RecordAndFixControlPointValues"),
         test_ids=("tests.test_nation_projection.NationProjectionSchedulerTests.test_nontriggering_education_change_preserves_cached_weights",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_WELFARE_COMPLETE = MechanicRule(
-        "nation.priority.welfare.complete", 2,
-        "Coordinate Welfare inequality and the conditionally activated colony/decolonization child rules.",
-        "verified", "exact", ("TINationState.OnWelfarePriorityComplete",),
+        "nation.priority.welfare.complete", 3,
+        "Coordinate Welfare inequality and cached availability of colony/decolonization child rules.",
+        "partial", "exact", ("TINationState.OnWelfarePriorityComplete",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_welfare_children_activate_only_on_the_executed_path",),
         source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_WELFARE_INEQUALITY = MechanicRule(
-        "nation.priority.welfare.inequality", 1,
-        "Apply the Welfare completion inequality reduction.",
-        "verified", "exact",
-        ("TINationState.OnWelfarePriorityComplete", "TINationState.welfarePriorityInequalityChange"),
+        "nation.priority.welfare.inequality", 2,
+        "Apply Welfare inequality bounds and above-cap cohesion/unrest spillover.",
+        "partial", "exact",
+        ("TINationState.OnWelfarePriorityComplete", "TINationState.welfarePriorityInequalityChange", "TINationState.AddToInequality", "TINationState.AddToCohesion", "TINationState.AddToUnrest"),
         data_dependencies=("nationDevelopment.globalConfig.welfarePriorityInequalityDecrease",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_welfare_children_activate_only_on_the_executed_path",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_WELFARE_COLONY_TRIGGER = MechanicRule(
         "nation.priority.welfare.colony-trigger", 1,
@@ -593,8 +597,8 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_population_formula_uses_deterministic_mean_input_not_trajectory_expectation",),
     )
     NATION_POPULATION_MONTHLY_GROWTH = MechanicRule(
-        "nation.population.monthly-growth", 2,
-        "Apply mean-input monthly population growth, then live regional GDP and bounded education updates in DLL order.",
+        "nation.population.monthly-growth", 3,
+        "Apply mean-input population growth before live regional GDP and supported setter callbacks.",
         "partial", "expected",
         ("TIRegionState.GrowPopulationByMonth",),
         data_dependencies=("nationDevelopment.daysPerYear",),

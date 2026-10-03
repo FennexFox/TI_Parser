@@ -17,6 +17,8 @@ import ti_save_parser as parser
 
 def source_state():
     value = state()
+    # This fixture explicitly describes a non-federated nation.
+    value.in_federation = False
     value.public_opinion = {"Resist": 1.0, "Undecided": 0.0}
     value.public_opinion_context = {"activeHumanIdeologyNames": ["resist", "cooperate"]}
     value.faction_effect_contexts = {7: {}, 8: {}}
