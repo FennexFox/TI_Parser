@@ -187,8 +187,8 @@ def test_audit_runs_both_180_day_trials_with_real_catalogs_and_exact_trace_parit
     assert reconciliation["complete"] is False
     assert {row["stage"] for row in report["preflightReads"]["reads"]} == {"target-resolution-preflight"}
     closure = report["executionClosure"]
-    assert closure["complete"] is False
-    assert report["structuralStatus"]["gates"]["executionClosureComplete"] is False
+    assert closure["complete"] is True
+    assert report["structuralStatus"]["gates"]["executionClosureComplete"] is True
     assert binding["executionClosureFingerprint"] == closure["fingerprint"]
     assert binding["requiredDomainPredicates"] == closure["requiredDomainPredicates"]
     assert set(report["trialReads"]) == {name for name, _k, _w in audit.TRIALS}
@@ -199,7 +199,7 @@ def test_audit_runs_both_180_day_trials_with_real_catalogs_and_exact_trace_parit
         assert "nation.priority.knowledge.complete" in trial["executedRuleIds"]
         assert "nation.priority.welfare.complete" in trial["executedRuleIds"]
         assert trial["executionRecordCount"] > len(trial["executedRuleIds"])
-        assert trial["blockers"]
+        assert trial["blockers"] == []
         welfare_edges = [row for row in trial["runtimeDependencyEdges"]
                          if row["from"] == "nation.priority.welfare.complete"
                          and row["to"] == "nation.priority.welfare.inequality"]
