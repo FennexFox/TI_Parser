@@ -11,7 +11,7 @@ python .\tools\build_research_catalog.py
 Important interpretation notes:
 
 - Schema version `2` packages strict runtime rows under `base.techs` and `base.projects` while retaining the legacy graph views below.
-- Payload fingerprint: `e4e1275eb46f1de57a5e1e41fe1722efa65d7e9256f3086d6e56964533b21aca`.
+- Payload fingerprint: `2f8fd17cd6642bc36349c5b51ecbd0b980b939e2d46eca308a12d8a0fd33633f`.
 - Supported scenarios: `2003Scenario`, `2026Scenario`, `2030Scenario`, `2070Scenario`, `BrokenEarthScenario`, `FullScenario`, `ModernScenario`, `SkirmishModeScenario`, `SkirmishScenario`, `TestScenario`.
 - Scenario overrides are sparse row maps merged only after an exact supported-scenario match; unsupported scenarios do not inherit base data.
 - `requirements` in the JSON is the canonical source for prerequisite logic.

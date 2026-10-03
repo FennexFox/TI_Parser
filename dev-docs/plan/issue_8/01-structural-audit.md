@@ -46,7 +46,7 @@ coverage parity. Input/catalog hashes stay unchanged, index aliases remain
 intact and no raw-container mutations are recorded.
 
 The explicit DLL audit returns exit 2: structural completeness is incomplete
-and the build comparison is mismatch. Catalog decode/manifest validation,
+while the refreshed build comparison is match. Catalog decode/manifest validation,
 plain index-container accesses and unexplained normalization paths remain
 unresolved. Five bounded source-to-derived chains now have static mappings;
 these establish structural roles only. Each candidate records source location

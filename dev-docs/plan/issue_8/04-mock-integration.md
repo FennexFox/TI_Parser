@@ -51,7 +51,9 @@ save replacement. This is a correlation primitive, not a new MCP tool or
 fair-play approval; the public guarded projection remains disabled.
 
 Real Codex CLI runs used isolated per-run configuration and six canonical
-prompts. Initial approval/routing failures were separated from calculation
+prompts against the pre-refresh baseline. Those retained observations are
+protocol/routing evidence only and do not certify current-build mechanics or
+visibility. Initial approval/routing failures were separated from calculation
 failures; application-owned descriptions/instructions corrected unnecessary
 TI calls. Retained call and answer-review evidence is in
 [routing-evidence.json](routing-evidence.json).

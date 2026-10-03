@@ -4,11 +4,40 @@ This document indexes mechanics implemented by `nation-projection`; it does not 
 formulas. Python is the runtime behavior, while the registry connects it to DLL symbols,
 catalog data, diagnostics, and tests.
 
-## Audited build
+## Audited builds
 
-- Assembly: `Assembly-CSharp.dll`; SHA-256: `ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5`.
+- Historical mechanics baseline: `Assembly-CSharp.dll`; SHA-256: `ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5`.
 - Runtime data: packaged `nation_development_catalog.json`, selected by the save's exact scenario and verified through `catalog_manifest.json`.
 - The installed DLL and templates used for the audit/catalog are authoritative. A changed source hash requires a new audit before claiming parity with that build.
+
+The packaged catalog baseline has been refreshed against DLL SHA-256
+`4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350`.
+This does not revalidate every historical mechanics rule. Each registry rule's
+`sourceHash` identifies the actual reviewed build; unchanged historical rules
+retain their old hash and are not certified for the refreshed build.
+
+The current-build review covers `nation.priority.knowledge.complete` (revision
+2), `nation.priority.welfare.complete`, `nation.priority.welfare.colony-trigger`
+and `nation.priority.welfare.decolonization`. Knowledge uses
+`TINationState.OnKnowledgePriorityComplete`, the education/cohesion change
+properties, population scaling, `AddToEducation` and `AddToCohesion`.
+`AddToEducation` clamps completion updates to `[1, 255]`; the former parser
+lower bound of zero and missing upper bound were corrected. Initialization's
+separate clamp is not evidence for completion behavior.
+
+The Welfare coordinator calls inequality before colony selection.
+`CandidateDecolonizeRegions`/`GetNextDecolonizeRegion` provide the deterministic
+candidate path; `OnDecolonizeRegionPriorityComplete` handles threshold removal,
+counter reset and permanent decolonization. The registry now cites these actual
+symbols. Welfare inequality effects and decolonization downstream recalculation
+retain their historical hashes because their full effect/call closure has not
+been re-audited. The coordinator's current evidence does not certify its child
+rules by inheritance.
+
+The call-order claims below describe the historical reviewed build unless a
+rule has explicit current-build evidence. See [catalogs](catalogs.md) for the
+refreshed data baseline and [interoperability](fairplay_interoperability.md) for
+separate structural, authority and visibility acceptance.
 
 Verified call order includes monthly nation work at month-day 1 00:00, daily investment at
 10:30, and the resting cohesion/unrest cache at 12:00. It also includes priority-enum
@@ -53,8 +82,8 @@ outside the declared set is an error, not an implicit downgrade.
 | `nation.priority.funding.complete` | verified | exact | `TINationState.OnFundingPriorityComplete` |
 | `nation.priority.welfare.complete` | verified | exact | `TINationState.OnWelfarePriorityComplete` |
 | `nation.priority.welfare.inequality` | verified | exact | `TINationState.welfarePriorityInequalityChange` |
-| `nation.priority.welfare.colony-trigger` | verified | exact | `TINationState.GetNextRegionToDecolonize` |
-| `nation.priority.welfare.decolonization` | verified | exact | `TIRegionState.SetColonialStatus` |
+| `nation.priority.welfare.colony-trigger` | verified | exact | `TINationState.GetNextDecolonizeRegion` |
+| `nation.priority.welfare.decolonization` | verified | exact | `TINationState.OnDecolonizeRegionPriorityComplete` |
 | `nation.priority.welfare.decolonization-downstream` | verified | exact | `TINationState.CacheRegionValues` |
 | `nation.priority.mission-control.complete` | verified | conditional | `TINationState.OnMissionControlPriorityComplete` |
 | `nation.priority.mission-control.placement` | verified | conditional | `TINationState.OnMissionControlPriorityComplete` |

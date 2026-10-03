@@ -50,6 +50,60 @@ catalogs by hand.
   deltas. Weapon names are collision-checked across families/scenarios. No DLC
   override means reuse of base rows, with no override claimed.
 
+## Current source baseline
+
+The packaged baseline uses installed `Assembly-CSharp.dll` SHA-256
+`4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350`.
+The runtime manifest bundle fingerprint is
+`661cd03973e868f12d8225055c45ea9721b1ae744425bef3aaf838994aba009a`.
+The local game log reports current version `1.0.53a`; the DLL/content hashes,
+rather than that log label or the Unity executable version, bind this baseline.
+
+Generation used explicit base Templates, DLC_Content and localization inputs.
+Before/after inventories of relative path, byte size and SHA-256 were identical.
+Their aggregate fingerprints hash records sorted by case-folded relative path,
+encoded as UTF-8 `path + NUL + decimal size + NUL + SHA-256 + LF`:
+
+| Input tree | Files | Inventory SHA-256 |
+| --- | ---: | --- |
+| Base Templates | 60 | `43347ec61cea9b7aa3af4046d1a9a2a782ef1e3c0fa4dd6ee184671e8e2f1868` |
+| DLC_Content | 360 | `e49876aa1e7fc98d233e4f8d72c8d39eb495e4f20bf3bf471d1e4a76f3e9412b` |
+| Localization | 1008 | `6fa3ccb3f06c4d624c294d26359728a31d8c2cbcc0a343c9e2bf178ea41bf4dd` |
+
+All twelve generated catalog/manifest/reference outputs were byte-identical
+across two independent temporary generations. Research runs before the runtime
+builder so the final manifest incorporates the generated research bytes.
+
+### Reviewed changes from the previous baseline
+
+- Nation claim/development provenance now names the current DLL instead of
+  `ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5`.
+- Source hashes also changed for `2003Scenario/TIStartTimeTemplate.json` and
+  `BrokenEarthScenario/TIGlobalConfig.json`; the selected normalized values
+  remain unchanged. This comparison covers catalog-owned fields, not every
+  field or mechanic in the game.
+- Current DLL inspection verified 73 numeric generation defaults, 11 template
+  defaults, seven priority diversity bonuses and 20 priority enum values.
+  Omitted ideology `willProxy`/`willAppease` fields use CLR integer zero, not
+  minus one. Explicit template values are preserved. Current rows already
+  specify these fields, so only their default-origin metadata changes.
+- In the 2003Scenario research overlay, `BS_DemocratizationofSpace`,
+  `BS_DigitalSociety` and `BS_ExascaleComputing` change `AI_techRole` to `Blocker`
+  from SpaceDevelopment, EarthPolitics and Income respectively. These fields
+  feed research-plan keyword tags and role output; they are not visibility
+  evidence or fair-play permission.
+- `Project_BS_MakingHistoryII.factionAlways` changes from an empty list to the
+  source string `CooperateCouncil`. The catalog preserves the source type;
+  current runtime consumers do not derive eligibility from that field.
+- Other normalized rows and overlays, including ModernScenario and
+  BrokenEarthScenario, are unchanged. Module/location catalogs and the module reference are unchanged. The research
+  reference changes only its generated payload fingerprint.
+
+The refresh establishes current-source packaged data, not universal current-
+build mechanics or visibility acceptance. [Mechanics evidence](nation_projection_mechanics_audit.md)
+remains rule-specific; [fair-play acceptance](fairplay_interoperability.md)
+separates build comparison, structural closure, authority and visibility.
+
 ## Verification and releases
 
 ```powershell

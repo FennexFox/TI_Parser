@@ -60729,8 +60729,8 @@
       "factionTemplates.isAlien": "TIFactionTemplate compiled field default",
       "ideologyTemplates.alien": "TIFactionIdeologyTemplate compiled field default",
       "ideologyTemplates.undecided": "TIFactionIdeologyTemplate compiled field default",
-      "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field initializer",
-      "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field initializer",
+      "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field default",
+      "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field default",
       "nationTemplates.popGrowthModifier": "TINationTemplate compiled field default",
       "regionTemplates.annualPopGrowthModifier": "TIRegionTemplate compiled field default",
       "regionTemplates.environment": "TIRegionTemplate compiled field initializer",
@@ -60743,7 +60743,7 @@
     "name": "build_runtime_catalogs",
     "version": "1"
   },
-  "payloadFingerprint": "be71db7b44575f895afb63e8a0219dccc718bf3ce4a1363f7235178c4821d40a",
+  "payloadFingerprint": "3c35be9556cdf8fc9ede0de35f088f7d727e8572f923e42061c9c8a48f3f2674",
   "scenarioOverrides": {
     "2003Scenario": {
       "bilateralTemplates": {
@@ -96510,7 +96510,7 @@
     },
     {
       "name": "2003Scenario/TIStartTimeTemplate.json",
-      "sha256": "3fa5c0b3a611cf8f3b7ea13b5479fda545947deadc80bb241d3df987be50c546"
+      "sha256": "9f38d67ea43808fb0afade00788aca56f889c14c04ae48e8d4afff5c498f8842"
     },
     {
       "name": "BrokenEarthScenario/TIBilateralTemplate.json",
@@ -96522,7 +96522,7 @@
     },
     {
       "name": "BrokenEarthScenario/TIGlobalConfig.json",
-      "sha256": "51def1f2b1188a8f89b0ffa3a7fa665944a114def663fb9ae5abcb226d803dc4"
+      "sha256": "24c653079dbdd0b8b8310df8cf6d77b282fd687abe1d1c2a5c903a61fe691a46"
     },
     {
       "name": "BrokenEarthScenario/TIMetaTemplate.json",
@@ -96542,7 +96542,7 @@
     },
     {
       "name": "TerraInvicta_Data/Managed/Assembly-CSharp.dll",
-      "sha256": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5"
+      "sha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350"
     },
     {
       "name": "base/TIBilateralTemplate.json",

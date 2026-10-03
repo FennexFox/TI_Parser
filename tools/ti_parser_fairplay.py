@@ -33,7 +33,7 @@ FAIRPLAY_ADVICE_GENERATION_POLICY = {
     "id": "fair-play-projection-v1",
     "status": "pending",
     "enabled": False,
-    "authorityHashStatus": "known-mismatch",
+    "authorityHashStatus": "not_evaluated",
     "runtimeInstalledDiscovery": False,
 }
 FAIR_PLAY_PROFILE = "fair-play"

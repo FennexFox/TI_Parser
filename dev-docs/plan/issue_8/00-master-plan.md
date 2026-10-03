@@ -2,13 +2,15 @@
 
 ## Issue Target And Scope Summary
 
-Issue #8 continues from the existing fair-play enforcement and correlation contract. This plan is authoritative for structural read auditing, evidence gates, test-only orchestration, and real-client acceptance. Existing default runtime behavior and committed catalogs remain unchanged.
+Issue #8 continues from the existing fair-play enforcement and correlation contract. This plan is authoritative for structural read auditing, evidence gates, test-only orchestration, and real-client acceptance. Existing default runtime contracts remain unchanged. The current-build catalog refresh is now an explicit predecessor task.
 
 ## Strategy
 
 Trace a fully owned ModernScenario nation for 180 days with single-segment plans, empty advisors and no diagnostic output. Knowledge/Welfare 3:1 and 1:3 are acceptance fixtures, not a production permission rule. Dynamic tracing is paired with static closure review. No trace, build, or visibility uncertainty may be interpreted as approval.
 
 ## Phase Order
+
+0. Current-build baseline: fingerprint installed sources, verify compiled defaults and mechanics, generate twice into temporary outputs, review semantic differences, then replace generator-owned artifacts and validate committed exports.
 
 1. [Structural read audit](01-structural-audit.md)
 2. [Authoritative build and visibility evidence](02-authority.md)
@@ -30,14 +32,14 @@ Run relevant audit, correlation and MCP tests, then the full pytest suite. Verif
 
 ## Known Risks And Assumptions
 
-Installed DLL SHA-256 differs from the catalog evidence DLL. Catalog regeneration/build migration is out of scope. A/B synthetic fixtures do not prove visibility. Container copies, normalization and scalar materialization can lose read provenance; unresolved escapes or static/dynamic discrepancies force audit incomplete. Strong generation identity requires same-algorithm fingerprints; pinned weak identity remains provisional even after reobservation. Actual Companion substitution and successful fair-play prediction remain required for issue closure.
+Installed and packaged DLL hashes now match after the current-build refresh; hash equality alone does not establish mechanics or visibility approval. Current-build catalog regeneration and evidence-backed mechanics corrections are in scope; unchecked hash replacement is forbidden. A/B synthetic fixtures do not prove visibility. Container copies, normalization and scalar materialization can lose read provenance; unresolved escapes or static/dynamic discrepancies force audit incomplete. Strong generation identity requires same-algorithm fingerprints; pinned weak identity remains provisional even after reobservation. Actual Companion substitution and successful fair-play prediction remain required for issue closure.
 
 ## Current State
 
 Application generation checks, pending guard metadata and mock two-server
 protocol/routing tooling are implemented. Structural instrumentation is a
-development aid; unresolved read mappings keep completeness open. Authority
-remains blocked by the build mismatch, so guarded prediction is disabled.
+development aid; unresolved read mappings keep completeness open. The current-build catalog baseline and DLL comparison are verified; full
+authority/visibility acceptance remains unresolved, so guarded prediction is disabled.
 Actual Companion/TI/Codex prediction acceptance remains open. See phase files
 for evidence and the [routing record](routing-evidence.json) for synthetic
 client observations; this plan is retained while acceptance gates are unresolved.
@@ -53,5 +55,4 @@ client observations; this plan is retained while acceptance gates are unresolved
    dynamic dependencies. Classify visibility only from applicable authority
    evidence; new reads, unexplained escapes and discrepancies remain blocking.
 4. Preserve current disabled policy, mock/routing evidence and actual Companion
-   acceptance gate. This follow-up does not modify the Companion repository,
-   regenerate catalogs or migrate mechanics.
+   acceptance gate. This follow-up does not modify the Companion repository. The current-build predecessor now regenerates catalogs and reviews mechanics against explicit installed inputs.

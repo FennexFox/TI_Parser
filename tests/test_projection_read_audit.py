@@ -59,8 +59,8 @@ def test_traced_containers_record_common_reads_and_normalization_without_values(
     assert all(row["classification"] == "unresolved" for row in tracker.report()["reads"])
 
 
-def test_runtime_catalog_source_hash_is_a_packaged_old_build_fingerprint():
-    assert audit._packaged_assembly_hash() == "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5"
+def test_runtime_catalog_source_hash_is_the_current_packaged_build_fingerprint():
+    assert audit._packaged_assembly_hash() == "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350"
     catalogs = RuntimeCatalogs.load("ModernScenario", catalog_files=("nation_development_catalog.json",))
     assert catalogs.nation_development["nationTemplates"]["USA"]["dataName"] == "USA"
 
@@ -160,6 +160,19 @@ def test_audit_runs_both_180_day_trials_with_real_catalogs_and_exact_trace_parit
     assert report["buildSourceAuthorityStatus"]["status"] == "unresolved"
     assert report["visibilityStatus"]["status"] == "unresolved"
     inventory = report["staticCallChecklist"]["sourceDerivedDependencies"]
+    binding = report["acceptanceBinding"]
+    assert binding["catalogBundleFingerprint"] == report["catalogs"]["bundleFingerprint"]
+    assert binding["catalogPackageFileSha256"] == report["catalogs"]["packageFileSha256"]
+    assert binding["scenario"] == "ModernScenario"
+    assert binding["experimentShape"] == audit._canonical_acceptance_shape()
+    assert binding["parserInventoryFingerprint"] == audit._canonical_hash(inventory)
+    assert binding["parserSourceFileSha256"] == inventory["sourceFileSha256"]
+    assert binding["requiredDependencyIds"] == sorted({row["dependencyId"] for row in inventory["dependencies"]})
+    binding_components = {
+        key: value for key, value in binding.items()
+        if key not in {"schemaVersion", "scopeFingerprint"}
+    }
+    assert binding["scopeFingerprint"] == audit._canonical_hash(binding_components)
     assert {row["sourceKey"] for row in inventory["dependencies"] if row["mappingStatus"] == "mapped"} >= {
         "controlPointPriorities", "diversityBonus", "_accumulatedInvestmentPoints", "publicOpinion", "resourceMarketValues",
     }
@@ -172,7 +185,28 @@ def test_audit_runs_both_180_day_trials_with_real_catalogs_and_exact_trace_parit
     assert reconciliation["complete"] is False
 
 
-def _accepted_policy_evidence(digest):
+def test_live_audit_with_matching_assembly_still_requires_accepted_visibility_evidence(tmp_path, monkeypatch):
+    assembly_path = tmp_path / "matching-assembly.dll"
+    assembly_path.write_bytes(b"synthetic matching assembly bytes")
+    digest = audit.file_sha256(assembly_path)
+    monkeypatch.setattr(audit, "_packaged_assembly_hash", lambda: digest)
+
+    report, exit_code = audit.audit_projection_reads(
+        data=audit._load_fixture(),
+        input_kind="controlled-synthetic-fixture",
+        nation_name=None,
+        faction_name=None,
+        assembly_path=assembly_path,
+    )
+
+    assert report["authorityStatus"]["assemblyHashComparison"] == "match"
+    assert report["authorityStatus"]["packageBuildIdentityMatches"] is True
+    assert report["visibilityStatus"]["status"] == "unresolved"
+    assert report["policyEligibility"]["status"] == "not_approved"
+    assert exit_code == 2
+
+
+def _accepted_policy_evidence(digest, *, scope_fingerprint="c" * 64, dependency_ids=("unit-test-dependency",)):
     # Decision-function fixture only: no claim of live game-source acceptance.
     return {
         "sourceAuthority": {"status": "accepted", "authorityKind": "game-dll", "sha256": digest,
@@ -180,10 +214,13 @@ def _accepted_policy_evidence(digest):
         "buildApplicability": {"status": "accepted", "providedSha256": digest, "packagedSha256": digest,
                                "evidenceReferences": ["unit-test accepted build review"]},
         "visibility": {"status": "accepted", "allDependenciesClassified": True, "dynamicStaticReconciled": True,
-                       "scopeFingerprint": "c" * 64,
-                       "dependencies": [{"dependencyId": "unit-test-dependency", "providedSha256": digest, "packagedSha256": digest,
-                                         "status": "accepted", "category": "player-visible",
-                                         "evidenceReferences": ["unit-test accepted visibility review"]}]},
+                       "scopeFingerprint": scope_fingerprint,
+                       "dependencies": [
+                           {"dependencyId": dependency_id, "providedSha256": digest, "packagedSha256": digest,
+                            "status": "accepted", "category": "player-visible",
+                            "evidenceReferences": ["unit-test accepted visibility review"]}
+                           for dependency_id in dependency_ids
+                       ]},
     }
 
 
@@ -191,6 +228,103 @@ def _policy_decision(**kwargs):
     kwargs.setdefault("required_dependency_ids", ("unit-test-dependency",))
     kwargs.setdefault("scope_fingerprint", "c" * 64)
     return audit._policy_status(**kwargs)
+
+
+def _acceptance_test_inputs():
+    return {
+        "catalogs": {
+            "bundleFingerprint": "a" * 64,
+            "files": {"runtime_catalog.json": "b" * 64},
+        },
+        "scenario": "ModernScenario",
+        "experiment_shape": audit._canonical_acceptance_shape(),
+        "parser_inventory": {
+            "scope": {"scenario": "ModernScenario"},
+            "sourceFileSha256": {"tools/ti_parser_core.py": "c" * 64},
+            "dependencies": [{"dependencyId": "unit-test-dependency", "sourceLocation": {"sha256": "c" * 64}}],
+            "normalizationBoundaries": [],
+        },
+        "required_dependency_ids": ("unit-test-dependency",),
+    }
+
+
+@pytest.mark.parametrize("change", [
+    "catalog-bundle", "catalog-file", "scenario", "input-kind", "days", "checkpoints",
+    "control-point-count", "ownership", "segment-count", "advisor-count", "details",
+    "diagnostics", "fixture-domain", "trial-domain", "parser-inventory", "parser-source-hash",
+    "required-dependency-set",
+])
+def test_accepted_packet_expires_when_any_baseline_component_changes(change):
+    baseline = _acceptance_test_inputs()
+    original_binding = audit._acceptance_binding(**baseline)
+    digest = "d" * 64
+    accepted_packet = _accepted_policy_evidence(
+        digest,
+        scope_fingerprint=original_binding["scopeFingerprint"],
+        dependency_ids=baseline["required_dependency_ids"],
+    )
+    original_decision = _policy_decision(
+        structural_complete=True,
+        assembly_status="match",
+        provided_hash=digest,
+        packaged_hash=digest,
+        evidence=accepted_packet,
+        required_dependency_ids=baseline["required_dependency_ids"],
+        scope_fingerprint=original_binding["scopeFingerprint"],
+    )
+    assert original_decision["exitCode"] == 0
+
+    changed = copy.deepcopy(baseline)
+    if change == "catalog-bundle":
+        changed["catalogs"]["bundleFingerprint"] = "e" * 64
+    elif change == "catalog-file":
+        changed["catalogs"]["files"]["runtime_catalog.json"] = "e" * 64
+    elif change == "scenario":
+        changed["scenario"] = "ChangedScenario"
+    elif change == "input-kind":
+        changed["experiment_shape"]["inputKind"] = "explicit-save"
+    elif change == "days":
+        changed["experiment_shape"]["days"] = 181
+    elif change == "checkpoints":
+        changed["experiment_shape"]["checkpoints"] = [0, 181]
+    elif change == "control-point-count":
+        changed["experiment_shape"]["controlPointCount"] = 5
+    elif change == "ownership":
+        changed["experiment_shape"]["fullyOwnedBySelectedFaction"] = False
+    elif change == "segment-count":
+        changed["experiment_shape"]["segmentCount"] = 2
+    elif change == "advisor-count":
+        changed["experiment_shape"]["advisorCount"] = 1
+    elif change == "details":
+        changed["experiment_shape"]["details"] = True
+    elif change == "diagnostics":
+        changed["experiment_shape"]["diagnostics"] = True
+    elif change == "fixture-domain":
+        changed["experiment_shape"]["fixtureDomain"] = ["A"]
+    elif change == "trial-domain":
+        changed["experiment_shape"]["trials"][0]["Knowledge"] = 4
+    elif change == "parser-inventory":
+        changed["parser_inventory"]["normalizationBoundaries"].append({"operation": "new-boundary"})
+    elif change == "parser-source-hash":
+        changed["parser_inventory"]["sourceFileSha256"]["tools/ti_parser_core.py"] = "e" * 64
+    elif change == "required-dependency-set":
+        changed["required_dependency_ids"] = ("unit-test-dependency", "new-dependency")
+        changed["parser_inventory"]["dependencies"].append({
+            "dependencyId": "new-dependency", "sourceLocation": {"sha256": "e" * 64},
+        })
+
+    changed_binding = audit._acceptance_binding(**changed)
+    assert changed_binding["scopeFingerprint"] != original_binding["scopeFingerprint"]
+    changed_decision = _policy_decision(
+        structural_complete=True,
+        assembly_status="match",
+        provided_hash=digest,
+        packaged_hash=digest,
+        evidence=accepted_packet,
+        required_dependency_ids=changed["required_dependency_ids"],
+        scope_fingerprint=changed_binding["scopeFingerprint"],
+    )
+    assert changed_decision["exitCode"] == 2
 
 
 @pytest.mark.parametrize("assembly_status,provided,packaged", [

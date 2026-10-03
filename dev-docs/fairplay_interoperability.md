@@ -128,17 +128,36 @@ The current CLI supplies no accepted evidence packet and offers no approval
 flag. Its live visibility records remain unresolved; unit acceptance packets
 exercise the decision contract and are not game evidence.
 
-The installed DLL observed during planning has SHA-256
-`4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350`.
-The packaged nation catalog and mechanics audit cite
+The current installed and packaged nation-development source DLL both have
+SHA-256 `4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350`.
+The previous packaged source was
 `ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5`.
-They are different builds. Hashing an explicitly supplied assembly is an offline
-audit input only; normal runtime never discovers an installed DLL.
+The [catalog refresh](catalogs.md) resolves this stale-source mismatch; explicit
+live assembly comparison now reports `match`. Hashing an explicitly supplied
+assembly remains an offline audit input only. Normal runtime never discovers
+an installed DLL, and capabilities report `authorityHashStatus: not_evaluated`
+rather than claiming an installed-build comparison.
 
-Structural auditing can proceed, but authoritative visibility/correctness
-acceptance cannot pass without matching-build or validated cross-build evidence.
-Catalog regeneration and mechanics migration are outside this workstream.
-This is a mandatory predecessor gate for projection approval.
+The refreshed canonical A/B calculations have identical complete results to
+the previous baseline, including status and coverage. Baseline/traced parity
+also passes. Structural completeness still fails: 457 of the 496 recorded read
+paths are unresolved in static/dynamic reconciliation, and unexplained
+normalization/materialization boundaries remain. Visibility is unresolved;
+no accepted evidence packet is supplied. Overall policy eligibility remains
+`not_approved` and the audit returns exit 2 even when the DLL hashes match.
+
+Catalog validity is resolved separately from complete projection mechanics
+acceptance. Only the explicitly reviewed Knowledge/Welfare rules have current
+build evidence; other [mechanics rules](nation_projection_mechanics_audit.md)
+retain their historical source hashes. Required hidden or unresolved reads,
+unreviewed rules and incomplete dependency closure remain blockers.
+
+The audit report's `acceptanceBinding.scopeFingerprint` binds the catalog bundle
+and package file hashes, exact scenario/execution shape, parser inventory/source
+hashes and required dependency IDs. The existing visibility scope comparison
+rejects packets issued for a different binding. Catalog updates, new reads,
+parser changes and different shapes invalidate the old scope even if the DLL
+hash is unchanged. This is an audit decision primitive, not runtime approval.
 
 ## Future guarded policy boundary
 
@@ -277,7 +296,8 @@ launch command is invented here.
 | Fair-play allowlist and pre-handler denial | Regression-tested | Only identity inspection is exposed; projection and other routes are denied before save reads. Capabilities identify the pending disabled guard. |
 | Exact/provisional matching and generation checks | Regression-tested | Save-only inspection/reinspection fingerprints and the application-issued projection subject receipt must agree with bound peer targets. Weak peer identity remains provisional; no public guarded projection/receipt is currently available. |
 | Structural read completeness | Open | A/B result/status/coverage parity alone does not establish complete tracing. Materialized values, catalog loading and static dependency closure require explicit mappings. |
-| Authoritative visibility/correctness | Blocked | Installed/catalog DLL hashes differ; matching-build or validated cross-build evidence is required. No catalog migration is performed. |
+| Current-build catalog/source comparison | Matched | Regenerated baseline and explicit installed DLL hashes match; normalized changes were reviewed. |
+| Authoritative visibility/correctness | Blocked | Hash equality does not certify all mechanics or player visibility; rule-specific review and dependency closure remain incomplete. |
 | Mock Companion plus TI stdio | Protocol-tested | Synthetic fixture-only connection, discovery, policy denial and correlation; not a visibility oracle. |
 | Real Codex routing with mock | Six canonical prompts reviewed | Current/history use Companion, correlation uses both with target unresolved, forecasts stay blocked, and hidden goals are refused without calls. [Synthetic client evidence](plan/issue_8/routing-evidence.json) records initial failures and corrected ownership; no mechanics approval follows. |
 | Actual Companion plus TI/Codex | Open | Substitute a runnable actual Companion (local branch/server is sufficient) and execute the approved 180-day A/B scenario. |

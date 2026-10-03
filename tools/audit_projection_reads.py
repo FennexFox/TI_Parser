@@ -40,6 +40,10 @@ from ti_parser_catalogs import RuntimeCatalogs, canonical_json_bytes, file_sha25
 SCENARIO = "ModernScenario"
 DAYS = 180
 CHECKPOINTS = [0, 180]
+TRIALS = (
+    ("knowledge3_welfare1", 3, 1),
+    ("welfare3_knowledge1", 1, 3),
+)
 BLOCKED_OUTPUT_PARTS = {".ti_cache", ".pytest_cache", ".ruff_cache", "__pycache__", "graphify-out"}
 STATIC_CALL_CHECKLIST = (
     ("ti_parser_projection_adapter", "calculate_nation_projection", "adapter preparation"),
@@ -83,6 +87,51 @@ def _load_fixture() -> dict[str, Any]:
 
 def _canonical_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def _canonical_acceptance_shape() -> dict[str, Any]:
+    return {
+        "inputKind": "controlled-synthetic-fixture",
+        "fixtureDomain": ["A", "B"],
+        "days": DAYS,
+        "checkpoints": CHECKPOINTS,
+        "controlPointCount": 6,
+        "fullyOwnedBySelectedFaction": True,
+        "everyControlPoint": True,
+        "segmentCount": 1,
+        "advisorCount": 0,
+        "details": False,
+        "diagnostics": False,
+        "trials": [
+            {"fixture": label, "name": trial, "Knowledge": knowledge, "Welfare": welfare}
+            for label, (trial, knowledge, welfare) in zip(("A", "B"), TRIALS)
+        ],
+    }
+
+
+def _acceptance_binding(
+    *,
+    catalogs: dict[str, Any],
+    scenario: str,
+    experiment_shape: dict[str, Any],
+    parser_inventory: dict[str, Any],
+    required_dependency_ids: tuple[str, ...],
+) -> dict[str, Any]:
+    """Bind a review packet to the exact audit baseline it was issued for."""
+    components = {
+        "catalogBundleFingerprint": catalogs.get("bundleFingerprint"),
+        "catalogPackageFileSha256": catalogs.get("files"),
+        "scenario": scenario,
+        "experimentShape": experiment_shape,
+        "parserInventoryFingerprint": _canonical_hash(parser_inventory),
+        "parserSourceFileSha256": parser_inventory.get("sourceFileSha256"),
+        "requiredDependencyIds": list(required_dependency_ids),
+    }
+    return {
+        "schemaVersion": 1,
+        **components,
+        "scopeFingerprint": _canonical_hash(components),
+    }
 
 
 def _source_string_constants() -> set[str]:
@@ -730,10 +779,6 @@ def audit_projection_reads(
     supplied_assembly = file_sha256(assembly_path) if assembly_path is not None else None
     assembly_status = _assembly_hash_status(supplied_assembly, expected_assembly)
 
-    trials = (
-        ("knowledge3_welfare1", 3, 1),
-        ("welfare3_knowledge1", 1, 3),
-    )
     tracker = ReadTracker()
     traced_data = traced_copy(data, tracker)
     traced_index = core.build_index(traced_data)
@@ -750,11 +795,11 @@ def audit_projection_reads(
 
     baseline_results: dict[str, dict[str, Any]] = {}
     traced_results: dict[str, dict[str, Any]] = {}
-    for trial_name, knowledge, welfare in trials:
+    for trial_name, knowledge, welfare in TRIALS:
         payload = _plan(trial_name, positions, knowledge, welfare)
         baseline_results[trial_name] = _run_plain(baseline_index, resolved_nation, resolved_faction, payload)
     with _instrument_catalog_reads(tracker):
-        for trial_name, knowledge, welfare in trials:
+        for trial_name, knowledge, welfare in TRIALS:
             payload = _plan(trial_name, positions, knowledge, welfare)
             traced_results[trial_name] = _run_traced(
                 traced_index,
@@ -765,7 +810,7 @@ def audit_projection_reads(
             )
     comparisons = {
         trial_name: _comparison_row(baseline_results[trial_name], traced_results[trial_name])
-        for trial_name, _knowledge, _welfare in trials
+        for trial_name, _knowledge, _welfare in TRIALS
     }
 
     after_input = _canonical_hash(data)
@@ -790,11 +835,28 @@ def audit_projection_reads(
         "staticCallChecklistComplete": static["complete"],
     }
     structural_status = "complete" if all(gates.values()) else "incomplete"
+    required_dependency_ids = tuple(sorted({
+        row["dependencyId"]
+        for row in static["sourceDerivedDependencies"]["dependencies"]
+    }))
+    experiment_shape = _canonical_acceptance_shape()
+    experiment_shape.update(
+        inputKind=input_kind,
+        controlPointCount=len(positions),
+        fullyOwnedBySelectedFaction=fully_owned,
+    )
+    acceptance_binding = _acceptance_binding(
+        catalogs=catalogs_before,
+        scenario=SCENARIO,
+        experiment_shape=experiment_shape,
+        parser_inventory=static["sourceDerivedDependencies"],
+        required_dependency_ids=required_dependency_ids,
+    )
     policy = _policy_status(structural_complete=structural_status == "complete",
                             assembly_status=assembly_status, provided_hash=supplied_assembly,
                             packaged_hash=expected_assembly,
-                            required_dependency_ids=tuple(sorted({row["dependencyId"] for row in static["sourceDerivedDependencies"]["dependencies"]})),
-                            scope_fingerprint=_canonical_hash(static["sourceDerivedDependencies"]))
+                            required_dependency_ids=required_dependency_ids,
+                            scope_fingerprint=acceptance_binding["scopeFingerprint"])
     report = {
         "schemaVersion": 1,
         "tool": "audit_projection_reads",
@@ -817,7 +879,7 @@ def audit_projection_reads(
             "diagnostics": False,
             "trials": {
                 name: {"Knowledge": knowledge, "Welfare": welfare}
-                for name, knowledge, welfare in trials
+                for name, knowledge, welfare in TRIALS
             },
         },
         "comparison": {
@@ -840,6 +902,7 @@ def audit_projection_reads(
         },
         "dynamicReads": tracker.report(),
         "staticCallChecklist": static,
+        "acceptanceBinding": acceptance_binding,
         "structuralStatus": {
             "status": structural_status,
             "completeTraceClaim": structural_status == "complete",

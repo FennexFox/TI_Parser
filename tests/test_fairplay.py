@@ -149,7 +149,7 @@ def test_registry_has_one_classification_source_without_changing_public_descript
         "id": "fair-play-projection-v1",
         "status": "pending",
         "enabled": False,
-        "authorityHashStatus": "known-mismatch",
+        "authorityHashStatus": "not_evaluated",
         "runtimeInstalledDiscovery": False,
     }
 
@@ -612,7 +612,7 @@ def test_policy_metadata_alone_cannot_activate_guard(monkeypatch):
     from ti_parser_fairplay import FAIRPLAY_ADVICE_GENERATION_POLICY
     monkeypatch.setitem(FAIRPLAY_ADVICE_GENERATION_POLICY, "enabled", True)
     monkeypatch.setitem(FAIRPLAY_ADVICE_GENERATION_POLICY, "status", "accepted")
-    monkeypatch.setitem(FAIRPLAY_ADVICE_GENERATION_POLICY, "authorityHashStatus", "verified")
+    monkeypatch.setitem(FAIRPLAY_ADVICE_GENERATION_POLICY, "authorityHashStatus", "match")
     session = Mock()
     with pytest.raises(UserInputError) as exc:
         _run_guarded_projection(session, nation_name="USA", days=1, allow_unverified=True)
