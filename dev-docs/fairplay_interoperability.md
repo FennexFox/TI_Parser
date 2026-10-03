@@ -233,33 +233,34 @@ read/branch/completion/output closure is proven; fixture success cannot establis
 a broad domain. Diagnostics, unresolved ownership/dependencies and unapproved
 shapes remain denied. `allow_unverified` never bypasses any of these gates.
 
-The current route stays visibility-dependent and globally blocked. No unused
-alternate calculator or fabricated successful prediction is introduced while
-the authority gate remains open.
+The raw-save route stays visibility-dependent and globally blocked. The
+separately authorized conditional model below does not satisfy its authority gate.
 
-### Deferred visible-input and explicit-assumption projection
+### Separate visible-input and explicit-assumption projection
 
-The selected contract continues to reject undisclosed exact operands. A future
-extension may use visible inputs and explicitly declared assumptions, but it is
-not implemented or approved by this audit. Keep that work separate from granting
-permission to the existing raw-save adapter.
+The user separately authorized a conditional model after confirming that exact
+xenoforming levels are not displayed. The optional `conditional` profile uses
+`visible-input-projection-v1`; it does not approve `fair-play-projection-v1` or
+grant permission to the existing raw-save adapter.
 
-The extension seam is input construction: prepare a `NationProjectionState` and
-`ProjectionContext` from an allowlisted, response-bound visible snapshot and
-declared scenario inputs, then reuse mechanics only where their dependencies
-and applicability have been reviewed. Do not initialize that state from hidden
-save fields and later mask them. Rounded observations, ranges, missing values
-and assumptions must retain their distinct provenance; an undisclosed value
-must not silently become zero or a guessed point estimate.
+`ti_parser_conditional_projection.py` constructs fresh state/context from a
+strict caller-reported snapshot, required explicit operands and an acknowledged
+`isolated-nation-v1` assumption set. Packaged public catalogs supply geometry
+and rule parameters. No raw-save numerical state, effect or cache initializes
+the model. Reported rounded values are point inputs; no interval coverage or
+probability guarantee is inferred. Exact xenoforming is an explicit scenario
+assumption, never an observed value or an automatically selected zero.
 
-Before implementation, separately define the allowed input domain, treatment of
-uncertainty and branching, and public result contract. Results must distinguish
-observation from conditional simulation, preserve incomplete/unsupported paths,
-and avoid claiming exactness or authoritative game outcomes from assumptions.
-Subject receipts and generation checks must bind the input snapshot, policy and
-assumptions as well as the result. Such an extension needs its own reviewed
-policy scope and acceptance tests; it cannot enable the pending raw-save policy
-by relabelling its inputs.
+The application owns schemas, immutable input receipts, result receipts and
+pre/post-calculation generation checks. Save reads establish identity and strict
+six-CP ownership only. Receipts attest input/result correlation, not whether the
+caller reported true visible values. Fresh peer reobservation is required before
+advice eligibility. Results retain engine status, coverage and incomplete
+prefixes within the declared model, while denying game-authoritative/exact
+outcome claims. Existing mechanics acceptance remains partial. The
+[conditional runbook](../docs/CONDITIONAL_PROJECTION.md) owns the public input
+domain, expanded assumptions and required observation sequence. Its validation
+and routing evidence are separate from the older blocked-profile evidence.
 
 | Evidence layer | Current evidence | What it establishes |
 | --- | --- | --- |
@@ -311,7 +312,8 @@ visibility. Its issuance tests use a real synthetic save session and packaged
 projection; it is not a fabricated inspection envelope. The existing
 `run_profile` admission owner still denies fair-play projection, including
 when policy metadata or `allow_unverified` is changed. No new MCP-only policy
-or tool is introduced. Receipt validation occurs within the issuer process;
+or tool is introduced into that profile. The separate conditional profile has
+its own reported-input receipt contract described above. Receipt validation occurs within the issuer process;
 it is not a serialized attestation protocol for external clients. Future
 guarded admission and transport must preserve this application boundary.
 
@@ -380,7 +382,7 @@ launch command is invented here.
 | --- | --- | --- |
 | Default profile preserves route behavior | Regression-tested | Omitted profile and explicit `default` retain existing behavior. |
 | Fair-play allowlist and pre-handler denial | Regression-tested | Only identity inspection is exposed; projection and other routes are denied before save reads. Capabilities identify the pending disabled guard. |
-| Exact/provisional matching and generation checks | Regression-tested | Save-only inspection/reinspection fingerprints and the application-issued projection subject receipt must agree with bound peer targets. Weak peer identity remains provisional; no public guarded projection/receipt is currently available. |
+| Exact/provisional matching and generation checks | Regression-tested | Save-only inspection/reinspection fingerprints and the application-issued projection subject receipt must agree with bound peer targets. Weak peer identity remains provisional; the raw-save fair-play guard remains unavailable. The conditional profile separately binds reported input and result receipts. |
 | Structural read completeness | Open | A/B result/status/coverage parity alone does not establish complete tracing. Materialized values, catalog loading and static dependency closure require explicit mappings. |
 | Current-build catalog/source comparison | Matched | Regenerated baseline and explicit installed DLL hashes match; normalized changes were reviewed. |
 | Authoritative visibility/correctness | Blocked | Hash equality does not certify all mechanics or player visibility; rule-specific review and dependency closure remain incomplete. |
@@ -388,7 +390,7 @@ launch command is invented here.
 | Real Codex routing with mock | Six canonical prompts reviewed | Current/history use Companion, correlation uses both with target unresolved, forecasts stay blocked, and hidden goals are refused without calls. [Synthetic client evidence](plan/issue_8/routing-evidence.json) records initial failures and corrected ownership; no mechanics approval follows. |
 | Actual Companion plus TI/Codex | Open | Substitute a runnable actual Companion (local branch/server is sufficient) and execute the approved 180-day A/B scenario. |
 
-Local tooling does not complete Issue #8. Keep projection blocked until
+Local tooling does not complete Issue #8. Keep raw-save projection blocked until
 structural completeness, authoritative visibility/correctness and the guarded
 execution policy pass; actual Companion/TI/Codex prediction acceptance then
 remains required. See the [active plan](plan/issue_8/00-master-plan.md) for open

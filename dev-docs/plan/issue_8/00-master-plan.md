@@ -17,6 +17,7 @@ Trace a fully owned ModernScenario nation for 180 days with single-segment plans
 3. [Guarded projection policy](03-guard.md)
 4. [Mock Companion and real TI Parser integration](04-mock-integration.md)
 5. [Real Companion and Codex acceptance](05-real-acceptance.md)
+6. [Visible-input conditional projection](06-conditional-projection.md)
 
 ## Phase Dependencies
 
@@ -55,6 +56,16 @@ denial and the unmet readiness requirement; do not replace it with an estimate,
 zero fixture assumption, or metadata-only approval.
 
 ## TI Parser Follow-up Order
+
+The user has authorized the previously deferred visible-input and explicit-
+assumption implementation. Phase 6 owns this separate `conditional` MCP profile
+and `visible-input-projection-v1` contract. It does not approve or enable the
+raw-save `fair-play-projection-v1` policy. The new path constructs fresh model
+inputs from reported observations and acknowledged scenario assumptions; save
+access is limited to existing identity and strict ownership/reference guards.
+Any acceptance of conditional advice must preserve its reported-input,
+assumption-dependent and mechanics-limited character. Actual Companion
+acceptance remains external.
 
 1. Establish actual A/B execution closure: per-trial source reads, preflight,
    preparation, executed/direct/transitive rules and static branch candidates.

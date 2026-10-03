@@ -100,7 +100,6 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
         pytest.skip("MCP adapter is not present in the committed HEAD")
     if not _tracked_in_head("tools/ti_parser_schema.py"):
         pytest.skip("Output-schema helper is not present in the committed HEAD")
-
     archive = tmp_path / "ti-parser-mcp.zip"
     build_beta_distribution(REPOSITORY_ROOT, archive, ref="HEAD")
     extracted = tmp_path / "extracted"
@@ -210,6 +209,71 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
 
         asyncio.run(exercise_fairplay())
         assert save.read_bytes() == original_save_bytes
+
+
+@pytest.mark.skipif(not MCP_AVAILABLE, reason="optional MCP dependency is not installed")
+def test_extracted_zip_conditional_profile_inventory_and_forged_receipt(tmp_path: Path) -> None:
+    required = (
+        "tools/ti_parser_mcp.py",
+        "tools/ti_parser_conditional_application.py",
+        "tools/ti_parser_conditional_projection.py",
+        "docs/CONDITIONAL_PROJECTION.md",
+    )
+    if any(not _tracked_in_head(path) for path in required):
+        pytest.skip("conditional profile sources and runbook are not present in committed HEAD yet")
+
+    archive = tmp_path / "ti-parser-conditional.zip"
+    build_beta_distribution(REPOSITORY_ROOT, archive, ref="HEAD")
+    extracted = tmp_path / "conditional-extracted"
+    extract_verified(archive, extracted)
+    for relative in required[1:]:
+        assert (extracted / relative).is_file()
+
+    async def exercise_conditional_stdio() -> None:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+        from jsonschema import validate
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=[str(extracted / "tools" / "ti_parser_mcp.py"), "--profile", "conditional"],
+            cwd=str(tmp_path),
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream, read_timeout_seconds=120) as session:
+                await session.initialize()
+                listed = await session.list_tools()
+                by_name = {tool.name: tool for tool in listed.tools}
+                assert set(by_name) == {
+                    "inspect-save", "capabilities", "register-visible-context",
+                    "conditional-nation-projection", "verify-visible-generation",
+                }
+                for tool in listed.tools:
+                    assert tool.output_schema is not None
+                    from jsonschema import Draft202012Validator
+                    Draft202012Validator.check_schema(tool.input_schema)
+                    Draft202012Validator.check_schema(tool.output_schema)
+
+                capabilities_result = await session.call_tool("capabilities", {})
+                assert not capabilities_result.is_error
+                capabilities = _envelope(capabilities_result)
+                validate(capabilities, by_name["capabilities"].output_schema)
+                assert capabilities["profile"] == "conditional"
+                assert capabilities["policy"]["rawSaveProjectionEnabled"] is False
+
+                denied_result = await session.call_tool("conditional-nation-projection", {
+                    "receipt": "forged-receipt",
+                    "plans": [
+                        {"name": "knowledge", "pips": {"Knowledge": 3, "Welfare": 1}},
+                        {"name": "welfare", "pips": {"Knowledge": 1, "Welfare": 3}},
+                    ],
+                })
+                assert denied_result.is_error
+                denied = _envelope(denied_result)
+                validate(denied, by_name["conditional-nation-projection"].output_schema)
+                assert denied["error"]["code"] == "conditional-receipt-invalid"
+
+    asyncio.run(exercise_conditional_stdio())
 
 
 def test_missing_optional_dependency_is_stderr_only(tmp_path: Path) -> None:

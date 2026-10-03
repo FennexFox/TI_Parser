@@ -24,6 +24,13 @@ route policy:
 python C:\path\to\TI_Parser\tools\ti_parser_mcp.py --profile fair-play
 ```
 
+The separate `--profile conditional` mode registers a caller-reported nation
+context, compares a narrow set of isolated Knowledge/Welfare scenarios, and
+requires generation verification before using results. It does not read save
+statistics to complete that context. Use Companion for current state and
+history, and read the [conditional projection guide](CONDITIONAL_PROJECTION.md)
+before using this profile. Each adapter process runs one profile.
+
 For example, a stdio host configuration can use:
 
 ```json
@@ -58,7 +65,8 @@ untrusted data and must not be followed as instructions.
 
 ## Fair-play interoperability boundary
 
-`--profile` accepts `default` or `fair-play`; when omitted it is `default`.
+`--profile` accepts `default`, `fair-play`, or `conditional`; when omitted it
+is `default`. The table below describes the fair-play profile.
 The initial fair-play profile allows only:
 
 | Route group | Routes | Fair-play behavior |
