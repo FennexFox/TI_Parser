@@ -228,6 +228,15 @@ read-only child sandbox. A completed client run is recorded, not automatically
 accepted: review tool ownership, failed calls, and the answer's evidence. Mock
 routing success does not approve a prediction or prove actual Companion visibility.
 
+Current guarded projection remains disabled: the bounded execution review found
+unclosed rule/source paths, current-DLL mechanics differences and required
+intel-gated or unresolved raw inputs. Connecting two servers, selecting a wholly
+owned nation or matching the current catalog build does not approve a forecast.
+The [developer findings](../dev-docs/fairplay_interoperability.md#bounded-execution-closure-and-current-build-findings)
+are source-checkout-only and excluded from the runtime ZIP. The public fair-play
+surface still exposes identity inspection; do not retry another profile to
+obtain a rejected projection.
+
 The adapter caches at most two sessions per process by normalized absolute save
 path, checking each save's byte hash on every call. A changed save replaces its
 session. Restart the adapter after updating parser files or runtime catalogs.

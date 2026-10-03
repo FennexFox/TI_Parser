@@ -39,6 +39,14 @@ rule has explicit current-build evidence. See [catalogs](catalogs.md) for the
 refreshed data baseline and [interoperability](fairplay_interoperability.md) for
 separate structural, authority and visibility acceptance.
 
+The subsequent bounded closure review found current-build mismatches and
+unclosed dependencies in monthly live rest getters, diversity gating and
+priority validity. No additional rules were rebound. See the [execution
+findings](projection_execution_evidence.json) for scoped method comparisons and
+[interoperability audit](fairplay_interoperability.md#bounded-execution-closure-and-current-build-findings)
+for the blocked approval decision. Historical `verified` metadata below is not
+current-build closure acceptance.
+
 Verified call order includes monthly nation work at month-day 1 00:00, daily investment at
 10:30, and the resting cohesion/unrest cache at 12:00. It also includes priority-enum
 completion traversal; persistent Economy fallback when a CP has no valid weight; live priority

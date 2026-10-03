@@ -9,6 +9,7 @@ active work. It is excluded from the runtime ZIP.
 | [Architecture](architecture.md) | Module ownership and dependency boundaries |
 | [Catalogs and verification](catalogs.md) | Generation, package-only rules, and release checks |
 | [Nation projection audit](nation_projection_mechanics_audit.md) | DLL evidence, rule index, coverage, and validation limits |
+| [Projection execution evidence](projection_execution_evidence.json) | Source-checkout-only, scoped current-DLL mechanics/UI findings; not an approval packet |
 | [Fair-play interoperability audit](fairplay_interoperability.md) | Profile routing, save matching, projection visibility, and external acceptance gates |
 | [Advisor activity audit](advisor_activity_audit.md) | Activity/detention evidence and stacking semantics |
 | [Development notes](development-notes.md) | Condensed completed work and unresolved acceptance items |

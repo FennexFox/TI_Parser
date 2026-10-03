@@ -18,7 +18,10 @@ tools/audit_projection_reads.py; tools/projection_audit_dependencies.py; tests/t
 
 ## Implementation steps
 
-Run bounded A/B fixture; record preparation and simulation separately; reconcile observed reads with static call closure and preserve unresolved paths.
+Run bounded A/B fixtures with separate read records, including target preflight.
+Collect executed rules and transitive dependencies from existing ruleExecutions,
+metric ruleIds and static preparation paths. Explain unexecuted branch candidates
+and scalar/container lineage; missing explanations remain incomplete.
 
 ## Acceptance criteria
 

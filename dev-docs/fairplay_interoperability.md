@@ -140,7 +140,7 @@ rather than claiming an installed-build comparison.
 
 The refreshed canonical A/B calculations have identical complete results to
 the previous baseline, including status and coverage. Baseline/traced parity
-also passes. Structural completeness still fails: 457 of the 496 recorded read
+also passes. The earlier source audit remained incomplete: 457 of its 496 recorded read
 paths are unresolved in static/dynamic reconciliation, and unexplained
 normalization/materialization boundaries remain. Visibility is unresolved;
 no accepted evidence packet is supplied. Overall policy eligibility remains
@@ -158,6 +158,61 @@ hashes and required dependency IDs. The existing visibility scope comparison
 rejects packets issued for a different binding. Catalog updates, new reads,
 parser changes and different shapes invalidate the old scope even if the DLL
 hash is unchanged. This is an audit decision primitive, not runtime approval.
+
+## Bounded execution closure and current-build findings
+
+The developer audit now records target-resolution preflight separately from
+A/B preparation, calculation and output reads. Each trial captures existing
+`ruleExecutions` before public output filtering, without enabling details or
+changing calculator inputs. Both trials observe 12 executed rule IDs and 16
+runtime dependency-closure IDs. This is an observed graph, not a completed
+source or mechanics closure.
+
+Four declared dependencies have no separate execution record: base IP, annual
+population growth and monthly cohesion/unrest. The Welfare-to-inequality edge
+is recorded dynamically but its append-based source declaration is not yet
+reconciled by the literal-edge scanner. These are instrumentation/reconciliation
+blockers, not proof that the game rules are absent or unknown. Static references
+inside observed functions retain branch context and source locations; references
+to unexecuted branches remain candidates until exclusions and influence are
+proved. No candidate is approved merely because the trace did not execute it.
+
+[Scoped execution evidence](projection_execution_evidence.json) records current-
+DLL mechanics and UI findings. Parser reference hashes use `sha256-utf8-lf`;
+normalizing checkout CRLF/LF preserves source evidence across Git exports.
+Other source edits and DLL changes mark findings stale. The report includes
+`currentBuildReview` and binds the evidence artifact bytes through the execution
+closure fingerprint. Missing/stale findings cannot establish permission, and
+this supplement is never an accepted policy packet.
+
+Decisive mechanics blockers include monthly movement reading live
+`cohesionRestState`/`unrestRestState` in the DLL while the parser uses prior daily
+cache values; non-invertible calibration from clamped rest caches; diversity
+bonus gating differences; and unclosed current validity, faction/effect and
+army dependencies. Arithmetic agreement in a positive-bonus fixture does not
+verify the broad rule contract. Historical registry evidence remains historical;
+no further source hashes or rule statuses were rebound on this review.
+
+Decisive visibility blockers include exact regional `xenoformingLevel`, whose
+`VisibleToFaction` predicate requires intel below stage 3 and does not grant an
+ownership bypass; saved `annualPopGrowthModifier`; raw GDP-history tracker and
+rest caches; and unconditional councilor, mission, faction-effect and topbar
+preparation. UI annual growth/rest values are aggregates, not proof of all raw
+constituents. National statistics and progress have formatted-value evidence;
+arbitrary saved precision remains unresolved. Owned CP pips have discrete UI
+evidence. Welfare's selected next colony counter has conditional UI exposure,
+so counters must not be blanket-labelled hidden; other counters and pre-branch
+reads still require closure.
+
+The synthetic fixture is source-read/parity evidence, not a runnable-game oracle.
+For example, its empty PCGDP history does not satisfy the inspected DLL getter's
+history maximum precondition. Held-fixed regional/world assumptions and the
+parser's scoped monthly subset cannot establish whole-game monthly parity.
+
+No production input predicate is proved. A/B pips remain fixtures. With
+structural, mechanics and visibility gates incomplete, guarded execution and
+public profile contracts remain unchanged. Actual Companion acceptance stays
+open independently of these internal blockers.
 
 ## Future guarded policy boundary
 

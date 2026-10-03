@@ -39,7 +39,7 @@ Broad input approval can disclose derived hidden state; preserve default behavio
 
 ## Progress
 
-Not activated: prerequisite evidence is absent.
+Not activated: execution closure, current-build mechanics, visibility and a production input predicate remain unproved.
 
 Registry metadata references `fair-play-projection-v1` separately from the
 unchanged visibility-dependent classification. Application/MCP capabilities
@@ -56,3 +56,8 @@ Do not build an unused alternate calculator or fake successful projection.
 
 Pre-handler denial and default compatibility tests pass. Approval remains
 blocked; fixture parity and `allow_unverified` do not bypass the evidence gate.
+Current-DLL findings and instrumented execution blockers are reproducible via
+`tools/audit_projection_reads.py` with an explicitly supplied assembly. Review
+findings expire on source/build changes and cannot serve as approval packets.
+Public guard activation and its acceptance scenarios are deferred until these
+specific predecessor gates pass; the issue remains open.

@@ -46,13 +46,18 @@ client observations; this plan is retained while acceptance gates are unresolved
 
 ## TI Parser Follow-up Order
 
-1. Replace negative assembly checks with separate structural, source-authority,
-   visibility and overall eligibility states. Structural completion never
-   grants authority; missing evidence must reject overall approval.
-2. Keep inspections save-only and bind a selected nation through a trusted
-   application operation. Caller-supplied JSON IDs cannot attest a subject.
-3. Close known source-to-derived mappings and explicitly reconcile static and
-   dynamic dependencies. Classify visibility only from applicable authority
-   evidence; new reads, unexplained escapes and discrepancies remain blocking.
-4. Preserve current disabled policy, mock/routing evidence and actual Companion
-   acceptance gate. This follow-up does not modify the Companion repository. The current-build predecessor now regenerates catalogs and reviews mechanics against explicit installed inputs.
+1. Establish actual A/B execution closure: per-trial source reads, preflight,
+   preparation, executed/direct/transitive rules and static branch candidates.
+   Preserve unexplained lineage and unrecorded paths as blockers.
+2. Re-audit the actual rule closure against the current DLL. Rebind only
+   verified rule contracts; record current-build mismatches separately from
+   historical registry evidence and scenario assumptions.
+3. Prove visibility for every required source dependency. A formatted or
+   aggregate UI statistic does not automatically attest its precise raw
+   constituents, cache, history or unrelated entities.
+4. Enable the existing policy only if structural, mechanics, visibility and a
+   production input predicate all pass. Otherwise preserve global denial and
+   report reproducible exact blockers. Fixture pips do not define production
+   permission, and metadata changes cannot activate a route.
+5. Validate and commit the bounded changes; update the issue report. Actual
+   Companion acceptance remains external and this work must not close #8.

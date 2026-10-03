@@ -59,4 +59,18 @@ structural closure or visibility evidence; phase 3 remains blocked.
 
 ## Outcomes / Retrospective
 
-Acceptance is pending the evidence and checks above; implementation completion is not release acceptance.
+Current bounded execution findings are recorded in
+[the scoped review supplement](../../projection_execution_evidence.json) and
+[the maintained interoperability audit](../../fairplay_interoperability.md#bounded-execution-closure-and-current-build-findings).
+Both trials record 12 executed rules and a 16-rule runtime dependency closure;
+static candidates and missing execution records remain unresolved. Current-DLL
+review identifies live-rest-state/monthly ordering and CP diversity differences,
+and required input visibility is not established for exact xenoforming,
+growth modifiers, cached/rest/history values and preparation reads. All 19
+mechanics and 14 visibility findings are applicable to the measured source
+baseline, but none establishes complete acceptance. No mechanics provenance
+is broadly rebound and no calculator behavior is changed.
+
+This follow-up completes reproducible blocker identification, not authority
+acceptance. The structural, mechanics, visibility and production-domain gates
+remain incomplete.
