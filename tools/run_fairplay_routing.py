@@ -221,7 +221,18 @@ def run_case(case, *, fixture, save, codex, timeout, profile="fair-play"):
             is_policy = any("policy" in (call.get("errorCategory", "")
                                           + " " + call.get("errorCode", "")).casefold()
                             for call in relevant)
-            if tool == "register-visible-context":
+            is_correlation = any(any(word in call.get("errorCode", "").casefold()
+                                     for word in ("generation", "fingerprint", "context-changed",
+                                                  "receipt", "scope")) for call in relevant)
+            is_input = any(call.get("errorCode") == "invalid-conditional-request"
+                           for call in relevant)
+            if is_policy:
+                failures.append("policy")
+            elif is_correlation:
+                failures.append("correlation")
+            elif is_input:
+                failures.append("input")
+            elif tool == "register-visible-context":
                 failures.append("policy" if is_policy else "input")
             elif tool == "verify-visible-generation":
                 failures.append("policy" if is_policy else "correlation")

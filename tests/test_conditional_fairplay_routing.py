@@ -142,3 +142,37 @@ def test_conditional_semantic_error_and_incomplete_prefix_are_separate(tmp_path,
     assert incomplete["toolExecution"] == "completed"
     assert incomplete["failureCategory"] is None
     assert incomplete["mechanicsOutcome"] == "incomplete"
+
+
+@pytest.mark.parametrize(
+    ("tool", "error", "expected_category"),
+    [
+        ("register-visible-context", {"code": "policy-denied", "category": "policy"}, "policy"),
+        ("register-visible-context", {"code": "invalid-context", "category": "input"}, "input"),
+        ("verify-visible-generation", {"code": "generation-mismatch", "category": "correlation"}, "correlation"),
+        ("conditional-nation-projection", {"code": "unsupported-mechanics", "category": "mechanics"}, "mechanics"),
+        ("register-visible-context", {"code": "conditional-generation-mismatch"}, "correlation"),
+        ("conditional-nation-projection", {"code": "invalid-conditional-request"}, "input"),
+    ],
+)
+def test_conditional_semantic_error_categories_are_distinct(tmp_path, monkeypatch, tool, error,
+                                                           expected_category):
+    from types import SimpleNamespace
+    import run_fairplay_routing as probe
+
+    fixture = tmp_path / "fixture.json"
+    fixture.write_text(json.dumps({"nation": {"name": "Test Nation"}}), encoding="utf-8")
+    payload = {"status": "error", "error": error}
+    event = {"type": "item.completed", "item": {
+        "type": "mcp_tool_call", "server": "ti-parser", "tool": tool, "status": "completed",
+        "result": {"content": [{"type": "text", "text": json.dumps(payload)}]},
+    }}
+    monkeypatch.setattr(probe.subprocess, "run", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout=json.dumps(event)))
+    result = probe.run_case(
+        {"id": tool, "prompt": "Run a conditional operation.", "required_tools": [tool]},
+        fixture=fixture, save=tmp_path / "save.gz", codex="codex", timeout=1,
+        profile="conditional",
+    )
+    assert result["toolExecution"] == "failed"
+    assert result["failureCategory"] == expected_category
