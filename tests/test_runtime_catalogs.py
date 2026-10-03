@@ -400,7 +400,7 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.assertEqual(broken["regionTemplates"]["BrokenRegion"]["annualPopGrowthModifier"], 1.21)
         self.assertEqual(
             broken["mapRegionTemplates"]["map_BrokenRegion"],
-            {"dataName": "map_BrokenRegion", "latitude": 27.5, "longitude": -108},
+            {"dataName": "map_BrokenRegion", "latitude": 27.5, "longitude": -108, "solarBody": None},
         )
         self.assertEqual(modern["startTimeTemplates"]["ModernStart"]["populationRegressionPeriod_years"], 20.0)
         self.assertEqual(millennium["startTimeTemplates"]["2003Start"]["populationRegressionPeriod_years"], 35)

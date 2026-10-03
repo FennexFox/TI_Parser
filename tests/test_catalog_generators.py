@@ -39,6 +39,28 @@ class CatalogGeneratorTests(unittest.TestCase):
         self.assertEqual(rows["TestIdeology"]["willProxy"], -1)
         self.assertEqual(rows["TestIdeology"]["willAppease"], 2)
 
+    def test_map_region_solar_body_preserves_nullable_source_and_default(self):
+        _, fields, defaults = runtime_builder.NATION_DEVELOPMENT_TEMPLATE_FIELDS["mapRegionTemplates"]
+        rows = runtime_builder.normalized_development_collection(
+            {
+                "MissingSolarBody": {"dataName": "MissingSolarBody", "latitude": 0, "longitude": 0},
+                "ExplicitNullSolarBody": {
+                    "dataName": "ExplicitNullSolarBody", "latitude": 1, "longitude": 1,
+                    "solarBody": None,
+                },
+                "ExplicitSolarBody": {
+                    "dataName": "ExplicitSolarBody", "latitude": 2, "longitude": 2,
+                    "solarBody": "Mars",
+                },
+            },
+            fields,
+            defaults,
+        )
+
+        self.assertIsNone(rows["MissingSolarBody"]["solarBody"])
+        self.assertIsNone(rows["ExplicitNullSolarBody"]["solarBody"])
+        self.assertEqual(rows["ExplicitSolarBody"]["solarBody"], "Mars")
+
     def test_nation_development_rejects_boolean_numeric_config_values(self):
         payload = runtime_builder._nation_development_payload({
             "priority_MC": True,
@@ -55,6 +77,43 @@ class CatalogGeneratorTests(unittest.TestCase):
             payload["globalConfig"]["coreEcoRegionGDPModifier"]["valueOrigin"],
             "TIGlobalConfig compiled field initializer",
         )
+
+    def test_neighbor_democracy_increase_uses_compiled_default_and_source_value(self):
+        field = "basePassiveDemocracyIncreaseFromNeighbor"
+
+        missing = runtime_builder._nation_development_payload({})["globalConfig"][field]
+        configured = runtime_builder._nation_development_payload({field: 0.125})["globalConfig"][field]
+
+        self.assertEqual(missing, {"value": 0.005, "valueOrigin": "TIGlobalConfig compiled field initializer"})
+        self.assertEqual(configured, {"value": 0.125, "valueOrigin": "TIGlobalConfig.json"})
+
+    def test_effect_rows_preserve_nullable_string_value_with_compiled_empty_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            templates_dir = Path(tmp) / "Templates"
+            write_json(templates_dir / "TIMetaTemplate.json", [])
+            write_json(
+                templates_dir / "TIEffectTemplate.json",
+                [
+                    {"dataName": "MissingStringValue", "operation": "Add", "value": 1},
+                    {"dataName": "ExplicitNullStringValue", "strValue": None},
+                    {"dataName": "ExplicitStringValue", "strValue": "map_Mars"},
+                ],
+            )
+
+            catalog = runtime_builder.build_row_catalog(
+                templates_dir=templates_dir,
+                scenario_dirs={},
+                supported_scenarios=[],
+                filename="TIEffectTemplate.json",
+                collection="effects",
+                fields=runtime_builder.EFFECT_FIELDS,
+                compiled_defaults={"strValue": ""},
+            )
+
+        effects = catalog["base"]["effects"]
+        self.assertEqual(effects["MissingStringValue"]["strValue"], "")
+        self.assertIsNone(effects["ExplicitNullStringValue"]["strValue"])
+        self.assertEqual(effects["ExplicitStringValue"]["strValue"], "map_Mars")
 
     def test_catalog_writers_emit_utf8_lf_with_one_trailing_newline(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -55,7 +55,7 @@ catalogs by hand.
 The packaged baseline uses installed `Assembly-CSharp.dll` SHA-256
 `4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350`.
 The runtime manifest bundle fingerprint is
-`661cd03973e868f12d8225055c45ea9721b1ae744425bef3aaf838994aba009a`.
+`aaa7a0eee908ef5935530b1446def50131b3b895af33f0c0130e9735855931b0`.
 The local game log reports current version `1.0.53a`; the DLL/content hashes,
 rather than that log label or the Unity executable version, bind this baseline.
 
@@ -103,6 +103,29 @@ The refresh establishes current-source packaged data, not universal current-
 build mechanics or visibility acceptance. [Mechanics evidence](nation_projection_mechanics_audit.md)
 remains rule-specific; [fair-play acceptance](fairplay_interoperability.md)
 separates build comparison, structural closure, authority and visibility.
+
+## Inputs required by live nation mechanics
+
+The runtime generator preserves `mapRegionTemplates.solarBody` (363 rows;
+nullable in this source build). The DLL uses Earth when this source field is
+null; the packaged location catalog supplies the body's radius. It preserves
+`effects.strValue` for numeric effect filtering (719 rows, 100 serialized
+nonempty values and 619 compiled empty-string defaults). Current DLL
+construction verifies `TIEffectTemplate.strValue == string.Empty` and
+`TIGlobalConfig.basePassiveDemocracyIncreaseFromNeighbor == 0.005`; the latter
+is absent from these template inputs and is recorded as a compiled initializer.
+Serialized overrides remain source values. These fields support live rest
+getters, filtered scalar effects and monthly neighbor democracy, rather than
+cache inversion or guessed coefficients.
+
+Only these three payload additions and their fingerprints change this catalog
+slice. Two independent generations match; the installed source inventories
+above remain unchanged. Raw input fingerprints are map templates
+`2965a28c8871a7cbd120679eee73861c5659a2a0af3c05c730647b76fd45a309`,
+global config `415113fadeecb4d67fa79f34275e026396c3fe914b722d936d5adcf737b07f4e`
+and effects `905aa752c53c4a9f03c36e525d8fd9fea9f15af2745db1164b7e7a77be9c3df9`.
+Catalog/manifest bytes change the approval baseline; prior fair-play acceptance
+cannot be reused merely because the DLL fingerprint is unchanged.
 
 ## Verification and releases
 
