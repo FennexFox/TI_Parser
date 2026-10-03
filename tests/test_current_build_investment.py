@@ -51,7 +51,7 @@ class CurrentBuildInvestmentTests(unittest.TestCase):
     def test_diversity_requires_national_plus_owner_bonus_above_negative_one(self):
         ctx = context()
         effective = {"Knowledge": 1, "Unity": 1}
-        state = SimpleNamespace(federation_economy_bonus=0.0, cached_num_mining_regions=0)
+        state = SimpleNamespace(federation_economy_bonus=0.0, cached_num_mining_regions=0, rest_state_context={})
 
         self.assertEqual(
             projection._diversity_bonus(state, control_point({"Knowledge": -1.0}), "Knowledge", effective, ctx),
@@ -62,7 +62,7 @@ class CurrentBuildInvestmentTests(unittest.TestCase):
             0.1,
         )
 
-        national_penalty_state = SimpleNamespace(federation_economy_bonus=-100.0, cached_num_mining_regions=0)
+        national_penalty_state = SimpleNamespace(federation_economy_bonus=-100.0, cached_num_mining_regions=0, rest_state_context={})
         economy_effective = {"Economy": 1, "Unity": 1}
         self.assertEqual(
             projection._diversity_bonus(

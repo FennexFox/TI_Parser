@@ -211,4 +211,8 @@ def test_monthly_type_dependency_keeps_only_the_authoritative_prefix():
         "transactionStatus": "committed",
     }
     assert result["runtimeStop"]["attemptedTransaction"]["kind"] == "monthly"
-    assert result["runtimeStop"]["attemptedTransaction"]["ruleExecutions"] == []
+    prefix_rules = result["runtimeStop"]["attemptedTransaction"]["ruleExecutions"]
+    assert [row["ruleId"] for row in prefix_rules] == [Rules.NATION_POPULATION_MONTHLY_GROWTH.id]
+    assert prefix_rules[0]["authoritativePrefix"] is True
+    assert prefix_rules[0]["effectiveCoverage"] == "expected"
+    assert prefix_rules[0]["expectationGuarantee"] is False
