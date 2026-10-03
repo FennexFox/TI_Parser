@@ -28,10 +28,15 @@ def _branch_context(function: ast.AST, target: ast.AST) -> list[dict[str, Any]]:
     result = []
     for node in ast.walk(function):
         if isinstance(node, ast.If):
-            for arm, children in (("body", node.body), ("else", node.orelse)):
-                if any(target is child for statement in children for child in ast.walk(statement)):
-                    result.append({"line": node.lineno, "predicate": ast.unparse(node.test), "arm": arm,
-                                   "outcome": "unproven"})
+            arms = (("body", node.body), ("else", node.orelse))
+        elif isinstance(node, ast.IfExp):
+            arms = (("body", [node.body]), ("else", [node.orelse]))
+        else:
+            continue
+        for arm, children in arms:
+            if any(target is child for statement in children for child in ast.walk(statement)):
+                result.append({"line": node.lineno, "predicate": ast.unparse(node.test), "arm": arm,
+                               "outcome": "unproven"})
     return sorted(result, key=lambda row: row["line"])
 
 
@@ -196,12 +201,20 @@ def rule_source_inventory(tools: Path, call_counts: Any, rules: Any) -> dict[str
     """
     references, edges, hashes = [], [], {}
 
-    def rule_id(node: ast.AST) -> str | None:
+    def rule_attribute(node: ast.AST) -> ast.Attribute | None:
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "Rules":
+            return node
         if (isinstance(node, ast.Attribute) and node.attr == "id"
                 and isinstance(node.value, ast.Attribute)
                 and isinstance(node.value.value, ast.Name) and node.value.value.id == "Rules"):
-            rule = getattr(rules, node.value.attr, None)
-            return getattr(rule, "id", f"unregistered:Rules.{node.value.attr}")
+            return node.value
+        return None
+
+    def rule_id(node: ast.AST) -> str | None:
+        attribute = rule_attribute(node)
+        if attribute is not None:
+            rule = getattr(rules, attribute.attr, None)
+            return getattr(rule, "id", f"unregistered:Rules.{attribute.attr}")
         return None
 
     for module in sorted({module for module, _name in call_counts}):
@@ -215,23 +228,25 @@ def rule_source_inventory(tools: Path, call_counts: Any, rules: Any) -> dict[str
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)) or not call_counts[(module, function.name)]:
                 continue
             for node in ast.walk(function):
-                identifier = rule_id(node)
-                if identifier:
+                attribute = rule_attribute(node)
+                if attribute is not None and attribute is node:
+                    identifier = rule_id(attribute)
                     references.append({"ruleId": identifier, "consumer": f"{module}.{function.name}",
-                                       "sourceLocation": {"file": f"tools/{path.name}", "line": node.lineno, "sha256": digest},
-                                       "branchContext": _branch_context(function, node), "executionStatus": "candidate-only"})
+                                       "sourceLocation": {"file": f"tools/{path.name}", "line": attribute.lineno, "sha256": digest},
+                                       "branchContext": _branch_context(function, attribute), "executionStatus": "candidate-only"})
                 if isinstance(node, ast.Dict):
                     entries = {key.value: value for key, value in zip(node.keys, node.values)
                                if isinstance(key, ast.Constant) and isinstance(key.value, str)}
                     parent = rule_id(entries["ruleId"]) if "ruleId" in entries else None
                     if parent and "dependencies" in entries:
                         for child in ast.walk(entries["dependencies"]):
-                            dependency = rule_id(child)
-                            if dependency:
+                            attribute = rule_attribute(child)
+                            if attribute is child:
+                                dependency = rule_id(attribute)
                                 edges.append({"from": parent, "to": dependency, "sourceLocation":
-                                              {"file": f"tools/{path.name}", "line": child.lineno, "sha256": digest},
+                                              {"file": f"tools/{path.name}", "line": attribute.lineno, "sha256": digest},
                                               "consumer": f"{module}.{function.name}",
-                                              "branchContext": _branch_context(function, child)})
+                                              "branchContext": _branch_context(function, attribute)})
     return {"ruleReferences": references, "registeredLiteralEdges": edges,
             "dynamicDependencyAppendSites": dependency_append_sites(tools),
             "sourceFileSha256": hashes}
@@ -305,9 +320,8 @@ def source_control_flow_context(tools: Path, module: str, function_name: str, li
                    if isinstance(node, ast.Call) and node.lineno == line and called_name(node) == callee_name]
     elif site_kind == "rule-reference":
         targets = [node for node in ast.walk(function)
-                   if isinstance(node, ast.Attribute) and node.attr == "id" and node.lineno == line
-                   and isinstance(node.value, ast.Attribute) and node.value.attr == callee_name
-                   and isinstance(node.value.value, ast.Name) and node.value.value.id == "Rules"]
+                   if isinstance(node, ast.Attribute) and node.attr == callee_name and node.lineno == line
+                   and isinstance(node.value, ast.Name) and node.value.id == "Rules"]
     else:
         targets = []
     if len(targets) != 1:
@@ -316,9 +330,13 @@ def source_control_flow_context(tools: Path, module: str, function_name: str, li
     target = targets[0]
     contexts = []
     for node in ast.walk(function):
-        if not isinstance(node, ast.If):
+        if isinstance(node, ast.If):
+            arms = (("body", node.body), ("else", node.orelse))
+        elif isinstance(node, ast.IfExp):
+            arms = (("body", [node.body]), ("else", [node.orelse]))
+        else:
             continue
-        for arm, statements in (("body", node.body), ("else", node.orelse)):
+        for arm, statements in arms:
             if any(target is child for statement in statements for child in ast.walk(statement)):
                 outcome = {"call": "observed-call-site", "return": "observed-return-site",
                            "rule-reference": "observed-rule-reference"}.get(site_kind, "observed-source-site")
@@ -402,10 +420,10 @@ def execution_closure(executions: list[dict[str, Any]], source: dict[str, Any], 
         events = observed_by_site.get(key, [])
         stages = sorted({str(event.get("stage", "unknown")) for event in events})
         if "projection-calculation" in stages:
-            status = "calculation-helper-reference-executed"
+            status = "calculation-stage-rule-metadata-reference-observed"
             calculation_reference_ids.add(row["ruleId"])
         elif events:
-            status = "preparation-or-output-reference-executed"
+            status = "preparation-or-output-rule-metadata-reference-observed"
         elif runtime_rule_references is not None:
             status = "not-evaluated-at-source-site"
             static_not_evaluated.append(dict(row, executionStatus=status,

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import audit_projection_reads as audit
-from projection_audit_dependencies import execution_closure, reconcile, source_inventory
+from projection_audit_dependencies import execution_closure, reconcile, source_inventory, rule_source_inventory
 from projection_audit_dependencies import dependency_append_sites, source_control_flow_context
 from collections import Counter
 from ti_parser_catalogs import RuntimeCatalogs
@@ -438,6 +438,31 @@ def test_rule_reference_context_records_observed_branch_without_claiming_executi
     assert context["calleeName"] == "CHILD"
     assert context["branchContext"] == [{"line": 2, "predicate": "state.enabled", "arm": "body",
                                           "outcome": "observed-rule-reference"}]
+
+
+def test_rule_inventory_maps_bare_rule_object_metadata_reads(tmp_path):
+    (tmp_path / "ti_parser_example.py").write_text(
+        "def coverage(name):\n"
+        "    resolver = Rules.NATION_PRIORITY_MISSION_CONTROL_PLACEMENT if name == 'MissionControl' else None\n"
+        "    return resolver.coverage_resolver_id if resolver is not None else None\n",
+        encoding="utf-8",
+    )
+    inventory = rule_source_inventory(
+        tmp_path,
+        Counter({("ti_parser_example", "coverage"): 1}),
+        audit.Rules,
+    )
+
+    references = [row for row in inventory["ruleReferences"]
+                  if row["ruleId"] == "nation.priority.mission-control.placement"]
+    assert len(references) == 1
+    assert references[0]["sourceLocation"]["line"] == 2
+    assert references[0]["branchContext"] == [{"line": 2, "predicate": "name == 'MissionControl'",
+                                                "arm": "body", "outcome": "unproven"}]
+    context = source_control_flow_context(tmp_path, "ti_parser_example", "coverage", 2,
+                                          "rule-reference", "NATION_PRIORITY_MISSION_CONTROL_PLACEMENT")
+    assert context["sourceMapped"] is True
+    assert context["branchContext"][0]["outcome"] == "observed-rule-reference"
 
 
 def test_static_non_observation_keeps_branch_predicates_unproven(tmp_path):
