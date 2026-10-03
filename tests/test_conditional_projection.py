@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import json
 import sys
 
 import pytest
@@ -104,6 +105,33 @@ def _plans() -> list[dict]:
     ]
 
 
+def _eight_plans() -> list[dict]:
+    allocations = (
+        {"Knowledge": 1, "Welfare": 0},
+        {"Knowledge": 0, "Welfare": 1},
+        {"Knowledge": 3, "Welfare": 0},
+        {"Knowledge": 0, "Welfare": 3},
+        {"Knowledge": 2, "Welfare": 1},
+        {"Knowledge": 1, "Welfare": 2},
+        {"Knowledge": 3, "Welfare": 3},
+        {"Knowledge": 2, "Welfare": 2},
+    )
+    return [
+        {"name": f"Plan {index + 1}", "pips": pips}
+        for index, pips in enumerate(allocations)
+    ]
+
+
+def _reconstruct_metric_coverage(result: dict, plan: dict) -> dict:
+    table = result["metricCoverageRecords"]
+    decoded = {}
+    for metric, reference in plan["engineProjection"]["metricCoverage"].items():
+        record = table[reference["evidenceIndex"]]
+        assert reference["coverage"] == record["coverage"]
+        decoded[metric] = record
+    return decoded
+
+
 def _module():
     from ti_parser_conditional_projection import (
         build_conditional_state,
@@ -157,14 +185,16 @@ def test_180_day_ab_uses_the_engine_and_labels_coverage_as_conditional():
     assert [plan["name"] for plan in result["plans"]] == ["Knowledge-heavy", "Welfare-heavy"]
     assert all(plan["status"].startswith("conditional-") for plan in result["plans"])
     assert all("engineCoverageWithinConditionalScenario" in plan for plan in result["plans"])
+    assert result["priorityCoverageScope"]
     for plan in result["plans"]:
         projection = plan["engineProjection"]
         assert [checkpoint["day"] for checkpoint in projection["checkpoints"]] == [0, 180]
         assert plan["engineStatus"] == "complete"
         assert plan["engineProjection"]["preflight"]["implicitFallbacks"] == []
-        assert plan["mechanicRuleDiagnostics"]
-        assert all("id" in item for item in plan["mechanicRuleDiagnostics"])
-        assert all("ruleId" not in item for item in plan["mechanicRuleDiagnostics"])
+        assert plan["engineProjection"]["mechanicRuleIds"]
+        assert set(plan["engineCoverageWithinConditionalScenario"]) == {"Knowledge", "Welfare"}
+        assert "ruleExecutions" not in projection
+        assert "completionEvents" not in projection
     assert result["catalogs"]["scenario"] == "ModernScenario"
     assert result["catalogs"]["catalogBundleFingerprint"]
     knowledge_end = result["plans"][0]["engineProjection"]["checkpoints"][-1]["nation"]
@@ -172,6 +202,87 @@ def test_180_day_ab_uses_the_engine_and_labels_coverage_as_conditional():
     assert knowledge_end["education"] > original["observations"]["nation"]["education"]
     assert welfare_end["inequality"] < original["observations"]["nation"]["inequality"]
     assert welfare_end["education"] == original["observations"]["nation"]["education"]
+    assert result["mechanicRuleDiagnostics"]
+    assert all("id" in item for item in result["mechanicRuleDiagnostics"])
+    assert all("ruleId" not in item for item in result["mechanicRuleDiagnostics"])
+    assert result["metricCoverageRecords"]
+    for plan in result["plans"]:
+        assert _reconstruct_metric_coverage(result, plan)
+    assert len(json.dumps(result, separators=(",", ":")).encode("utf-8")) < 125_000
+
+
+def test_compact_summaries_and_coverage_reconstruct_engine_evidence(monkeypatch):
+    import ti_parser_nation_projection as engine
+
+    _, calculate, _, _ = _module()
+    raw_results = []
+    original_run_projection = engine.run_projection
+
+    def capture_raw_result(*args, **kwargs):
+        result = original_run_projection(*args, **kwargs)
+        raw_results.append(result)
+        return result
+
+    monkeypatch.setattr(engine, "run_projection", capture_raw_result)
+    result = calculate(_context(), _plans())
+
+    assert len(raw_results) == len(result["plans"]) == 2
+    for raw, plan in zip(raw_results, result["plans"], strict=True):
+        projection = plan["engineProjection"]
+        execution_summary = projection["executionSummary"]
+        completion_summary = projection["completionSummary"]
+        assert execution_summary["totalCount"] == len(raw["ruleExecutions"])
+        assert completion_summary["totalCount"] == len(raw["completionEvents"])
+        assert execution_summary["eventDayAvailability"] == "not-reported-by-engine"
+        assert "ruleExecutions" not in projection
+        assert "completionEvents" not in projection
+        assert _reconstruct_metric_coverage(result, plan) == raw["metricCoverage"]
+
+        by_rule = {row["ruleId"]: row for row in execution_summary["byRule"]}
+        raw_by_rule = {}
+        for row in raw["ruleExecutions"]:
+            raw_by_rule.setdefault(row["ruleId"], []).append(row)
+        assert set(by_rule) == set(raw_by_rule)
+        for rule_id, rows in raw_by_rule.items():
+            summary = by_rule[rule_id]
+            assert summary["count"] == len(rows)
+            assert summary["lastDay"] is None
+            assert summary["coverageCounts"] == _counts_for(rows, "effectiveCoverage")
+            assert summary["provenanceCounts"] == _counts_for(rows, "provenance")
+
+        by_priority = {row["priority"]: row for row in completion_summary["byPriority"]}
+        raw_by_priority = {}
+        for row in raw["completionEvents"]:
+            raw_by_priority.setdefault(row["priority"], []).append(row)
+        assert set(by_priority) == set(raw_by_priority)
+        for priority, rows in raw_by_priority.items():
+            summary = by_priority[priority]
+            assert summary["count"] == len(rows)
+            assert summary["firstDay"] == min(row["day"] for row in rows)
+            assert summary["lastDay"] == max(row["day"] for row in rows)
+            assert summary["statusCounts"] == _counts_for(rows, "effectiveCoverage")
+
+
+def _counts_for(rows: list[dict], field: str) -> list[dict]:
+    counts = {}
+    for row in rows:
+        value = row.get(field)
+        counts[value] = counts.get(value, 0) + 1
+    return [
+        {"value": value, "count": count}
+        for value, count in sorted(counts.items(), key=lambda item: (item[0] is None, str(item[0])))
+    ]
+
+
+def test_eight_plan_conditional_payload_stays_bounded():
+    _, calculate, _, _ = _module()
+
+    result = calculate(_context(), _eight_plans())
+
+    assert len(result["plans"]) == 8
+    assert all("executionSummary" in row["engineProjection"] for row in result["plans"])
+    assert all("completionSummary" in row["engineProjection"] for row in result["plans"])
+    assert len(json.dumps(result, separators=(",", ":")).encode("utf-8")) < 280_000
 
 
 def test_unknown_or_missing_hidden_state_is_rejected_instead_of_zeroed():
@@ -273,17 +384,29 @@ def test_runtime_prefix_stop_remains_incomplete_and_is_not_success_masked(monkey
         assert plan["engineProjection"]["lastAuthoritativeState"]
 
 
-def test_low_gdp_monthly_control_point_reduction_stops_before_unobserved_mutation():
+def test_low_gdp_monthly_control_point_reduction_stops_before_unobserved_mutation(monkeypatch):
+    import ti_parser_nation_projection as engine
+
     _, calculate, _, _ = _module()
+    raw_results = []
+    original_run_projection = engine.run_projection
+
+    def capture_raw_result(*args, **kwargs):
+        result = original_run_projection(*args, **kwargs)
+        raw_results.append(result)
+        return result
+
+    monkeypatch.setattr(engine, "run_projection", capture_raw_result)
     document = _context()
     document["observations"]["nation"]["gdp"] = 1_250_000_000_000.0
 
     result = calculate(document, _plans())
 
     assert result["status"] == "incomplete"
-    for plan in result["plans"]:
+    for raw, plan in zip(raw_results, result["plans"], strict=True):
         assert plan["status"] == "conditional-incomplete"
         projection = plan["engineProjection"]
+        assert _reconstruct_metric_coverage(result, plan) == raw["metricCoverage"]
         stop = projection["runtimeStop"]
         assert stop["phase"] == "beforeControlPointCountMutation"
         assert stop["simulationDay"] == 22

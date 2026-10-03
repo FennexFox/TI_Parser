@@ -19,6 +19,10 @@ def test_non_mcp_operation_is_a_routing_failure_even_when_client_exits_zero(tmp_
     assert result["status"] == "recorded"
     assert result["failureCategory"] == "routing"
     assert result["toolRouting"]["violations"] == ["non-mcp-operation"]
+    assert set(result) == {
+        "id", "status", "failureCategory", "exitCode", "calls", "answers", "errors",
+        "toolRouting", "toolExecution", "unexpectedOperations", "expected", "model",
+    }
 
 
 def test_completed_failed_call_is_still_an_observed_routing_attempt():

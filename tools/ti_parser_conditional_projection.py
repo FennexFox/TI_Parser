@@ -9,7 +9,9 @@ nation projection engine.
 from __future__ import annotations
 
 import copy
+import json
 import math
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -876,12 +878,144 @@ def _parse_plans(value: Any, state: projection_engine.NationProjectionState) -> 
     return tuple(plans)
 
 
+def _summary_counts(values: list[Any]) -> list[dict[str, Any]]:
+    """Count public labels without retaining the engine's repeated event rows."""
+
+    counts = Counter(values)
+    return [
+        {"value": value, "count": count}
+        for value, count in sorted(counts.items(), key=lambda item: (item[0] is None, str(item[0])))
+    ]
+
+
+def _summarize_rule_executions(value: Any) -> dict[str, Any]:
+    """Summarize execution records by rule and coverage/provenance status.
+
+    The engine's rule records intentionally carry no event day.  This result
+    keeps that limitation explicit instead of inferring timing from adjacent
+    transactions.
+    """
+
+    executions = value if isinstance(value, list) else []
+    grouped: dict[str | None, list[Mapping[str, Any]]] = {}
+    for row in executions:
+        if not isinstance(row, Mapping):
+            continue
+        rule_id = row.get("ruleId")
+        if rule_id is not None and not isinstance(rule_id, str):
+            rule_id = str(rule_id)
+        grouped.setdefault(rule_id, []).append(row)
+    by_rule = []
+    for rule_id, rows in sorted(grouped.items(), key=lambda item: (item[0] is None, str(item[0]))):
+        by_rule.append({
+            "ruleId": rule_id,
+            "count": len(rows),
+            "coverageCounts": _summary_counts([row.get("effectiveCoverage") for row in rows]),
+            "provenanceCounts": _summary_counts([row.get("provenance") for row in rows]),
+            "lastDay": None,
+        })
+    return {
+        "totalCount": len(executions),
+        "eventDayAvailability": "not-reported-by-engine",
+        "byRule": by_rule,
+    }
+
+
+def _summarize_completions(value: Any) -> dict[str, Any]:
+    """Summarize repeated priority completions without exposing transaction logs."""
+
+    completions = value if isinstance(value, list) else []
+    grouped: dict[str | None, list[Mapping[str, Any]]] = {}
+    for row in completions:
+        if not isinstance(row, Mapping):
+            continue
+        priority = row.get("priority")
+        if priority is not None and not isinstance(priority, str):
+            priority = str(priority)
+        grouped.setdefault(priority, []).append(row)
+    by_priority = []
+    for priority, rows in sorted(grouped.items(), key=lambda item: (item[0] is None, str(item[0]))):
+        days = [row["day"] for row in rows if type(row.get("day")) is int]
+        by_priority.append({
+            "priority": priority,
+            "count": len(rows),
+            "statusCounts": _summary_counts([row.get("effectiveCoverage") for row in rows]),
+            "firstDay": min(days) if days else None,
+            "lastDay": max(days) if days else None,
+        })
+    return {"totalCount": len(completions), "byPriority": by_priority}
+
+
+def _intern_metric_coverage(
+    value: Any,
+    records: list[dict[str, Any]],
+    record_indexes: dict[str, int],
+) -> dict[str, dict[str, Any]]:
+    """Reference full per-metric coverage evidence through a deduplicated table."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    references: dict[str, dict[str, Any]] = {}
+    for metric, raw in value.items():
+        if not isinstance(raw, Mapping):
+            continue
+        record = copy.deepcopy(dict(raw))
+        signature = json.dumps(
+            record,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        index = record_indexes.get(signature)
+        if index is None:
+            index = len(records)
+            record_indexes[signature] = index
+            records.append(record)
+        references[str(metric)] = {
+            "coverage": copy.deepcopy(raw.get("coverage")),
+            "evidenceIndex": index,
+        }
+    return references
+
+
+def _compact_engine_projection(
+    result: Mapping[str, Any],
+    metric_coverage_references: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Bound the public conditional payload while retaining states and coverage."""
+
+    compact = {
+        key: copy.deepcopy(value)
+        for key, value in result.items()
+        if key not in {"status", "coverage", "ruleExecutions", "completionEvents"}
+    }
+    compact["metricCoverage"] = copy.deepcopy(dict(metric_coverage_references))
+    compact["executionSummary"] = _summarize_rule_executions(result.get("ruleExecutions", []))
+    compact["completionSummary"] = _summarize_completions(result.get("completionEvents", []))
+    return compact
+
+
+def _conditional_priority_coverage(value: Any) -> dict[str, Any]:
+    """Expose coverage only for priorities admitted by this conditional API."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        priority: copy.deepcopy(value[priority])
+        for priority in _PRIORITIES
+        if priority in value
+    }
+
+
 def calculate_conditional_projection(document: Any, plans: Any) -> dict[str, Any]:
     """Project narrow Knowledge/Welfare plans over the fixed 180-day scenario."""
 
     state, context, provenance = build_conditional_state(document)
     parsed_plans = _parse_plans(plans, state)
     plan_results: list[dict[str, Any]] = []
+    metric_coverage_records: list[dict[str, Any]] = []
+    metric_coverage_record_indexes: dict[str, int] = {}
     used_rule_ids: set[str] = set()
     for plan in parsed_plans:
         result = projection_engine.run_projection(
@@ -894,15 +1028,19 @@ def calculate_conditional_projection(document: Any, plans: Any) -> dict[str, Any
         )
         engine_status = str(result.get("status", "incomplete"))
         used_rule_ids.update(str(rule_id) for rule_id in result.get("mechanicRuleIds", []))
-        coverage = copy.deepcopy(result.get("coverage", {}))
-        result_without_engine_status = {key: copy.deepcopy(value) for key, value in result.items() if key != "status" and key != "coverage"}
+        coverage = _conditional_priority_coverage(result.get("coverage", {}))
+        metric_coverage_references = _intern_metric_coverage(
+            result.get("metricCoverage", {}),
+            metric_coverage_records,
+            metric_coverage_record_indexes,
+        )
+        result_without_engine_status = _compact_engine_projection(result, metric_coverage_references)
         plan_results.append({
             "name": plan.name,
             "status": "conditional-complete" if engine_status == "complete" else "conditional-incomplete",
             "engineStatus": engine_status,
             "engineCoverageWithinConditionalScenario": coverage,
             "engineProjection": result_without_engine_status,
-            "mechanicRuleDiagnostics": mechanic_diagnostics(result.get("mechanicRuleIds", [])),
         })
 
     return {
@@ -917,6 +1055,14 @@ def calculate_conditional_projection(document: Any, plans: Any) -> dict[str, Any
         "inputProvenance": provenance,
         "assumptions": copy.deepcopy(provenance["assumptions"]["expanded"]),
         "catalogs": copy.deepcopy(provenance["catalogs"]),
+        "priorityCoverageScope": (
+            "Only Knowledge and Welfare coverage is included; all other priorities are outside this accepted plan domain."
+        ),
+        "metricCoverageEncoding": (
+            "Each plan engineProjection.metricCoverage entry contains its coverage label and an evidenceIndex "
+            "into this table; each table record is the complete original engine metric-coverage record."
+        ),
+        "metricCoverageRecords": metric_coverage_records,
         "plans": plan_results,
         "mechanicRuleIds": sorted(used_rule_ids),
         "mechanicRuleDiagnostics": mechanic_diagnostics(used_rule_ids),

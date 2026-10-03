@@ -41,6 +41,46 @@ def _load_fixture(path: Path) -> dict[str, Any]:
     return value
 
 
+def _conditional_input_sample(fixture: dict[str, Any]) -> dict[str, Any] | None:
+    """Build an explicitly synthetic visible-input context when supplied."""
+    sample = fixture.get("conditionalScenario")
+    if sample is None:
+        return None
+    if (
+        not isinstance(sample, dict)
+        or not isinstance(sample.get("observations"), dict)
+        or not isinstance(sample.get("assumptions"), dict)
+        or not isinstance(sample.get("provenance"), dict)
+    ):
+        raise ValueError("conditionalScenario requires observations, assumptions, and provenance.")
+    observations = sample["observations"]
+    if set(observations) != {"source", "precision", "nation"}:
+        raise ValueError("conditionalScenario observations must have source, precision, and nation.")
+    provenance = sample["provenance"]
+    if provenance.get("kind") != "synthetic-test-input" or provenance.get("mockVisibilityOracle") is not False:
+        raise ValueError("conditionalScenario must identify synthetic input and deny visibility-oracle status.")
+    document = {
+        "schemaVersion": "conditional-nation-v1",
+        "model": "isolated-nation-v1",
+        "assumptionsAcknowledged": True,
+        "peer": {
+            "saveIdentity": fixture["snapshotIdentity"],
+            "selectedNationId": fixture["selectedNationId"],
+        },
+        "observations": observations,
+        "assumptions": sample["assumptions"],
+    }
+    return {
+        "document": document,
+        "provenance": provenance,
+        "disclosure": (
+            "This mock supplies synthetic caller-reported values and explicit scenario assumptions. "
+            "Assumptions are not observations, and this mock is not a game UI or a visibility oracle. "
+            "Any xenoforming value in the assumptions is not proof of exact-value visibility."
+        ),
+    }
+
+
 def create_server(fixture_path: Path) -> Any:
     """Create a low-level MCP server backed only by ``fixture_path``."""
 
@@ -95,6 +135,9 @@ def create_server(fixture_path: Path) -> Any:
                 "selectedNationId": fixture["selectedNationId"],
                 "result": {"nation": fixture["nation"]},
             }
+            conditional_sample = _conditional_input_sample(fixture)
+            if conditional_sample is not None:
+                payload["conditionalInputSample"] = conditional_sample
             return _result(mcp_types, payload)
         if params.name == "companion_recent_changes":
             payload = {

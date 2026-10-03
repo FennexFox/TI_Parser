@@ -388,6 +388,8 @@ launch command is invented here.
 | Authoritative visibility/correctness | Blocked | Hash equality does not certify all mechanics or player visibility; rule-specific review and dependency closure remain incomplete. |
 | Mock Companion plus TI stdio | Protocol-tested | Synthetic fixture-only connection, discovery, policy denial and correlation; not a visibility oracle. |
 | Real Codex routing with mock | Six canonical prompts reviewed | Current/history use Companion, correlation uses both with target unresolved, forecasts stay blocked, and hidden goals are refused without calls. [Synthetic client evidence](plan/issue_8/routing-evidence.json) records initial failures and corrected ownership; no mechanics approval follows. |
+| Separate conditional model and receipts | Regression-tested | Fresh reported inputs and acknowledged assumptions, strict six-CP ownership, immutable issuance, scope expiry and generation rejection are tested independently of raw-save approval. |
+| Conditional Codex routing with mock | Reviewed | Current/history use only their Companion tools; A/B uses registration, conditional projection, fresh Companion observation and verification. Hidden-state requests allow policy discovery only. [Conditional routing evidence](conditional_routing_evidence.json) preserves initial expectations and response-size limitations alongside the compact rerun. |
 | Actual Companion plus TI/Codex | Open | Substitute a runnable actual Companion (local branch/server is sufficient) and execute the approved 180-day A/B scenario. |
 
 Local tooling does not complete Issue #8. Keep raw-save projection blocked until

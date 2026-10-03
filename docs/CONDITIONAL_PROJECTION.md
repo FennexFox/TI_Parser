@@ -171,13 +171,26 @@ reported inputs and declared assumptions. Its coverage is reported only
 within this scenario. It does not imply that all game mechanics were executed
 or that a rule being present in code makes downstream values exact.
 
-Each plan reports the projection engine status and execution-derived
-`engineCoverageWithinConditionalScenario`. If an unsupported next action or
+Each plan reports the projection engine status. The Knowledge/Welfare entries
+in `engineCoverageWithinConditionalScenario` are static rule capabilities
+(`coverageMode: static`), not proof that a completion or downstream path ran.
+Execution-derived metric evidence is in `engineProjection.metricCoverage`.
+If an unsupported next action or
 missing dependency stops a path, the engine preserves the completed verified
 prefix and stops before that unsupported mutation. Such prefix values remain
 conditional outputs from the isolated model; they are not authoritative save
 transactions or predicted game truth. A plan can therefore be incomplete even
 when it contains useful completed-prefix results.
+
+The public result summarizes repeated rule executions and priority completions
+as counts rather than returning every internal transaction. Checkpoints,
+final/last completed state, stop reasons and missing dependencies remain
+available. `metricCoverageRecords` stores the full metric evidence records;
+each plan's `engineProjection.metricCoverage` maps a metric name to its
+coverage and `evidenceIndex` in that shared table. The referenced record retains
+provenance, dependency links, rule IDs and blockers. Reuse of identical records
+does not change the path-derived evidence for a plan. The top-level mechanics
+diagnostic table is shared across plans; it does not establish game acceptance.
 
 The `fair-play` profile remains limited to `capabilities` and sanitized
 `inspect-save`; raw-save `nation-projection`, `advise`, `raw`, and other
