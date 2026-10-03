@@ -18,6 +18,17 @@ dev-docs/fairplay_interoperability.md; existing projection mechanics audit.
 
 ## Implementation steps
 
+The bounded mechanics follow-up has scoped fixes for owner/national diversity,
+occupation refresh, shared priority validity, live monthly rest inputs, and
+supported monthly control-point transitions. Changed registry rules carry
+incremented revisions and partial current-build provenance. Missing source
+inputs and unsupported mutations remain explicit stops. The bounded monthly
+population loop now follows the inspected population, live-PCGDP, GDP-floor,
+education-clamp and output-cache order. The downstream `ModifyGDP`/
+`PossiblePriorityValidationChange` callback closure remains unapproved.
+Mechanics repair does not grant visibility or production-policy acceptance.
+The final bounded audit confirms parity but leaves source closure incomplete.
+
 Fingerprint explicit installed DLL/templates/DLC/localization inputs before and after generation. Verify generator compiled defaults against current DLL. Generate all families twice in temporary outputs, review normalized payload and overlay differences, then regenerate committed artifacts. Re-audit source mechanics and visibility independently; leave missing evidence unresolved.
 
 ## Acceptance criteria
@@ -59,18 +70,21 @@ structural closure or visibility evidence; phase 3 remains blocked.
 
 ## Outcomes / Retrospective
 
-Current bounded execution findings are recorded in
-[the scoped review supplement](../../projection_execution_evidence.json) and
-[the maintained interoperability audit](../../fairplay_interoperability.md#bounded-execution-closure-and-current-build-findings).
-Both trials record 12 executed rules and a 16-rule runtime dependency closure;
-static candidates and missing execution records remain unresolved. Current-DLL
-review identifies live-rest-state/monthly ordering and CP diversity differences,
-and required input visibility is not established for exact xenoforming,
-growth modifiers, cached/rest/history values and preparation reads. All 19
-mechanics and 14 visibility findings are applicable to the measured source
-baseline, but none establishes complete acceptance. No mechanics provenance
-is broadly rebound and no calculator behavior is changed.
+The current bounded source audit confirms complete A/B output, status and
+coverage parity, unchanged inputs/catalogs, and zero mutations. Its static
+checklist and execution closure remain incomplete. The scoped review supplement
+is [recorded here](../../projection_execution_evidence.json), with the policy
+decision in [the maintained interoperability
+audit](../../fairplay_interoperability.md#bounded-execution-closure-and-current-build-findings).
 
-This follow-up completes reproducible blocker identification, not authority
-acceptance. The structural, mechanics, visibility and production-domain gates
-remain incomplete.
+The current local repairs cover monthly cohesion/unrest inputs, CP diversity,
+GDP-weighted occupation, priority validity, supported CP-type transitions, and
+related contribution/effect paths. Changed registry rules have partial
+current-build provenance; this does not certify transitive effects or full
+monthly execution. The GDP-setter callback closure remains unapproved pending
+independent audit. Visibility is still unapproved for exact
+xenoforming, growth modifiers, raw history/rest values and preparation reads.
+The fair-play guard remains disabled: structural closure is incomplete,
+visibility is unapproved, and actual Companion acceptance is out of scope.
+This follow-up records bounded repairs and blockers, not authority acceptance;
+the structural, mechanics, visibility and production-domain gates remain open.

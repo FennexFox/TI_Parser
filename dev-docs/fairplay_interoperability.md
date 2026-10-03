@@ -138,19 +138,19 @@ assembly remains an offline audit input only. Normal runtime never discovers
 an installed DLL, and capabilities report `authorityHashStatus: not_evaluated`
 rather than claiming an installed-build comparison.
 
-The refreshed canonical A/B calculations have identical complete results to
-the previous baseline, including status and coverage. Baseline/traced parity
-also passes. The earlier source audit remained incomplete: 457 of its 496 recorded read
-paths are unresolved in static/dynamic reconciliation, and unexplained
-normalization/materialization boundaries remain. Visibility is unresolved;
-no accepted evidence packet is supplied. Overall policy eligibility remains
-`not_approved` and the audit returns exit 2 even when the DLL hashes match.
+The latest bounded source audit confirms complete A/B output, status and
+coverage parity, unchanged inputs/catalogs, and zero mutations. Its static
+checklist and execution closure remain incomplete, and
+normalization/materialization boundaries still need reconciliation. Visibility
+is unresolved; no accepted evidence packet is supplied. Overall policy
+eligibility remains `not_approved` even when the DLL hashes match.
 
 Catalog validity is resolved separately from complete projection mechanics
-acceptance. Only the explicitly reviewed Knowledge/Welfare rules have current
-build evidence; other [mechanics rules](nation_projection_mechanics_audit.md)
-retain their historical source hashes. Required hidden or unresolved reads,
-unreviewed rules and incomplete dependency closure remain blockers.
+acceptance. The Knowledge/Welfare rules and a bounded set of repaired rules have
+current-build evidence at their stated scopes; the repaired rules remain
+partial. Other [mechanics rules](nation_projection_mechanics_audit.md) retain
+historical source hashes. Required hidden or unresolved reads, unreviewed rules
+and incomplete dependency closure remain blockers.
 
 The audit report's `acceptanceBinding.scopeFingerprint` binds the catalog bundle
 and package file hashes, exact scenario/execution shape, parser inventory/source
@@ -161,37 +161,39 @@ hash is unchanged. This is an audit decision primitive, not runtime approval.
 
 ## Bounded execution closure and current-build findings
 
-The developer audit now records target-resolution preflight separately from
-A/B preparation, calculation and output reads. Each trial captures existing
-`ruleExecutions` before public output filtering, without enabling details or
-changing calculator inputs. Both trials observe 12 executed rule IDs and 16
-runtime dependency-closure IDs. This is an observed graph, not a completed
-source or mechanics closure.
+The developer audit separates target-resolution preflight from A/B preparation,
+calculation and output reads. The latest run after the source repairs preserves
+parity, but its static checklist and execution closure remain false. Branch-aware
+static/dynamic reconciliation is still required, and unexecuted branches remain
+candidates until exclusions and influence are proved. No candidate is approved
+merely because a trace did not execute it.
 
-Four declared dependencies have no separate execution record: base IP, annual
-population growth and monthly cohesion/unrest. The Welfare-to-inequality edge
-is recorded dynamically but its append-based source declaration is not yet
-reconciled by the literal-edge scanner. These are instrumentation/reconciliation
-blockers, not proof that the game rules are absent or unknown. Static references
-inside observed functions retain branch context and source locations; references
-to unexecuted branches remain candidates until exclusions and influence are
-proved. No candidate is approved merely because the trace did not execute it.
+[Scoped execution evidence](projection_execution_evidence.json) binds mechanics
+and UI findings to parser references hashed as `sha256-utf8-lf`; checkout line
+ending normalization preserves those bytes across Git exports. Parser edits and
+DLL changes invalidate affected findings. The supplement now binds hash-checked
+findings only for the corrected partial mechanics scopes; untouched mechanics
+findings remain stale, and visibility findings remain unresolved. Missing or
+stale findings cannot establish permission, and the supplement is never an
+accepted policy packet.
 
-[Scoped execution evidence](projection_execution_evidence.json) records current-
-DLL mechanics and UI findings. Parser reference hashes use `sha256-utf8-lf`;
-normalizing checkout CRLF/LF preserves source evidence across Git exports.
-Other source edits and DLL changes mark findings stale. The report includes
-`currentBuildReview` and binds the evidence artifact bytes through the execution
-closure fingerprint. Missing/stale findings cannot establish permission, and
-this supplement is never an accepted policy packet.
-
-Decisive mechanics blockers include monthly movement reading live
-`cohesionRestState`/`unrestRestState` in the DLL while the parser uses prior daily
-cache values; non-invertible calibration from clamped rest caches; diversity
-bonus gating differences; and unclosed current validity, faction/effect and
-army dependencies. Arithmetic agreement in a positive-bonus fixture does not
-verify the broad rule contract. Historical registry evidence remains historical;
-no further source hashes or rule statuses were rebound on this review.
+The bounded local mechanics repairs cover live monthly cohesion/unrest inputs
+and their supported order, source terms in place of clamped-cache inversion,
+eligible allied-army unrest with filtered effects, CP diversity's
+national-plus-owner bonus gate, live GDP-weighted occupation, and current-input
+priority validity. The monthly population loop now mutates regional population
+before reading live PCGDP, applies the current total-population GDP floor and
+bounded education clamp, then refreshes output caches. Monthly CP types and
+sector contributions follow the supported state transitions. Required inputs
+remain strict dependencies.
+Unsupported stochastic democracy and nonzero surveillance abductions stop
+before their mutations, retaining the authoritative prefix. This is a bounded
+monthly subset; the downstream `ModifyGDP`/`PossiblePriorityValidationChange`
+callback closure is unapproved pending its own audit. These scoped repairs do
+not establish complete game mechanics, visibility, or production-domain
+acceptance. Changed rules carry partial
+current-build provenance. See the
+[mechanics audit](nation_projection_mechanics_audit.md).
 
 Decisive visibility blockers include exact regional `xenoformingLevel`, whose
 `VisibleToFaction` predicate requires intel below stage 3 and does not grant an
@@ -205,14 +207,14 @@ so counters must not be blanket-labelled hidden; other counters and pre-branch
 reads still require closure.
 
 The synthetic fixture is source-read/parity evidence, not a runnable-game oracle.
-For example, its empty PCGDP history does not satisfy the inspected DLL getter's
-history maximum precondition. Held-fixed regional/world assumptions and the
-parser's scoped monthly subset cannot establish whole-game monthly parity.
+The source-realistic fixture now supplies explicit history and world inputs;
+those controlled values remain scenario assumptions. Held-fixed regional/world
+inputs and supported monthly branches cannot establish whole-game monthly parity.
 
-No production input predicate is proved. A/B pips remain fixtures. With
-structural, mechanics and visibility gates incomplete, guarded execution and
-public profile contracts remain unchanged. Actual Companion acceptance stays
-open independently of these internal blockers.
+No production input predicate is proved. A/B pips remain fixtures. The
+fair-play guard remains disabled while structural closure is incomplete and
+visibility is unapproved; actual Companion acceptance is out of scope and stays
+independently open.
 
 ## Future guarded policy boundary
 

@@ -6,7 +6,16 @@
     "evidenceOrigin": "Explicit installed-DLL decompilation supplied by coordinator; temporary references are audit-only and not runtime dependencies.",
     "status": "incomplete",
     "scope": "Observed canonical A/B runtime closure plus explicitly labelled static/dependency review candidates; not production-domain approval.",
-    "registryRebindingsApplied": [],
+    "registryRebindingsApplied": [
+      "nation.ip.base",
+      "nation.ip.priority-bonus",
+      "nation.priority.validity",
+      "nation.periodic.derived-cache",
+      "nation.periodic.cohesion",
+      "nation.periodic.unrest",
+      "nation.population.monthly-growth",
+      "nation.periodic.control-point-types"
+    ],
     "findings": [
       {
         "ruleId": "nation.ip.control-point-allocation",
@@ -46,18 +55,17 @@
       },
       {
         "ruleId": "nation.ip.priority-bonus",
-        "status": "mismatch",
+        "status": "current-reviewed-scope-only",
         "parser": {
           "file": "tools/ti_parser_nation_projection.py",
           "symbols": [
             "_diversity_bonus",
             "_national_priority_bonus",
-            "_run_investment_transaction",
-            "_cache_faction_priority_bonuses"
+            "_run_investment_transaction"
           ],
-          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
-          "registryAuditStatus": "verified",
-          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          "registrySourceHash": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+          "registryAuditStatus": "partial",
+          "sourceSha256": "53f95f4378bded8b1b5ab8ff2cb93e0f214140734aa23529ee0ee827b2d688ba"
         },
         "authoritativeDllSymbols": [
           "TINationState.ControlPointPriorityBonuses",
@@ -73,9 +81,9 @@
             "file": "TIControlPoint.cs"
           }
         ],
-        "reviewedSummary": "Current total bonus includes faction cached priority bonuses, CP diversity and national bonus; a disabled CP suppresses only a nonnegative total. Parser matches that suppression.",
-        "blocker": "Current CP diversity contribution is gated by national plus owner cached bonus being greater than -1. Parser _diversity_bonus omits that gate. Current TIFactionState.SumPriorityBonuses and cache scheduler closure were not reviewed.",
-        "scopeLimitations": "A positive-bonus fixture may agree numerically; that does not justify rebinding this broad rule.",
+        "reviewedSummary": "The source gates CP diversity on the sum of the national and cached owner bonus being greater than -1. The parser now applies that eligibility gate before adding the diversity contribution.",
+        "blocker": "TIFactionState.SumPriorityBonuses, bonus-cache scheduling, downstream allocation closure and exact floating-point ordering remain unclosed.",
+        "scopeLimitations": "This is a local bonus-eligibility correction, not complete priority-bonus or allocation closure.",
         "currentBuildClosureEstablished": false
       },
       {
@@ -121,17 +129,20 @@
       },
       {
         "ruleId": "nation.periodic.derived-cache",
-        "status": "mismatch",
+        "status": "current-reviewed-scope-only",
         "parser": {
           "file": "tools/ti_parser_nation_projection.py",
           "symbols": [
-            "_refresh_rest_caches",
-            "_cohesion_dynamic_impact",
-            "_own_army_unrest_impact"
+            "_live_cohesion_rest",
+            "_live_unrest_rest",
+            "_cohesion_fixed_impact",
+            "_unrest_fixed_impact",
+            "_own_army_unrest_impact",
+            "_refresh_rest_caches"
           ],
-          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
-          "registryAuditStatus": "verified",
-          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          "registrySourceHash": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+          "registryAuditStatus": "partial",
+          "sourceSha256": "53f95f4378bded8b1b5ab8ff2cb93e0f214140734aa23529ee0ee827b2d688ba"
         },
         "authoritativeDllSymbols": [
           "TINationState.cohesionRestState",
@@ -152,9 +163,9 @@
             "file": "TINationState.cs"
           }
         ],
-        "reviewedSummary": "Current cohesion getter computes live impacts, democratic transform and clamp. Current unrest getter computes live cohesion, PCGDP, armies, xenoforming and hostile claims. Neither getter reads dailyCache.",
-        "blocker": "Parser schedules calibrated resting-state caches and reads fixed cohesion/unrest impacts. Current armyImpactOnUnrest includes allied standard armies, a home-base-IP/alien-army predicate and per-army effects on the cumulative value; parser _own_army_unrest_impact omits these. Historical registry DailyNationUpdate2 and NationPeriodicUpdate symbols are absent from inspected current TINationState. Current cache scheduler is unreviewed.",
-        "scopeLimitations": "Do not repair by substituting calibrated cache values for current live-source closure. Getter formulas alone do not establish clock scheduling.",
+        "reviewedSummary": "Live resting targets are reconstructed from source terms rather than inverted from clamped serialized caches. Allied eligible armies contribute with cumulative filtered effects; scalar effects with a nonmatching strValue are skipped.",
+        "blocker": "Complete rest-cache scheduling, all world/static-impact and public-opinion helper paths, exact raw-input visibility and downstream setter callbacks remain unclosed.",
+        "scopeLimitations": "Getter inputs and local formulas are covered; this does not certify scheduler timing or the full monthly state transition.",
         "currentBuildClosureEstablished": false
       },
       {
@@ -205,17 +216,16 @@
       },
       {
         "ruleId": "nation.priority.validity",
-        "status": "mismatch",
+        "status": "current-reviewed-scope-only",
         "parser": {
           "file": "tools/ti_parser_nation_projection.py",
           "symbols": [
             "_priority_valid",
-            "_effective_pips",
-            "_record_and_fix_control_point"
+            "_run_investment_transaction"
           ],
-          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
-          "registryAuditStatus": "verified",
-          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          "registrySourceHash": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+          "registryAuditStatus": "partial",
+          "sourceSha256": "53f95f4378bded8b1b5ab8ff2cb93e0f214140734aa23529ee0ee827b2d688ba"
         },
         "authoritativeDllSymbols": [
           "TINationState.ValidPriority",
@@ -236,9 +246,9 @@
             "file": "TIControlPoint.cs"
           }
         ],
-        "reviewedSummary": "Knowledge/Welfare are always valid in current DLL. Parser effective-pip checks evaluate only positive raw pips; completion checks evaluate validity after progress reaches threshold. DLL cached-weight revalidation checks all raw dictionary keys and allocation traverses enum priorities.",
-        "blocker": "Broad rule differs: current Environment has sustainability/decontamination predicates, Oppression requires military, Military requires capability and tech below cap, LaunchFacilities requires own/federation spaceflight, nuclear priorities require no-nukes policy false, Government at cap reads cached legitimize availability. Parser treats several as always valid or omits policy/cache inputs.",
-        "scopeLimitations": "Some unchosen zero-weight branches may not affect canonical arithmetic, but broad ID current-source binding remains unsupported; actual call/branch records must resolve bounded relevance.",
+        "reviewedSummary": "Shared priority validity now uses the reviewed capability, technology, policy, capacity and cached availability predicates. Missing required predicate inputs remain unknown and stop affected work before mutation.",
+        "blocker": "Full caller/revalidation closure, every cache-refresh transition and downstream setter callbacks remain unclosed.",
+        "scopeLimitations": "The review covers implemented predicate branches and missing-input behavior; it does not establish every validity call path or whole-rule closure.",
         "currentBuildClosureEstablished": false
       },
       {
@@ -274,16 +284,17 @@
       },
       {
         "ruleId": "nation.ip.base",
-        "status": "unresolved",
+        "status": "current-reviewed-scope-only",
         "parser": {
           "file": "tools/ti_parser_nation_projection.py",
           "symbols": [
+            "_occupation_factor",
             "_base_ip",
-            "_army_maintenance"
+            "_run_investment_transaction"
           ],
-          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
-          "registryAuditStatus": "verified",
-          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          "registrySourceHash": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+          "registryAuditStatus": "partial",
+          "sourceSha256": "53f95f4378bded8b1b5ab8ff2cb93e0f214140734aa23529ee0ee827b2d688ba"
         },
         "authoritativeDllSymbols": [
           "TINationState.SetBaseInvestmentPoints_month",
@@ -299,9 +310,9 @@
             "file": "TINationState.cs"
           }
         ],
-        "reviewedSummary": "Current base IP equals economyScore times adviser, occupation and unrest factors, minus army and navy maintenance, floored at zero. Parser matches this mathematical outer formula.",
-        "blocker": "Current occupation penalty is a live GDP-share-weighted highest-war-alliance occupation sum; parser retains occupation_factor. GDP-share mutations, advisor derivation, army maintenance predicates/effects and float ordering remain unclosed.",
-        "scopeLimitations": "Formula review only, particularly no proof that saved factor remains valid after regional mutation.",
+        "reviewedSummary": "Base IP uses live regional GDP weights and the clamped largest opposing-alliance occupation sum over the nation’s wars; the parser recomputes occupation instead of using a stale saved fraction.",
+        "blocker": "GDP-share mutations and the ModifyGDP/PossiblePriorityValidationChange callback, advisor derivation, army/navy maintenance predicates and effects, and floating-point ordering remain unclosed.",
+        "scopeLimitations": "The reviewed scope is the base-IP occupation input and outer formula. It does not certify every transitive GDP, advisor or maintenance path.",
         "currentBuildClosureEstablished": false
       },
       {
@@ -332,15 +343,16 @@
       },
       {
         "ruleId": "nation.periodic.cohesion",
-        "status": "mismatch",
+        "status": "current-reviewed-scope-only",
         "parser": {
           "file": "tools/ti_parser_nation_projection.py",
           "symbols": [
-            "_run_monthly_transaction"
+            "_run_monthly_transaction",
+            "_live_cohesion_rest"
           ],
-          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
-          "registryAuditStatus": "verified",
-          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          "registrySourceHash": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+          "registryAuditStatus": "partial",
+          "sourceSha256": "53f95f4378bded8b1b5ab8ff2cb93e0f214140734aa23529ee0ee827b2d688ba"
         },
         "authoritativeDllSymbols": [
           "TINationState.MonthlyNationUpdate",
@@ -366,22 +378,23 @@
             "file": "TINationState.cs"
           }
         ],
-        "reviewedSummary": "Current monthly order reconciles CPs, applies democracy paths, evaluates live cohesion rest, clamps decline speed based on inequality and moves cohesion via setter, then evaluates unrest.",
-        "blocker": "Parser _run_monthly_transaction uses previously cached state.cohesion_rest and skips current preceding democracy paths; current live getter is not a dailyCache read. Calibrated rest inputs do not close this mismatch.",
-        "scopeLimitations": "Outer movement speed formula matches; monthly state inputs and source order do not.",
+        "reviewedSummary": "In the supported monthly prefix, deterministic war/neighbor democracy work precedes movement toward the live cohesion target; decline speed uses the reviewed inequality cap.",
+        "blocker": "Low-cohesion stochastic democracy, surveillance abductions and other branches outside the supported prefix stop before unsupported mutation. Input visibility and setter/revalidation closure remain open.",
+        "scopeLimitations": "This is bounded monthly-prefix behavior, not full MonthlyNationUpdate equivalence.",
         "currentBuildClosureEstablished": false
       },
       {
         "ruleId": "nation.periodic.unrest",
-        "status": "mismatch",
+        "status": "current-reviewed-scope-only",
         "parser": {
           "file": "tools/ti_parser_nation_projection.py",
           "symbols": [
-            "_run_monthly_transaction"
+            "_run_monthly_transaction",
+            "_live_unrest_rest"
           ],
-          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
-          "registryAuditStatus": "verified",
-          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          "registrySourceHash": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+          "registryAuditStatus": "partial",
+          "sourceSha256": "53f95f4378bded8b1b5ab8ff2cb93e0f214140734aa23529ee0ee827b2d688ba"
         },
         "authoritativeDllSymbols": [
           "TINationState.MonthlyNationUpdate",
@@ -407,9 +420,9 @@
             "file": "TINationState.cs"
           }
         ],
-        "reviewedSummary": "Current unrest movement reads live unrest rest after cohesion setter; rapid increase applies when cohesion is zero and target is above current unrest. Setter clamps and may trigger Oppression revalidation.",
-        "blocker": "Parser reads state.unrest_rest from earlier cache, so the changed cohesion is not immediately reflected in target. Setter validity and army/effect dependencies remain unclosed.",
-        "scopeLimitations": "Movement cap branch matches, but current live target/downstream setter closure does not.",
+        "reviewedSummary": "The parser evaluates the live unrest target after applying the monthly cohesion mutation, matching the reviewed getter order for the supported prefix.",
+        "blocker": "Whole-method monthly branches, raw input visibility and AddToUnrest/Oppression setter and callback closure remain unclosed.",
+        "scopeLimitations": "Movement and local order are reviewed only for supported transitions; no whole-game monthly parity is claimed.",
         "currentBuildClosureEstablished": false
       },
       {
@@ -493,20 +506,25 @@
       },
       {
         "ruleId": "nation.population.monthly-growth",
-        "status": "unresolved",
+        "status": "current-reviewed-scope-only",
         "parser": {
           "file": "tools/ti_parser_nation_projection.py",
-          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81",
-          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
-          "registryAuditStatus": "verified"
+          "sourceSha256": "53f95f4378bded8b1b5ab8ff2cb93e0f214140734aa23529ee0ee827b2d688ba",
+          "registrySourceHash": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+          "registryAuditStatus": "partial",
+          "symbols": [
+            "_run_monthly_transaction",
+            "_annual_population_growth",
+            "_refresh_economy_score"
+          ]
         },
         "authoritativeDllSymbols": [
           "TIRegionState.GrowPopulationByMonth"
         ],
         "temporaryEvidenceReferences": [],
-        "reviewedSummary": "An actual executed rule or transitive dependency requires explicit current-build closure review. Existing registry evidence is preserved, not re-certified.",
-        "blocker": "Current source monthly conversion is known, but annual-growth dependency and monthly call ordering remain unclosed.",
-        "scopeLimitations": "No full current-build closure or visibility acceptance is claimed.",
+        "reviewedSummary": "The bounded mean-input loop updates each region population before reading live regional PCGDP, applies the current total-population GDP floor, clamps the negative-growth education update to [1, 255], refreshes economy score, and refreshes regional GDP output caches. Population-path coverage remains expected.",
+        "blocker": "Deterministic mean input is not equality with stochastic trajectories. Annual-growth input visibility, full MonthlyNationUpdate orchestration and the ModifyGDP/PossiblePriorityValidationChange callback closure remain unclosed.",
+        "scopeLimitations": "This records the local GrowPopulationByMonth ordering and bounded parser path only; it does not certify annual-growth dependencies or full monthly execution.",
         "currentBuildClosureEstablished": false
       },
       {
@@ -567,13 +585,37 @@
         "blocker": "Setter clamps match the inspected current source; current faction/effect modifiers and overflow/downstream closure have not been established.",
         "scopeLimitations": "No full current-build closure or visibility acceptance is claimed.",
         "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.periodic.control-point-types",
+        "status": "current-reviewed-scope-only",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_run_monthly_transaction",
+            "_refresh_control_point_types"
+          ],
+          "registrySourceHash": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+          "registryAuditStatus": "partial",
+          "sourceSha256": "53f95f4378bded8b1b5ab8ff2cb93e0f214140734aa23529ee0ee827b2d688ba"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.UpdateControlPointTypes",
+          "TIControlPoint.SetControlPointType"
+        ],
+        "temporaryEvidenceReferences": [],
+        "reviewedSummary": "After supported monthly movement and population updates, the parser applies the reviewed control-point type transitions through SetControlPointType. The type operation has exact execution coverage; dependent mean-path population metrics retain expected coverage.",
+        "blocker": "Monthly CP-count mutation remains unsupported and stops before execution. Full MonthlyNationUpdate scheduling, input closure and all downstream consumers are not established.",
+        "scopeLimitations": "This is the bounded CP-type transition only; exact local coverage does not imply full monthly or production-domain closure.",
+        "currentBuildClosureEstablished": false
       }
     ],
     "remainingClosureUnknowns": [
       "Current scheduler call closure and time boundaries, including absent historical cache method symbols.",
       "Current advisor mission lifecycle, faction effect expiration and cached faction bonus helper closure.",
-      "Monthly CP reconciliation, population growth and welfare inequality are reviewed by other workers; this supplement does not establish their closure.",
-      "Current full world/static-impact calibration, public-opinion helper closure, allied army/effect dependencies and region/federation GDP-share transitions.",
+      "Monthly CP-count reconciliation and welfare inequality remain outside these bounded corrections; expected monthly population growth does not establish full MonthlyNationUpdate closure.",
+      "Current full world/static-impact calibration, public-opinion helper closure, foreign/allied effect-stack scheduling, and region/federation GDP-share transitions.",
+      "The ModifyGDP/PossiblePriorityValidationChange callback and other downstream setter paths remain unclosed.",
       "Execution records absent for dependencies must remain missing evidence, not implied executions.",
       "Actual game behavior/visibility correctness, disabled-policy route acceptance and Companion acceptance remain independent unresolved gates."
     ]

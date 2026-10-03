@@ -13,8 +13,9 @@ catalog data, diagnostics, and tests.
 The packaged catalog baseline has been refreshed against DLL SHA-256
 `4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350`.
 This does not revalidate every historical mechanics rule. Each registry rule's
-`sourceHash` identifies the actual reviewed build; unchanged historical rules
-retain their old hash and are not certified for the refreshed build.
+`sourceHash` identifies the actual reviewed build. A bounded set of repaired
+rules now carries the current hash with partial status; unchanged historical
+rules retain their old hash and are not certified for the refreshed build.
 
 The current-build review covers `nation.priority.knowledge.complete` (revision
 2), `nation.priority.welfare.complete`, `nation.priority.welfare.colony-trigger`
@@ -39,21 +40,59 @@ rule has explicit current-build evidence. See [catalogs](catalogs.md) for the
 refreshed data baseline and [interoperability](fairplay_interoperability.md) for
 separate structural, authority and visibility acceptance.
 
-The subsequent bounded closure review found current-build mismatches and
-unclosed dependencies in monthly live rest getters, diversity gating and
-priority validity. No additional rules were rebound. See the [execution
-findings](projection_execution_evidence.json) for scoped method comparisons and
-[interoperability audit](fairplay_interoperability.md#bounded-execution-closure-and-current-build-findings)
-for the blocked approval decision. Historical `verified` metadata below is not
-current-build closure acceptance.
+## Current-build mechanics corrections
 
-Verified call order includes monthly nation work at month-day 1 00:00, daily investment at
-10:30, and the resting cohesion/unrest cache at 12:00. It also includes priority-enum
-completion traversal; persistent Economy fallback when a CP has no valid weight; live priority
-validity; Advisor conversion and rank decay; and recurring Advise lifecycle. Advise resolves
-automatically and moves at assignment. Mission-phase bookkeeping clears its persistent effect
-until the order-0 resolution segment reapplies it. Verified time conversions and compound
-literals remain in Python rather than becoming undocumented domain constants.
+The bounded review's local mismatches have scoped repairs against the explicitly
+measured current DLL. CP diversity is eligible only when national plus cached
+owner bonus exceeds `-1`; IP occupation recomputes regional GDP weights and
+sums the opposing alliance for each war, taking the clamped largest sum.
+Validity follows `ValidPriority`, including cached Government/Environment
+availability, military tech caps, federation spaceflight, no-nukes policy,
+complete anti-space defenses and regional STO capacity. Unavailable predicate
+inputs remain unknown rather than becoming guessed constants.
+
+Monthly democracy's deterministic war/neighbor work precedes live cohesion
+movement; unrest's live target is evaluated after cohesion changes. Live rest
+inputs use geographic distance, current population/history, rivals/wars,
+public/elite opinion, eligible own/allied armies with cumulative effects, and
+alien xenoforming. Scalar effects skip nonmatching `strValue` just as
+`SumEffectsModifiers` does. Serialized clamped caches no longer identify fixed
+residuals. Explicit Python scenario terms retain assumption provenance.
+
+Unsupported low-cohesion stochastic democracy and nonzero surveillance
+abductions stop before mutation. Missing source references stop explicitly.
+Verified work before a later stop remains the authoritative prefix. Monthly
+CP types use `SetControlPointType`; changed types affect downstream Religion,
+KnowledgeSector and FinancialSector consumers. Government/Unity legitimize
+branches use their cached availability and update it only at the modeled
+hostile-claim setter/cache boundary. The bounded monthly population loop applies
+mean-input population growth before reading live regional PCGDP, then applies
+the current total-population GDP floor, bounded education update, economy-score
+refresh and final regional GDP-cache refresh. This remains an expected-path
+repair; it does not close the whole `MonthlyNationUpdate` method or the
+downstream `ModifyGDP`/`PossiblePriorityValidationChange` callback closure.
+
+Changed rule contracts are recorded as **partial** current-build evidence,
+with implementation revisions incremented; this does not certify every
+transitive rule, world state transition or visibility predicate. The rule-index
+`verified` label is registry status, not blanket current-build acceptance;
+unchanged rules with historical source hashes remain historical. The new
+`nation.periodic.control-point-types` ID distinguishes type reconciliation from
+CP-count mutation. See [scoped findings](projection_execution_evidence.json)
+and [interoperability acceptance](fairplay_interoperability.md#bounded-execution-closure-and-current-build-findings).
+Parser/catalog/closure changes invalidate earlier acceptance evidence.
+
+
+The reviewed DLL call order includes monthly nation work at month-day 1 00:00,
+daily investment at 10:30, and the resting cohesion/unrest cache at 12:00. It
+also includes priority-enum completion traversal; persistent Economy fallback
+when a CP has no valid weight; live priority validity; Advisor conversion and
+rank decay; and recurring Advise lifecycle. Advise resolves automatically and
+moves at assignment. Mission-phase bookkeeping clears its persistent effect
+until the order-0 resolution segment reapplies it. These source observations do
+not imply every transition is modeled in the current projection. Verified time
+conversions and compound literals remain in Python rather than becoming
+undocumented domain constants.
 
 Coverage follows the executed path. Static rules have one registry coverage; conditional rules
 name a resolver and its closed set of outcomes. Each runtime execution records resolver,
@@ -64,16 +103,16 @@ outside the declared set is an error, not an implicit downgrade.
 
 | Rule ID | Audit | Coverage | Primary DLL symbol |
 | --- | --- | --- | --- |
-| `nation.ip.base` | verified | exact | `TINationState.SetBaseInvestmentPoints_month` |
+| `nation.ip.base` | partial | exact | `TINationState.SetBaseInvestmentPoints_month` |
 | `nation.ip.economy-score` | verified | exact | `TINationState.ModifyGDP` |
 | `nation.ip.control-point-allocation` | verified | exact | `TINationState.ControlPointWeightsTotalToPriorityIP` |
-| `nation.ip.priority-bonus` | verified | exact | `TINationState.ControlPointPriorityBonuses_Uncached` |
+| `nation.ip.priority-bonus` | partial | exact | `TINationState.ControlPointPriorityBonuses_Uncached` |
 | `nation.ip.control-point-default-economy` | verified | exact | `TIControlPoint.RecordAndFixControlPointValues` |
-| `nation.priority.validity` | verified | exact | `TINationState.ValidPriority` |
+| `nation.priority.validity` | partial | exact | `TINationState.ValidPriority` |
 | `nation.priority.completion-order` | verified | exact | `TINationState.ProcessPrioritySpending` |
 | `nation.priority.knowledge.complete` | verified | exact | `TINationState.OnKnowledgePriorityComplete` |
-| `nation.priority.government.complete` | verified | exact | `TINationState.OnGovernmentPriorityComplete` |
-| `nation.priority.government.legitimize` | verified | exact | `TINationState.GetNextRegionToLegitimizeClaim` |
+| `nation.priority.government.complete` | partial | exact | `TINationState.OnGovernmentPriorityComplete` |
+| `nation.priority.government.legitimize` | partial | exact | `TINationState.GetNextRegionToLegitimizeClaim` |
 | `nation.priority.economy.complete` | verified | exact | `TINationState.OnEconomyPriorityComplete` |
 | `nation.priority.economy.gdp` | verified | exact | `TINationState.economyPriorityPerCapitaGDPChange` |
 | `nation.priority.economy.inequality` | verified | exact | `TINationState.economyPriorityInequalityChange` |
@@ -81,11 +120,11 @@ outside the declared set is an error, not an implicit downgrade.
 | `nation.priority.economy.region-trigger` | verified | exact | `TINationState.OnEconomyPriorityComplete` |
 | `nation.priority.economy.region-transition` | verified | exact | `TIRegionState.SetCore*Region` |
 | `nation.priority.economy.downstream-cache` | verified | exact | `TINationState.ModifyGDP` |
-| `nation.priority.unity.complete` | verified | expected | `TINationState.OnUnityPriorityComplete` |
+| `nation.priority.unity.complete` | partial | expected | `TINationState.OnUnityPriorityComplete` |
 | `nation.priority.unity.public-opinion` | verified | conditional | `TINationState.PropagandaOnPop` |
 | `nation.priority.unity.cohesion` | verified | exact | `TINationState.unityPriorityCohesionChange` |
 | `nation.priority.unity.education` | verified | exact | `TINationState.unityPriorityEducationChange` |
-| `nation.priority.unity.legitimize` | verified | exact | `TINationState.OnLegitimizeClaimPriorityComplete` |
+| `nation.priority.unity.legitimize` | partial | exact | `TINationState.OnLegitimizeClaimPriorityComplete` |
 | `nation.cohesion.public-opinion` | verified | exact | `TINationState.publicOpinionImpactOnCohesion` |
 | `nation.priority.funding.complete` | verified | exact | `TINationState.OnFundingPriorityComplete` |
 | `nation.priority.welfare.complete` | verified | exact | `TINationState.OnWelfarePriorityComplete` |
@@ -101,20 +140,21 @@ outside the declared set is an error, not an implicit downgrade.
 | `nation.priority.build-navy.complete` | verified | exact | `TINationState.GetNextNavy`, `TIArmyState.AddNavy` |
 | `nation.priority.build-navy.market` | verified | conditional | `TIGlobalValuesState.ModifyMarketValuesForArmyPriority` |
 | `nation.asset.army.maintenance` | verified | exact | `TINationState.SetBaseInvestmentPoints_month` |
-| `nation.effect.context-expiration` | verified | exact | `TIFactionState.RemoveExpiredEffectContexts` |
+| `nation.effect.context-expiration` | partial | exact | `TIFactionState.RemoveExpiredEffectContexts` |
 | `nation.priority.validation-trigger` | verified | exact | `TINationState.PossiblePriorityValidationChange` |
 | `nation.periodic.region-cache` | verified | exact | `TINationState.CacheRegionValues` |
-| `nation.periodic.cohesion` | verified | exact | `TINationState.GetMonthlyCohesionMovement` |
-| `nation.periodic.unrest` | verified | exact | `TINationState.GetMonthlyUnrestMovement` |
-| `nation.periodic.derived-cache` | verified | exact | `TINationState.DailyNationUpdate2` |
+| `nation.periodic.cohesion` | partial | exact | `TINationState.GetMonthlyCohesionMovement` |
+| `nation.periodic.unrest` | partial | exact | `TINationState.GetMonthlyUnrestMovement` |
+| `nation.periodic.derived-cache` | partial | exact | `TINationState.cohesionRestState` and `TINationState.unrestRestState` |
 | `nation.periodic.control-points` | partial | conditional | `TINationState.UpdateControlPoints` |
+| `nation.periodic.control-point-types` | partial | exact | `TINationState.UpdateControlPointTypes` and `TIControlPoint.SetControlPointType` |
 | `nation.periodic.population` | verified | expected | `TIRegionState.GrowPopulationByMonth` |
 | `nation.population.annual-growth` | verified | exact | `TIRegionState.get_annualPopulationGrowth` |
-| `nation.population.monthly-growth` | verified | expected | `TIRegionState.GrowPopulationByMonth` |
+| `nation.population.monthly-growth` | partial | expected | `TIRegionState.GrowPopulationByMonth` |
 | `nation.advisor.attribute-source` | verified | exact | `TICouncilorState.AdvisingBonus` |
 | `nation.advisor.stacking` | verified | exact | `TINationState.GetAdvisingScore` |
 | `nation.advisor.mission-lifecycle` | verified | expected | `TIMissionPhaseState.StartofTurnBookkeeping` and `FinalizeCouncilorMissions.StaggerMissionResolutions` |
-| `nation.faction-contribution` | verified | exact | `TINationState.GetMonthlyResearchFromControlPoint` and peer contribution methods |
+| `nation.faction-contribution` | partial | exact | `TINationState.GetMonthlyResearchFromControlPoint` and peer contribution methods |
 
 Mission Control placement resolver `nation.priority.mission-control.placement.v1` returns
 `exact` for one candidate, `aggregateOnly` for multiple candidates equivalent across all
