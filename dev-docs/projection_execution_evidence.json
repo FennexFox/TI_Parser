@@ -1,0 +1,1398 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Developer evidence supplement for bounded projection execution closure; not an approval packet.",
+  "mechanics": {
+    "currentDllSha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+    "evidenceOrigin": "Explicit installed-DLL decompilation supplied by coordinator; temporary references are audit-only and not runtime dependencies.",
+    "status": "incomplete",
+    "scope": "Observed canonical A/B runtime closure plus explicitly labelled static/dependency review candidates; not production-domain approval.",
+    "registryRebindingsApplied": [],
+    "findings": [
+      {
+        "ruleId": "nation.ip.control-point-allocation",
+        "status": "current-reviewed-scope-only",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_run_investment_transaction"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.GetInvestmentFromControlPoint",
+          "TINationState.ControlPointWeightsTotalToPriorityIP",
+          "TINationState.DailyNationUpdate"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 3911,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 4270,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 9350,
+            "file": "TINationState.cs"
+          }
+        ],
+        "reviewedSummary": "Current source divides cached monthly base IP by CP count, multiplies live-valid pips over cached total weight, applies positive-share bonus, sums CP shares then multiplies by 12/365.2422. Parser uses the same mathematical allocation formula. Daily source caches regions before allocation and completes priorities afterward.",
+        "blocker": "Dependencies on current validity, cached bonuses, base IP and scheduling remain unclosed. Float operation ordering and literal precision were not proven bit-identical.",
+        "scopeLimitations": "This review establishes the inspected arithmetic and local daily order, not entire allocation closure or approval.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.ip.priority-bonus",
+        "status": "mismatch",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_diversity_bonus",
+            "_national_priority_bonus",
+            "_run_investment_transaction",
+            "_cache_faction_priority_bonuses"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.ControlPointPriorityBonuses",
+          "TIControlPoint.RecordAndFixControlPointValues"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 4252,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 597,
+            "file": "TIControlPoint.cs"
+          }
+        ],
+        "reviewedSummary": "Current total bonus includes faction cached priority bonuses, CP diversity and national bonus; a disabled CP suppresses only a nonnegative total. Parser matches that suppression.",
+        "blocker": "Current CP diversity contribution is gated by national plus owner cached bonus being greater than -1. Parser _diversity_bonus omits that gate. Current TIFactionState.SumPriorityBonuses and cache scheduler closure were not reviewed.",
+        "scopeLimitations": "A positive-bonus fixture may agree numerically; that does not justify rebinding this broad rule.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.periodic.region-cache",
+        "status": "current-reviewed-scope-only",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_refresh_region_cache"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.CacheRegionValues",
+          "TINationState.CandidateCoreEconomicRegions",
+          "TINationState.CandidateCoreMiningRegions",
+          "TINationState.CandidateCoreOilRegions"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 3577,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 5339,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 5371,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 5399,
+            "file": "TINationState.cs"
+          }
+        ],
+        "reviewedSummary": "Inspected current resource/oil/core counts exclude fully occupied regions. Core candidates exclude colony and nuclear damage and require GDP share above 500 billion; mining/oil candidates exclude core/resource and nuclear damage; policy/end-of-oil gates match parser.",
+        "blocker": "Current CacheRegionValues refreshes federation ECO bonus and additional decolonize/decontaminate/legitimize booleans. Parser retains saved federation_economy_bonus and does not refresh all those booleans in this function. GDP-share helper and federation ECO closure remain pending.",
+        "scopeLimitations": "Reviewed counts/candidate subset only. No claim that every current CacheRegionValues downstream dependency is reconstructed.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.periodic.derived-cache",
+        "status": "mismatch",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_refresh_rest_caches",
+            "_cohesion_dynamic_impact",
+            "_own_army_unrest_impact"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.cohesionRestState",
+          "TINationState.unrestRestState",
+          "TINationState.armyImpactOnUnrest"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 965,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 1120,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 1088,
+            "file": "TINationState.cs"
+          }
+        ],
+        "reviewedSummary": "Current cohesion getter computes live impacts, democratic transform and clamp. Current unrest getter computes live cohesion, PCGDP, armies, xenoforming and hostile claims. Neither getter reads dailyCache.",
+        "blocker": "Parser schedules calibrated resting-state caches and reads fixed cohesion/unrest impacts. Current armyImpactOnUnrest includes allied standard armies, a home-base-IP/alien-army predicate and per-army effects on the cumulative value; parser _own_army_unrest_impact omits these. Historical registry DailyNationUpdate2 and NationPeriodicUpdate symbols are absent from inspected current TINationState. Current cache scheduler is unreviewed.",
+        "scopeLimitations": "Do not repair by substituting calibrated cache values for current live-source closure. Getter formulas alone do not establish clock scheduling.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.cohesion.public-opinion",
+        "status": "unresolved",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_public_opinion_cohesion_impact"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.publicEliteDivideImpactOnCohesion",
+          "TINationState.publicOpinionImpactOnCohesion",
+          "TINationState.GetMeanPublicOpinionVector",
+          "TINationState.GetMeanEliteVector",
+          "TINationState.PublicOpinionToMaxIdeologicalAntipathyRatio"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 900,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 902,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 2430,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 2456,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 2466,
+            "file": "TINationState.cs"
+          }
+        ],
+        "reviewedSummary": "Current outer getters use public/elite vector distance and ideological-antipathy ratio with configured multipliers. Parser implements vector means and dispersion.",
+        "blocker": "Vector helper bodies, ideology membership, active-human filtering, maximum-antipathy dependency and owner/public input materialization need complete current-source review.",
+        "scopeLimitations": "Only outer current formulas inspected; no complete helper-closure equivalence claimed.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.priority.validity",
+        "status": "mismatch",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_priority_valid",
+            "_effective_pips",
+            "_record_and_fix_control_point"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.ValidPriority",
+          "TIControlPoint.GetControlPointPriority",
+          "TIControlPoint.RecordAndFixControlPointValues"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 4155,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 576,
+            "file": "TIControlPoint.cs"
+          },
+          {
+            "line": 597,
+            "file": "TIControlPoint.cs"
+          }
+        ],
+        "reviewedSummary": "Knowledge/Welfare are always valid in current DLL. Parser effective-pip checks evaluate only positive raw pips; completion checks evaluate validity after progress reaches threshold. DLL cached-weight revalidation checks all raw dictionary keys and allocation traverses enum priorities.",
+        "blocker": "Broad rule differs: current Environment has sustainability/decontamination predicates, Oppression requires military, Military requires capability and tech below cap, LaunchFacilities requires own/federation spaceflight, nuclear priorities require no-nukes policy false, Government at cap reads cached legitimize availability. Parser treats several as always valid or omits policy/cache inputs.",
+        "scopeLimitations": "Some unchosen zero-weight branches may not affect canonical arithmetic, but broad ID current-source binding remains unsupported; actual call/branch records must resolve bounded relevance.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.priority.completion-order",
+        "status": "current-reviewed-scope-only",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_run_investment_transaction"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.ProcessPrioritySpending",
+          "PriorityType"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 4575,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 1,
+            "file": "PriorityType.cs"
+          }
+        ],
+        "reviewedSummary": "Current traversal follows enum order, loops guard/handler/consume, recomputes threshold after completion and defers became-invalid validation until full traversal. Parser follows equivalent order for supported constant-cost priorities.",
+        "blocker": "Validity dependencies remain mismatched; current dynamically recomputed costs are not fully implemented across all priority types. Parser epsilon and arithmetic equivalence are unreviewed.",
+        "scopeLimitations": "Traversal contract reviewed only. Root chose no rebind because complete rule/dependency meaning is not proven.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.ip.base",
+        "status": "unresolved",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_base_ip",
+            "_army_maintenance"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.SetBaseInvestmentPoints_month",
+          "TINationState.investmentPoints_occupationPenalty_frac"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 4086,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 1644,
+            "file": "TINationState.cs"
+          }
+        ],
+        "reviewedSummary": "Current base IP equals economyScore times adviser, occupation and unrest factors, minus army and navy maintenance, floored at zero. Parser matches this mathematical outer formula.",
+        "blocker": "Current occupation penalty is a live GDP-share-weighted highest-war-alliance occupation sum; parser retains occupation_factor. GDP-share mutations, advisor derivation, army maintenance predicates/effects and float ordering remain unclosed.",
+        "scopeLimitations": "Formula review only, particularly no proof that saved factor remains valid after regional mutation.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.ip.economy-score",
+        "status": "current-reviewed-scope-only",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_refresh_economy_score"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.ModifyGDP"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 3011,
+            "file": "TINationState.cs"
+          }
+        ],
+        "reviewedSummary": "Current ModifyGDP updates economyScore with GDP in billions to controlPointIPScaling times controlPointIPFactor, matching parser outer score formula.",
+        "blocker": "Current setter also floors GDP, invalidates research and may revalidate MC/Funding priorities; those caller/downstream paths require closure. Historical registry SetEconomyScore symbol is absent in inspected current class. Float cast ordering is unreviewed.",
+        "scopeLimitations": "Score formula only, not complete ModifyGDP setter equivalence.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.periodic.cohesion",
+        "status": "mismatch",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_run_monthly_transaction"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.MonthlyNationUpdate",
+          "TINationState.GetMonthlyCohesionMovement",
+          "TINationState.cohesionRestState",
+          "TINationState.AddToCohesion"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 9573,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 3429,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 965,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 3354,
+            "file": "TINationState.cs"
+          }
+        ],
+        "reviewedSummary": "Current monthly order reconciles CPs, applies democracy paths, evaluates live cohesion rest, clamps decline speed based on inequality and moves cohesion via setter, then evaluates unrest.",
+        "blocker": "Parser _run_monthly_transaction uses previously cached state.cohesion_rest and skips current preceding democracy paths; current live getter is not a dailyCache read. Calibrated rest inputs do not close this mismatch.",
+        "scopeLimitations": "Outer movement speed formula matches; monthly state inputs and source order do not.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.periodic.unrest",
+        "status": "mismatch",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "symbols": [
+            "_run_monthly_transaction"
+          ],
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.MonthlyNationUpdate",
+          "TINationState.GetMonthlyUnrestMovement",
+          "TINationState.unrestRestState",
+          "TINationState.AddToUnrest"
+        ],
+        "temporaryEvidenceReferences": [
+          {
+            "line": 9643,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 3491,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 1120,
+            "file": "TINationState.cs"
+          },
+          {
+            "line": 3449,
+            "file": "TINationState.cs"
+          }
+        ],
+        "reviewedSummary": "Current unrest movement reads live unrest rest after cohesion setter; rapid increase applies when cohesion is zero and target is above current unrest. Setter clamps and may trigger Oppression revalidation.",
+        "blocker": "Parser reads state.unrest_rest from earlier cache, so the changed cohesion is not immediately reflected in target. Setter validity and army/effect dependencies remain unclosed.",
+        "scopeLimitations": "Movement cap branch matches, but current live target/downstream setter closure does not.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.advisor.mission-lifecycle",
+        "status": "unresolved",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81",
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified"
+        },
+        "authoritativeDllSymbols": [
+          "TIMissionPhaseState.StartofTurnBookkeeping",
+          "FinalizeCouncilorMissions.StaggerMissionResolutions",
+          "AssignCouncilorToMission.Execute",
+          "TIMissionResolution_Automatic.GetMissionOutcome"
+        ],
+        "temporaryEvidenceReferences": [],
+        "reviewedSummary": "An actual executed rule or transitive dependency requires explicit current-build closure review. Existing registry evidence is preserved, not re-certified.",
+        "blocker": "Empty advisors still executes mission schedule/lifecycle bookkeeping; actual game mission-phase scheduling and source preparation closure are not established.",
+        "scopeLimitations": "No full current-build closure or visibility acceptance is claimed.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.effect.context-expiration",
+        "status": "unresolved",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81",
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified"
+        },
+        "authoritativeDllSymbols": [
+          "FactionPeriodicUpdate.OnMonthlyUpdate",
+          "FactionPeriodicUpdate.OnMidMonthlyUpdate",
+          "TIEffectsState.GlobalCheckForRemoveEffects"
+        ],
+        "temporaryEvidenceReferences": [],
+        "reviewedSummary": "An actual executed rule or transitive dependency requires explicit current-build closure review. Existing registry evidence is preserved, not re-certified.",
+        "blocker": "Per-faction effect preparation and expiry are executed; game effect-stack scheduling and foreign-faction visibility are not closed.",
+        "scopeLimitations": "No full current-build closure or visibility acceptance is claimed.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.periodic.control-points",
+        "status": "unresolved",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81",
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "partial"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.UpdateControlPoints",
+          "TINationState.MonthlyNationUpdate"
+        ],
+        "temporaryEvidenceReferences": [],
+        "reviewedSummary": "An actual executed rule or transitive dependency requires explicit current-build closure review. Existing registry evidence is preserved, not re-certified.",
+        "blocker": "The observed no-count-change prefix does not establish current DLL reconciliation/candidate/update-type semantics for other states.",
+        "scopeLimitations": "No full current-build closure or visibility acceptance is claimed.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.population.annual-growth",
+        "status": "unresolved",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81",
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified"
+        },
+        "authoritativeDllSymbols": [
+          "TIRegionState.get_annualPopulationGrowth",
+          "GameControl.get_CampaignDurationYearsExact"
+        ],
+        "temporaryEvidenceReferences": [],
+        "reviewedSummary": "An actual executed rule or transitive dependency requires explicit current-build closure review. Existing registry evidence is preserved, not re-certified.",
+        "blocker": "Current regional formula consumes exact xenoforming and saved growth modifier. Source-input/precision and effect/world closure are unresolved.",
+        "scopeLimitations": "No full current-build closure or visibility acceptance is claimed.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.population.monthly-growth",
+        "status": "unresolved",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81",
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified"
+        },
+        "authoritativeDllSymbols": [
+          "TIRegionState.GrowPopulationByMonth"
+        ],
+        "temporaryEvidenceReferences": [],
+        "reviewedSummary": "An actual executed rule or transitive dependency requires explicit current-build closure review. Existing registry evidence is preserved, not re-certified.",
+        "blocker": "Current source monthly conversion is known, but annual-growth dependency and monthly call ordering remain unclosed.",
+        "scopeLimitations": "No full current-build closure or visibility acceptance is claimed.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.priority.knowledge.complete",
+        "status": "unresolved",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81",
+          "registrySourceHash": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+          "registryAuditStatus": "verified"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.OnKnowledgePriorityComplete",
+          "TINationState.knowledgePriorityEducationChange",
+          "TINationState.knowledgePriorityCohesionChange",
+          "TINationState.AddToEducation",
+          "TINationState.AddToCohesion"
+        ],
+        "temporaryEvidenceReferences": [],
+        "reviewedSummary": "An actual executed rule or transitive dependency requires explicit current-build closure review. Existing registry evidence is preserved, not re-certified.",
+        "blocker": "Direct completion was previously re-audited on this DLL; preparation, population scaling and broader execution dependencies remain unclosed.",
+        "scopeLimitations": "No full current-build closure or visibility acceptance is claimed.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.priority.welfare.complete",
+        "status": "unresolved",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81",
+          "registrySourceHash": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+          "registryAuditStatus": "verified"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.OnWelfarePriorityComplete"
+        ],
+        "temporaryEvidenceReferences": [],
+        "reviewedSummary": "An actual executed rule or transitive dependency requires explicit current-build closure review. Existing registry evidence is preserved, not re-certified.",
+        "blocker": "Direct coordinator was previously re-audited on this DLL; current inequality/effect dependency closure is not established.",
+        "scopeLimitations": "No full current-build closure or visibility acceptance is claimed.",
+        "currentBuildClosureEstablished": false
+      },
+      {
+        "ruleId": "nation.priority.welfare.inequality",
+        "status": "unresolved",
+        "parser": {
+          "file": "tools/ti_parser_nation_projection.py",
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81",
+          "registrySourceHash": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5",
+          "registryAuditStatus": "verified"
+        },
+        "authoritativeDllSymbols": [
+          "TINationState.OnWelfarePriorityComplete",
+          "TINationState.welfarePriorityInequalityChange"
+        ],
+        "temporaryEvidenceReferences": [],
+        "reviewedSummary": "An actual executed rule or transitive dependency requires explicit current-build closure review. Existing registry evidence is preserved, not re-certified.",
+        "blocker": "Setter clamps match the inspected current source; current faction/effect modifiers and overflow/downstream closure have not been established.",
+        "scopeLimitations": "No full current-build closure or visibility acceptance is claimed.",
+        "currentBuildClosureEstablished": false
+      }
+    ],
+    "remainingClosureUnknowns": [
+      "Current scheduler call closure and time boundaries, including absent historical cache method symbols.",
+      "Current advisor mission lifecycle, faction effect expiration and cached faction bonus helper closure.",
+      "Monthly CP reconciliation, population growth and welfare inequality are reviewed by other workers; this supplement does not establish their closure.",
+      "Current full world/static-impact calibration, public-opinion helper closure, allied army/effect dependencies and region/federation GDP-share transitions.",
+      "Execution records absent for dependencies must remain missing evidence, not implied executions.",
+      "Actual game behavior/visibility correctness, disabled-policy route acceptance and Companion acceptance remain independent unresolved gates."
+    ]
+  },
+  "visibilityFindings": {
+    "status": "incomplete",
+    "currentDllSha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+    "purpose": "Supplemental review findings, not an approval packet and not exhaustive inventory acceptance.",
+    "scope": {
+      "scenario": "ModernScenario",
+      "fixtureDomain": [
+        "A",
+        "B"
+      ],
+      "controlPoints": 6,
+      "ownership": "Fully player-owned target fixture; source-specific UI proof is still required.",
+      "days": 180,
+      "checkpoints": [
+        0,
+        180
+      ],
+      "advisors": [],
+      "priorityRatios": [
+        {
+          "Knowledge": 3,
+          "Welfare": 1
+        },
+        {
+          "Knowledge": 1,
+          "Welfare": 3
+        }
+      ]
+    },
+    "method": "Read-only parser inspection and explicitly supplied current DLL offline decompilation. Source patterns identify findings to reconcile with exact execution dependency IDs; they are not an assertion that every matching nested field was dynamically read.",
+    "acceptedVisibilityPacket": false,
+    "allDependenciesClassified": false,
+    "dynamicStaticReconciled": false,
+    "findings": [
+      {
+        "id": "xenoforming-level",
+        "sourcePatterns": [
+          "$.gamestates.TIRegionState[*].Value.xenoforming",
+          "$.gamestates.TIRegionXenoformingState[*].Value.xenoformingLevel"
+        ],
+        "consumer": "extract_nation_projection_state -> _annual_population_growth -> monthly population",
+        "derivedRole": "Annual growth subtracts xenoforming_level / 200; changed population affects GDP per capita, IP, and research.",
+        "classification": "intel-gated-condition-unproved",
+        "classificationScope": "Exact raw regional level; nation ownership supplies no intel bypass.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              645,
+              654,
+              709
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_nation_projection.py",
+            "symbol": "_annual_population_growth",
+            "lines": [
+              2737,
+              2772
+            ],
+            "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          },
+          {
+            "path": "tools/ti_parser_nation_projection.py",
+            "symbol": "_run_monthly_transaction",
+            "lines": [
+              2851,
+              2867
+            ],
+            "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "TIRegionXenoformingState.cs",
+            "symbol": "TIRegionXenoformingState.VisibleToFaction",
+            "lines": [
+              274,
+              285
+            ],
+            "observation": "Below stage3, positive levels require faction.SufficientIntel; zero returns false. Stage3 is visible.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "eb53ffdc0db8c4854d5a6c2f16468c60d0601018625268ab4908b26c8b770b53"
+          },
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "TIRegionState.cs",
+            "symbol": "TIRegionState.annualPopulationGrowth",
+            "lines": [
+              369,
+              374
+            ],
+            "observation": "Formula consumes exact xenoformingLevel.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "24b74977e81674bb78288daa6e0b0595f6647d89a31d95e082af9b8fe3f06b93"
+          },
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "NationInfoController.cs",
+            "symbol": "NationInfoController.BuildPopulationTooltip",
+            "lines": [
+              1944,
+              1951
+            ],
+            "observation": "UI displays aggregate annual rate formatted P2, not raw constituent levels.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035"
+          }
+        ],
+        "blocking": true,
+        "blockingReason": "No reviewed evidence establishes requested faction intel or exact raw-level visibility; fixture zero does not prove permitted access to the saved absence.",
+        "limitations": [
+          "Visibility of the entity does not itself prove exact level disclosure. No blanket hidden classification across all levels/factions."
+        ]
+      },
+      {
+        "id": "annual-population-modifier",
+        "sourcePatterns": [
+          "$.gamestates.TIRegionState[*].Value.annualPopGrowthModifier"
+        ],
+        "consumer": "extract_nation_projection_state -> _annual_population_growth",
+        "derivedRole": "Saved regional modifier contributes with campaign-duration regression factor.",
+        "classification": "unresolved-required",
+        "classificationScope": "Exact regional modifier in bounded monthly-growth path.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              706
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_nation_projection.py",
+            "symbol": "_annual_population_growth",
+            "lines": [
+              2735,
+              2769,
+              2771
+            ],
+            "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "TIRegionState.cs",
+            "symbol": "TIRegionState.annualPopulationGrowth",
+            "lines": [
+              369,
+              374
+            ],
+            "observation": "Formula consumes annualPopGrowthModifier with regression factor.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "24b74977e81674bb78288daa6e0b0595f6647d89a31d95e082af9b8fe3f06b93"
+          },
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "NationInfoController.cs",
+            "symbol": "NationInfoController.BuildPopulationTooltip",
+            "lines": [
+              1944,
+              1951
+            ],
+            "observation": "Only aggregate annual population rate is exposed here.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035"
+          }
+        ],
+        "blocking": true,
+        "blockingReason": "No inspected nation/region UI getter exposes constituent saved modifier; aggregate visibility is insufficient.",
+        "limitations": [
+          "Negative UI search limited to NationInfoController, RegionListItemController, and PriorityListItemController; absence is unresolved, not a universal nonvisibility proof."
+        ]
+      },
+      {
+        "id": "owned-control-point-pips",
+        "sourcePatterns": [
+          "$.gamestates.TIControlPointState[*].Value.controlPointPriorities.Knowledge",
+          "$.gamestates.TIControlPointState[*].Value.controlPointPriorities.Welfare"
+        ],
+        "consumer": "extract_nation_projection_state -> plan weights/control-point allocation",
+        "derivedRole": "Discrete per-CP pips seed plan inputs and weighting.",
+        "classification": "visible-discrete-input",
+        "classificationScope": "Positive Knowledge/Welfare pips on target player's owned CPs in bounded A/B fixtures only.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              595,
+              603
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "PriorityListItemController.cs",
+            "symbol": "PriorityListItemController.SetListItem",
+            "lines": [
+              274,
+              287
+            ],
+            "observation": "Each CP's GetControlPointPriority(...,checkValid:false) determines displayed sprite; active-player ownership enables editing.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "880619b4f1111f1849ec66410dd438360173fd156f8e23ae2d233c652e287322"
+          }
+        ],
+        "blocking": false,
+        "blockingReason": null,
+        "limitations": [
+          "Evidence does not classify other CP fields, inactive priorities, ownership identity, or arbitrary private faction data."
+        ]
+      },
+      {
+        "id": "priority-progress",
+        "sourcePatterns": [
+          "$.gamestates.TINationState[*].Value._accumulatedInvestmentPoints.Knowledge",
+          "$.gamestates.TINationState[*].Value._accumulatedInvestmentPoints.Welfare"
+        ],
+        "consumer": "extract_nation_projection_state -> priority completions",
+        "derivedRole": "Initial accumulated progress determines completion timing.",
+        "classification": "visible-formatted-aggregate-precision-unresolved",
+        "classificationScope": "Displayed Knowledge/Welfare progress only.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              847,
+              909
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "PriorityListItemController.cs",
+            "symbol": "PriorityListItemController.priorityAccumulationStr",
+            "lines": [
+              46,
+              48
+            ],
+            "observation": "Positive progress is FormatSmallNumber(...,2); nonpositive is '-'.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "880619b4f1111f1849ec66410dd438360173fd156f8e23ae2d233c652e287322"
+          },
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "PriorityListItemController.cs",
+            "symbol": "PriorityListItemController.SetListItem",
+            "lines": [
+              272
+            ],
+            "observation": "Accumulation string is rendered.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "880619b4f1111f1849ec66410dd438360173fd156f8e23ae2d233c652e287322"
+          }
+        ],
+        "blocking": true,
+        "blockingReason": "Exact raw numeric precision and arbitrary progress-map membership are not established by formatted UI.",
+        "limitations": [
+          "Canonical fixture empty progress map is a scenario input, not UI proof of all raw keys."
+        ]
+      },
+      {
+        "id": "national-stats",
+        "sourcePatterns": [
+          "$.gamestates.TINationState[*].Value.education",
+          "$.gamestates.TINationState[*].Value.inequality",
+          "$.gamestates.TINationState[*].Value.cohesion",
+          "$.gamestates.TINationState[*].Value.unrest",
+          "$.gamestates.TINationState[*].Value.democracy"
+        ],
+        "consumer": "extract_nation_projection_state -> priority completions/rest state/research",
+        "derivedRole": "National values drive Knowledge/Welfare effects and downstream calculations.",
+        "classification": "visible-formatted-statistics-precision-unresolved",
+        "classificationScope": "Displayed national statistics, not arbitrary saved float precision.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              897,
+              903
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "NationInfoController.cs",
+            "symbol": "NationInfoController national-stat text",
+            "lines": [
+              1239,
+              1246
+            ],
+            "observation": "Displays democracy, inequality, cohesion and education through descriptive formatters.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035"
+          },
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "NationInfoController.cs",
+            "symbol": "NationInfoController.BuildEducationTooltip",
+            "lines": [
+              1885,
+              1887
+            ],
+            "observation": "Education formatter requested with 3.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035"
+          },
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "NationInfoController.cs",
+            "symbol": "NationInfoController.BuildCohesionTooltip/BuildUnrestTooltip",
+            "lines": [
+              1895,
+              1931
+            ],
+            "observation": "Tooltips show current values, live rest values, and formatted breakdowns.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035"
+          }
+        ],
+        "blocking": true,
+        "blockingReason": "Formatted display does not establish permission for exact saved precision used by simulation.",
+        "limitations": [
+          "Precision permission could be specified separately; this review does not invent that policy."
+        ]
+      },
+      {
+        "id": "regional-population",
+        "sourcePatterns": [
+          "$.gamestates.TIRegionState[*].Value.populationInMillions"
+        ],
+        "consumer": "nation_population_millions / extract_nation_projection_state -> growth/IP/research",
+        "derivedRole": "Regional population supplies national total and scaling.",
+        "classification": "visible-formatted-statistic-precision-unresolved",
+        "classificationScope": "Displayed regional population amount.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              696
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "RegionListItemController.cs",
+            "symbol": "RegionListItemController.UpdateListItem",
+            "lines": [
+              43,
+              48
+            ],
+            "observation": "Displays populationInMillions.ToString('N2').",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "11932f39a50520188ef0fcdf11322169a874361c88e94ecebf7d8094be141df8"
+          },
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "NationInfoController.cs",
+            "symbol": "NationInfoController.BuildPopulationTooltip",
+            "lines": [
+              1944,
+              1951
+            ],
+            "observation": "National population is aggregate N1 and growth is P2.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035"
+          }
+        ],
+        "blocking": true,
+        "blockingReason": "Exact underlying regional float precision not proved by N2 text.",
+        "limitations": []
+      },
+      {
+        "id": "regional-statuses",
+        "sourcePatterns": [
+          "$.gamestates.TIRegionState[*].Value.colonyRegion",
+          "$.gamestates.TIRegionState[*].Value.coreEconomicRegion",
+          "$.gamestates.TIRegionState[*].Value.resourceRegion",
+          "$.gamestates.TIRegionState[*].Value.oilRegion",
+          "$.gamestates.TIRegionState[*].Value.nuclearDetonations"
+        ],
+        "consumer": "extract_nation_projection_state -> region weighting/growth/Welfare candidate branch",
+        "derivedRole": "Discrete statuses affect regional weights/candidate selection; nuclear count affects growth.",
+        "classification": "visible-conditional-discrete-status",
+        "classificationScope": "Positive displayed region statuses and positive nuclear count.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              663,
+              667,
+              710
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "NationInfoController.cs",
+            "symbol": "NationInfoController.BuildRegionDataTooltip",
+            "lines": [
+              1769,
+              1810
+            ],
+            "observation": "Renders core/resource/oil/colony status when set and nuclearDetonations count when positive.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035"
+          },
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "RegionListItemController.cs",
+            "symbol": "RegionListItemController.UpdateListItem",
+            "lines": [
+              51
+            ],
+            "observation": "Binds region data tooltip.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "11932f39a50520188ef0fcdf11322169a874361c88e94ecebf7d8094be141df8"
+          }
+        ],
+        "blocking": false,
+        "blockingReason": null,
+        "limitations": [
+          "Absence/zero is a UI branch observation, not independently proven here; permanentlyDecolonized is outside reviewed exposed fields."
+        ]
+      },
+      {
+        "id": "welfare-colony-counter",
+        "sourcePatterns": [
+          "$.gamestates.TIRegionState[*].Value.accumulatedDecolonizeTriggers"
+        ],
+        "consumer": "extract_nation_projection_state -> Welfare selected candidate branch",
+        "derivedRole": "Counter ranks colonies, increments, and triggers removal at1000; fixture no-colony branch does not consume counter after extraction.",
+        "classification": "selected-candidate-visible-other-reads-unresolved",
+        "classificationScope": "Only next colony's counter when canAccumulateDecolonizeTriggers; no blanket classification.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              721
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_nation_projection.py",
+            "symbol": "Welfare completion branch",
+            "lines": [
+              1786,
+              1796,
+              1802,
+              1818
+            ],
+            "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "PriorityListItemController.cs",
+            "symbol": "PriorityListItemController.priorityTipStr Welfare branch",
+            "lines": [
+              199,
+              205
+            ],
+            "observation": "Displays nextDecolonizeRegion.accumulatedDecolonizeTriggers /1000 under canAccumulateDecolonizeTriggers.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "880619b4f1111f1849ec66410dd438360173fd156f8e23ae2d233c652e287322"
+          },
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "TINationState.cs",
+            "symbol": "TINationState.OnWelfarePriorityComplete/GetNextDecolonizeRegion",
+            "lines": [
+              4718,
+              4731,
+              5434,
+              5449
+            ],
+            "observation": "Inequality first, then conditional candidate selection/order and threshold.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "ca4639e21e860662b78362912e97ccc050b0c88c753927e7b52baa73baa5dfca"
+          }
+        ],
+        "blocking": true,
+        "blockingReason": "Adapter still reads every region counter; nonselected/noncolony counter visibility is not established.",
+        "limitations": [
+          "No-colony fixture avoids executed counter mutation but does not remove preparation read obligation."
+        ]
+      },
+      {
+        "id": "pcgdp-history-tracker",
+        "sourcePatterns": [
+          "$.gamestates.TINationState[*].Value.tracker_PCGDP_ByQuarter"
+        ],
+        "consumer": "extract_nation_projection_state -> _cohesion_dynamic_impact",
+        "derivedRole": "Recent40-quarter maximum affects low-PCGDP cohesion term and calibrated residual.",
+        "classification": "unresolved-required-raw-history",
+        "classificationScope": "Serialized quarter-keyed tracker, not displayed derived effect.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              912
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_nation_projection.py",
+            "symbol": "_cohesion_dynamic_impact",
+            "lines": [
+              3039,
+              3041
+            ],
+            "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "TINationState.cs",
+            "symbol": "TINationState.perCapitaGDPImpactOnCohesion",
+            "lines": [
+              882,
+              890
+            ],
+            "observation": "Consumes tracker maximum of recent40 quarters.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "ca4639e21e860662b78362912e97ccc050b0c88c753927e7b52baa73baa5dfca"
+          },
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "TINationState.cs",
+            "symbol": "TINationState.CohesionRestStateDetail",
+            "lines": [
+              990,
+              992
+            ],
+            "observation": "Displays derived low-PCGDP impact, not full tracker.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "ca4639e21e860662b78362912e97ccc050b0c88c753927e7b52baa73baa5dfca"
+          }
+        ],
+        "blocking": true,
+        "blockingReason": "Raw tracker/maximum visibility not established by derived impact; empty fixture tracker is not authoritative valid game-state proof.",
+        "limitations": []
+      },
+      {
+        "id": "serialized-rest-caches",
+        "sourcePatterns": [
+          "$.gamestates.TINationState[*].Value.cohesionRestState_dailyCache",
+          "$.gamestates.TINationState[*].Value.unrestRestState_dailyCache"
+        ],
+        "consumer": "extract_nation_projection_state -> calibrate_rest_state_context -> _refresh_rest_caches",
+        "derivedRole": "Caches anchor held-fixed residuals; clamped/transform values cannot uniquely reconstruct external terms.",
+        "classification": "live-aggregate-visible-saved-cache-unresolved",
+        "classificationScope": "Live UI getter evidence only, not equality with serialized cache.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              901,
+              903
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_nation_projection.py",
+            "symbol": "calibrate_rest_state_context",
+            "lines": [
+              3166,
+              3201
+            ],
+            "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "NationInfoController.cs",
+            "symbol": "NationInfoController.BuildCohesionTooltip/BuildUnrestTooltip",
+            "lines": [
+              1899,
+              1924
+            ],
+            "observation": "Uses live cohesionRestState and unrestRestState, not dailyCache fields.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035"
+          }
+        ],
+        "blocking": true,
+        "blockingReason": "Saved-cache/live-getter equivalence not proved; parser chooses raw5 for transformed cached5 and fixed unrest10.5 at clamped endpoints.",
+        "limitations": [
+          "Held-fixed calibration is a parser/scenario approximation boundary, not a DLL visibility certification."
+        ]
+      },
+      {
+        "id": "councilor-preparation",
+        "sourcePatterns": [
+          "$.gamestates.TICouncilorState[*].Value",
+          "$.gamestates.TIFactionState[*].Value.councilors",
+          "$.gamestates.TIOrgState[*].Value"
+        ],
+        "consumer": "councilor_summary_maps -> projection_advisor_profiles; owner org/trait bonus preparation",
+        "derivedRole": "Builds profiles for all active councilors and owner bonuses before parsing empty advisors.",
+        "classification": "unresolved-incidental-preparation",
+        "classificationScope": "Executed preparation and static root expansion; not proof every nested field read in fixture.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "calculate_nation_projection",
+            "lines": [
+              973,
+              974,
+              981
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "projection_advisor_profiles",
+            "lines": [
+              134,
+              159
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "faction_priority_bonuses_for_projection",
+            "lines": [
+              69,
+              94
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          }
+        ],
+        "dllEvidence": [],
+        "blocking": true,
+        "blockingReason": "No reviewed councilor/org UI/intel closure; foreign councilors are scanned before roster filtering; empty advisors does not authorize reads.",
+        "limitations": [
+          "Canonical fixture has empty councilor/org roots. Do not label absent row values dynamically read."
+        ]
+      },
+      {
+        "id": "mission-preparation",
+        "sourcePatterns": [
+          "$.gamestates.TITimeEvent[*].Value",
+          "$.gamestates.TICouncilorState[*].Value.activeMission"
+        ],
+        "consumer": "projection_advisor_mission_schedule / extract_nation_projection_state",
+        "derivedRole": "Saved cadence and assignments prepared before empty-advisor execution.",
+        "classification": "unresolved-incidental-preparation",
+        "classificationScope": "Mission event and assignment inputs reached by adapter.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "projection_advisor_mission_schedule",
+            "lines": [
+              195,
+              296
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "extract_nation_projection_state",
+            "lines": [
+              795,
+              811
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "calculate_nation_projection",
+            "lines": [
+              990
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          }
+        ],
+        "dllEvidence": [],
+        "blocking": true,
+        "blockingReason": "No current-build UI visibility evidence for saved event/cadence/internal mission state.",
+        "limitations": []
+      },
+      {
+        "id": "faction-effects",
+        "sourcePatterns": [
+          "$.gamestates.TIEffectsState[*].Value.factionEffectsNames",
+          "$.gamestates.TIEffectsState[*].Value.factionEffectExpirations"
+        ],
+        "consumer": "faction_effect_contexts / faction_effect_expirations_for_projection -> context expiration/priority bonuses",
+        "derivedRole": "All faction contexts/expirations prepared; selected effects can alter Welfare/priority bonus values.",
+        "classification": "unresolved-required-and-preparation",
+        "classificationScope": "Per-faction effect names/expiration times; visible bonus aggregate is narrower.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_core.py",
+            "symbol": "faction_effect_contexts",
+            "lines": [
+              844,
+              860
+            ],
+            "sourceSha256": "711e15617bf3a1c019fd0450555c0961adfa4734865570f8549803d5e13cb246"
+          },
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "faction_effect_expirations_for_projection",
+            "lines": [
+              98,
+              124
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "calculate_nation_projection",
+            "lines": [
+              1034,
+              1076
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          }
+        ],
+        "dllEvidence": [
+          {
+            "type": "offline-current-dll-decompile",
+            "file": "PriorityListItemController.cs",
+            "symbol": "PriorityListItemController.priorityTipStr",
+            "lines": [
+              231,
+              235
+            ],
+            "observation": "Displays aggregate SumPriorityBonuses, not all raw faction effect lists/expirations.",
+            "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+            "decompiledSourceSha256": "880619b4f1111f1849ec66410dd438360173fd156f8e23ae2d233c652e287322"
+          }
+        ],
+        "blocking": true,
+        "blockingReason": "Aggregate bonus visibility does not establish raw effect or foreign-faction expiration permission.",
+        "limitations": []
+      },
+      {
+        "id": "topbar-preparation",
+        "sourcePatterns": [
+          "$.gamestates.TIFactionState[*].Value.resources",
+          "$.gamestates.TIFactionState[*].Value.baseIncomes_year",
+          "$.gamestates.TIFactionState[*].Value.habitats",
+          "$.gamestates.TIFactionState[*].Value.fleets",
+          "$.gamestates.TIGlobalResearchState[*].Value"
+        ],
+        "consumer": "calculate_topbar -> observedTotalAtStart",
+        "derivedRole": "Whole-faction start context emitted; declared excluded from conditions/comparison/future projection.",
+        "classification": "unresolved-incidental-preparation",
+        "classificationScope": "Source root checklist, not exhaustive field inventory nor blanket hidden classification.",
+        "parserSources": [
+          {
+            "path": "tools/ti_parser_projection_adapter.py",
+            "symbol": "calculate_nation_projection",
+            "lines": [
+              1121,
+              1131
+            ],
+            "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+          },
+          {
+            "path": "tools/ti_parser_topbar.py",
+            "symbol": "calculate_topbar",
+            "lines": [
+              709
+            ],
+            "sourceSha256": "2ad2fd5d96c1a84d0936b23b1dc108c2a19110c06a4ec162389175c0d758250a"
+          }
+        ],
+        "dllEvidence": [],
+        "blocking": true,
+        "blockingReason": "Raw income/research/hab/fleet preparation still needs source-specific proof; output-only scope does not erase prior reads.",
+        "limitations": []
+      }
+    ],
+    "limitations": [
+      "Temporary decompilation line references are locators for this reviewed source hash; reproduce from named DLL types. Normal runtime does not read these files.",
+      "Negative UI searches were limited to inspected types; unresolved means absence of proof, not proof of universal nonvisibility.",
+      "A visible derived aggregate cannot establish visibility of its exact raw inputs, saved precision, private constituent fields, or serialized caches.",
+      "No mechanics registry rebindings, runtime changes, policy activation, or ownership-based blanket visibility approval were made.",
+      "Broad full-method mechanics correctness cannot be inferred from bounded projections. Current MonthlyNationUpdate includes neighbor-democracy/wars, stochastic low-cohesion democracy, and abductions outside the parser's reviewed monthly subset."
+    ]
+  },
+  "decompiler": {
+    "tool": "ilspycmd",
+    "version": "9.1.0.7988",
+    "inputs": "Explicit Assembly-CSharp.dll and referenced game assemblies; output kept outside repository."
+  },
+  "parserSourceHashAlgorithm": "sha256-utf8-lf"
+}

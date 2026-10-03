@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import audit_projection_reads as audit
-from projection_audit_dependencies import reconcile, source_inventory
+from projection_audit_dependencies import execution_closure, reconcile, source_inventory
 from collections import Counter
 from ti_parser_catalogs import RuntimeCatalogs
 
@@ -151,7 +151,8 @@ def test_audit_runs_both_180_day_trials_with_real_catalogs_and_exact_trace_parit
     assert report["structuralStatus"]["gates"]["zeroRawContainerMutations"] is True
     assert {read["stage"] for read in report["dynamicReads"]["reads"]} == {
         "adapter-preparation",
-        "projection-execution-output",
+        "projection-calculation",
+        "projection-output",
     }
     assert all(read["classification"] == "unresolved" for read in report["dynamicReads"]["reads"])
     assert any(read["container"].startswith("catalog-") for read in report["dynamicReads"]["reads"])
@@ -183,6 +184,117 @@ def test_audit_runs_both_180_day_trials_with_real_catalogs_and_exact_trace_parit
     assert reconciliation["mappedDynamicReadCount"] > 0
     assert reconciliation["unresolvedDynamicReadCount"] > 0
     assert reconciliation["complete"] is False
+    assert {row["stage"] for row in report["preflightReads"]["reads"]} == {"target-resolution-preflight"}
+    closure = report["executionClosure"]
+    assert closure["complete"] is False
+    assert report["structuralStatus"]["gates"]["executionClosureComplete"] is False
+    assert binding["executionClosureFingerprint"] == closure["fingerprint"]
+    assert binding["requiredDomainPredicates"] == closure["requiredDomainPredicates"]
+    assert set(report["trialReads"]) == {name for name, _k, _w in audit.TRIALS}
+    assert all(report["trialReads"][name]["reads"] for name in report["trialReads"])
+    for name, trial in closure["trials"].items():
+        assert trial["authoritativeExecutionResult"]["status"] == report["comparison"]["baselineVersusTraced"][name]["baselineStatus"]
+        assert trial["authoritativeExecutionResult"]["runtimeStop"] is None
+        assert "nation.priority.knowledge.complete" in trial["executedRuleIds"]
+        assert "nation.priority.welfare.complete" in trial["executedRuleIds"]
+        assert trial["executionRecordCount"] > len(trial["executedRuleIds"])
+        assert trial["blockers"]
+
+
+def _closure_source(*edges, references=()):
+    return {"registeredLiteralEdges": [{"from": p, "to": c} for p, c in edges],
+            "ruleReferences": list(references), "sourceFileSha256": {}}
+
+
+def test_execution_closure_preserves_transitive_edges_and_blocks_unknown_rules_and_missing_records():
+    result = execution_closure(
+        [{"ruleId": "a", "dependencies": ["b"]}, {"ruleId": "b", "dependencies": ["unknown"]}],
+        _closure_source(("a", "b")), {"a": object(), "b": object()}, required_predicates={"days": 180},
+    )
+    assert result["executedRuleIds"] == ["a", "b"]
+    assert result["closureRuleIds"] == ["a", "b", "unknown"]
+    assert result["transitiveDependencies"]["a"] == ["b", "unknown"]
+    assert {row["kind"] for row in result["blockers"]} == {
+        "unknown-rule", "unreconciled-dynamic-edge", "dependency-not-recorded",
+    }
+    assert result["complete"] is False
+
+
+def test_execution_closure_blocks_cycles_and_unrecorded_conditional_rules():
+    branch = {"ruleId": "branch", "consumer": "test.consumer", "sourceLocation": {"line": 3},
+              "branchContext": [{"line": 2, "predicate": "state.colony", "arm": "body", "outcome": "unproven"}]}
+    result = execution_closure(
+        [{"ruleId": "a", "dependencies": ["b"]}, {"ruleId": "b", "dependencies": ["a"]}],
+        _closure_source(("a", "b"), ("b", "a"), references=[branch]),
+        {name: object() for name in ("a", "b", "branch")}, required_predicates={"colony": False},
+    )
+    assert result["complete"] is False
+    assert {row["kind"] for row in result["blockers"]} == {"dependency-cycle", "unexplained-static-path"}
+    assert result["unrecordedStaticRuleReferences"] == [branch]
+
+
+def test_execution_closure_fingerprint_binds_edges_and_required_predicates():
+    source = _closure_source(("a", "b"))
+    executions = [{"ruleId": "a", "dependencies": ["b"]}, {"ruleId": "b", "dependencies": []}]
+    first = execution_closure(executions, source, {"a": 1, "b": 1}, required_predicates={"days": 180})
+    changed = execution_closure(executions, source, {"a": 1, "b": 1}, required_predicates={"days": 181})
+    assert first["complete"] is True
+    assert first["fingerprint"] != changed["fingerprint"]
+
+
+def test_static_non_observation_keeps_branch_predicates_unproven(tmp_path):
+    (tmp_path / "ti_parser_example.py").write_text(
+        "def consumer(state):\n    if state.get('colony'):\n        return state.get('hiddenCounter')\n", encoding="utf-8",
+    )
+    inventory = source_inventory(tmp_path, Counter({("ti_parser_example", "consumer"): 1}))
+    result = reconcile(inventory, [])
+    hidden = next(row for row in result["staticCandidatesNotObserved"] if row["sourceKey"] == "hiddenCounter")
+    assert hidden["branchContext"][0]["predicate"] == "state.get('colony')"
+    assert hidden["branchContext"][0]["outcome"] == "unproven"
+    assert hidden["blocking"] is True
+    assert result["complete"] is False
+
+
+def test_trial_trackers_do_not_merge_reads_from_the_other_trial():
+    combined, first, second = audit.ReadTracker(), audit.ReadTracker(), audit.ReadTracker()
+    combined.active_trial = first
+    combined.record("$.firstField", "get", "dict")
+    combined.active_trial = second
+    combined.record("$.secondField", "get", "dict")
+    combined.active_trial = None
+    assert {row["path"] for row in first.report()["reads"]} == {"$.firstField"}
+    assert {row["path"] for row in second.report()["reads"]} == {"$.secondField"}
+    assert {row["path"] for row in combined.report()["reads"]} == {"$.firstField", "$.secondField"}
+
+
+def test_developer_capture_preserves_incomplete_authoritative_prefix_and_details_false(monkeypatch):
+    result = {"status": "incomplete", "ruleExecutions": [{"ruleId": "verified-prefix", "dependencies": []}],
+              "runtimeStop": {"unsupportedNextStep": {"ruleId": "unexecuted-next-step"}},
+              "coverage": {"complete": False}, "metricCoverage": {"prefix": "exact"}}
+    calls = []
+
+    def original_run(*args, **kwargs):
+        calls.append(kwargs)
+        return result
+
+    def original_output(*args, **kwargs):
+        return audit.projection.run_projection(details=kwargs["details"])
+
+    def calculator(*args, **kwargs):
+        return audit.projection.projection_output(details=kwargs["details"])
+
+    monkeypatch.setattr(audit.projection, "run_projection", original_run)
+    monkeypatch.setattr(audit.projection, "projection_output", original_output)
+    monkeypatch.setattr(audit.parser, "calculate_nation_projection", calculator)
+    tracker = audit.ReadTracker()
+    captured = audit._run_traced(None, tracker, "A", "B", {})
+    assert captured is result
+    assert calls == [{"details": False}]
+    assert tracker.rule_executions == result["ruleExecutions"]
+    assert tracker.execution_result["runtimeStop"] == result["runtimeStop"]
+    assert "unexecuted-next-step" not in {row["ruleId"] for row in tracker.rule_executions}
+    assert audit.projection.run_projection is original_run
+    assert audit.projection.projection_output is original_output
 
 
 def test_live_audit_with_matching_assembly_still_requires_accepted_visibility_evidence(tmp_path, monkeypatch):

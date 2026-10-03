@@ -33,7 +33,10 @@ import ti_parser_nation_projection as projection
 import ti_parser_runtime as runtime_layer
 import ti_parser_topbar as topbar_layer
 import ti_save_parser as parser
+from projection_audit_evidence import review_evidence
 from projection_audit_dependencies import reconcile, source_inventory
+from projection_audit_dependencies import execution_closure, rule_source_inventory
+from ti_parser_mechanics import REGISTRY, Rules
 from ti_parser_catalogs import RuntimeCatalogs, canonical_json_bytes, file_sha256, runtime_catalog_scope
 
 
@@ -116,6 +119,8 @@ def _acceptance_binding(
     experiment_shape: dict[str, Any],
     parser_inventory: dict[str, Any],
     required_dependency_ids: tuple[str, ...],
+    execution_closure_fingerprint: str | None = None,
+    required_domain_predicates: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bind a review packet to the exact audit baseline it was issued for."""
     components = {
@@ -126,6 +131,8 @@ def _acceptance_binding(
         "parserInventoryFingerprint": _canonical_hash(parser_inventory),
         "parserSourceFileSha256": parser_inventory.get("sourceFileSha256"),
         "requiredDependencyIds": list(required_dependency_ids),
+        "executionClosureFingerprint": execution_closure_fingerprint,
+        "requiredDomainPredicates": required_domain_predicates,
     }
     return {
         "schemaVersion": 1,
@@ -164,6 +171,9 @@ class ReadTracker:
         self.call_counts: Counter[tuple[str, str]] = Counter()
         self.read_consumers: dict[tuple[str, str, str, str], set[str]] = {}
         self.read_call_paths: dict[tuple[str, str, str, str], set[tuple[str, ...]]] = {}
+        self.active_trial: ReadTracker | None = None
+        self.rule_executions: list[dict[str, Any]] = []
+        self.execution_result: dict[str, Any] = {}
 
     def safe_path(self, path: str) -> str:
         return path or "$"
@@ -181,6 +191,9 @@ class ReadTracker:
         return f"{parent or '$'}[*]"
 
     def record(self, path: str, operation: str, container: str) -> None:
+        if self.active_trial is not None:
+            self.active_trial.stage_name = self.stage_name
+            self.active_trial.record(path, operation, container)
         category = "catalog" if path.startswith("$.catalogs") else "save"
         event_key = (self.safe_path(path), self.stage_name, operation, f"{category}-{container}")
         self.events[event_key] += 1
@@ -201,6 +214,8 @@ class ReadTracker:
         self.read_call_paths.setdefault(event_key, set()).add(tuple(call_path))
 
     def escape(self, path: str, operation: str, container: str) -> None:
+        if self.active_trial is not None:
+            self.active_trial.escape(path, operation, container)
         self.escape_events[(self.safe_path(path), operation, container)] += 1
 
     @contextmanager
@@ -231,7 +246,7 @@ class ReadTracker:
             for (path, operation, container), count in sorted(self.escape_events.items())
         ]
         return {
-            "stages": ["adapter-preparation", "projection-execution-output"],
+            "stages": sorted({row["stage"] for row in reads}),
             "classificationDefault": "unresolved",
             "reads": reads,
             "plainContainerEscapes": escapes,
@@ -582,6 +597,8 @@ def _profile_calls(tracker: ReadTracker):
             module = str(frame.f_globals.get("__name__", ""))
             if module.startswith("ti_parser_"):
                 tracker.call_counts[(module, frame.f_code.co_name)] += 1
+                if tracker.active_trial is not None:
+                    tracker.active_trial.call_counts[(module, frame.f_code.co_name)] += 1
         if old_profile is not None:
             old_profile(frame, event, _arg)
 
@@ -594,13 +611,26 @@ def _profile_calls(tracker: ReadTracker):
 
 def _run_traced(indexed: core.IndexedState, tracker: ReadTracker, nation: str, faction: str | None, plan: dict[str, Any]) -> dict[str, Any]:
     output = projection.projection_output
+    run = projection.run_projection
 
     def staged_output(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        with tracker.stage("projection-execution-output"):
+        with tracker.stage("projection-output"):
             return output(*args, **kwargs)
+
+    def staged_run(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        # Capture the original full return before public output processing. Do
+        # not change details, diagnostics, transactions, or calculator inputs.
+        with tracker.stage("projection-calculation"):
+            result = run(*args, **kwargs)
+        sink = tracker.active_trial or tracker
+        sink.rule_executions.extend(copy.deepcopy(result.get("ruleExecutions", [])))
+        sink.execution_result = {key: copy.deepcopy(result.get(key)) for key in
+                                 ("status", "coverage", "metricCoverage", "runtimeStop", "missingMechanicRules", "missingDependencies")}
+        return result
 
     with _profile_calls(tracker):
         projection.projection_output = staged_output
+        projection.run_projection = staged_run
         try:
             with tracker.stage("adapter-preparation"):
                 return parser.calculate_nation_projection(
@@ -615,6 +645,7 @@ def _run_traced(indexed: core.IndexedState, tracker: ReadTracker, nation: str, f
                 )
         finally:
             projection.projection_output = output
+            projection.run_projection = run
 
 
 def _run_plain(indexed: core.IndexedState, nation: str, faction: str | None, plan: dict[str, Any]) -> dict[str, Any]:
@@ -781,6 +812,12 @@ def audit_projection_reads(
 
     tracker = ReadTracker()
     traced_data = traced_copy(data, tracker)
+    preflight_tracker = ReadTracker()
+    preflight_data = traced_copy(data, preflight_tracker)
+    with preflight_tracker.stage("target-resolution-preflight"), _profile_calls(preflight_tracker):
+        traced_identity = _state_identity(preflight_data, nation_name, faction_name)
+    if traced_identity != (resolved_nation, resolved_faction, positions, fully_owned):
+        raise AuditInputError("Target resolution changed under developer tracing")
     traced_index = core.build_index(traced_data)
     alias_checks = {
         "dataGamestatesPreserved": traced_index.data["gamestates"] is traced_index.gamestates,
@@ -795,19 +832,21 @@ def audit_projection_reads(
 
     baseline_results: dict[str, dict[str, Any]] = {}
     traced_results: dict[str, dict[str, Any]] = {}
+    trial_trackers: dict[str, ReadTracker] = {}
     for trial_name, knowledge, welfare in TRIALS:
         payload = _plan(trial_name, positions, knowledge, welfare)
         baseline_results[trial_name] = _run_plain(baseline_index, resolved_nation, resolved_faction, payload)
     with _instrument_catalog_reads(tracker):
         for trial_name, knowledge, welfare in TRIALS:
             payload = _plan(trial_name, positions, knowledge, welfare)
-            traced_results[trial_name] = _run_traced(
-                traced_index,
-                tracker,
-                resolved_nation,
-                resolved_faction,
-                payload,
-            )
+            trial_trackers[trial_name] = ReadTracker()
+            tracker.active_trial = trial_trackers[trial_name]
+            try:
+                traced_results[trial_name] = _run_traced(
+                    traced_index, tracker, resolved_nation, resolved_faction, payload,
+                )
+            finally:
+                tracker.active_trial = None
     comparisons = {
         trial_name: _comparison_row(baseline_results[trial_name], traced_results[trial_name])
         for trial_name, _knowledge, _welfare in TRIALS
@@ -825,6 +864,24 @@ def audit_projection_reads(
         for row in comparisons.values()
     )
     static = _static_checklist(tracker)
+    required_predicates = _canonical_acceptance_shape()
+    required_predicates.update(inputKind=input_kind, controlPointCount=len(positions),
+                               fullyOwnedBySelectedFaction=fully_owned)
+    closures = {}
+    for name, trial_tracker in trial_trackers.items():
+        source = rule_source_inventory(TOOLS, trial_tracker.call_counts, Rules)
+        closures[name] = execution_closure(trial_tracker.rule_executions, source, REGISTRY,
+                                          required_predicates=required_predicates)
+        closures[name]["authoritativeExecutionResult"] = trial_tracker.execution_result
+    closure_report = {"trials": closures, "requiredDomainPredicates": required_predicates,
+                      "complete": all(row["complete"] for row in closures.values()),
+                      "lineageStatus": "unresolved",
+                      "reason": "Rule closure is parser execution evidence; scalar lineage, preparation reads and game visibility require separate acceptance."}
+    current_review = review_evidence(ROOT, supplied_assembly, expected_assembly,
+                                    set().union(*(set(row["closureRuleIds"]) for row in closures.values())))
+    closure_report["reviewEvidenceSha256"] = current_review["evidenceSha256"]
+    closure_report["currentBuildReviewStatus"] = current_review["status"]
+    closure_report["fingerprint"] = _canonical_hash(closure_report)
     gates = {
         "exactResultCoverageAndStatusParity": parity,
         "dataGamestatesAliasPreserved": alias_checks["dataGamestatesPreserved"],
@@ -833,6 +890,7 @@ def audit_projection_reads(
         "catalogsUnchanged": catalogs_unchanged,
         "zeroRawContainerMutations": tracker.mutations == 0,
         "staticCallChecklistComplete": static["complete"],
+        "executionClosureComplete": closure_report["complete"],
     }
     structural_status = "complete" if all(gates.values()) else "incomplete"
     required_dependency_ids = tuple(sorted({
@@ -851,6 +909,8 @@ def audit_projection_reads(
         experiment_shape=experiment_shape,
         parser_inventory=static["sourceDerivedDependencies"],
         required_dependency_ids=required_dependency_ids,
+        execution_closure_fingerprint=closure_report["fingerprint"],
+        required_domain_predicates=required_predicates,
     )
     policy = _policy_status(structural_complete=structural_status == "complete",
                             assembly_status=assembly_status, provided_hash=supplied_assembly,
@@ -901,6 +961,10 @@ def audit_projection_reads(
             },
         },
         "dynamicReads": tracker.report(),
+        "trialReads": {name: trial_tracker.report() for name, trial_tracker in trial_trackers.items()},
+        "preflightReads": preflight_tracker.report(),
+        "executionClosure": closure_report,
+        "currentBuildReview": current_review,
         "staticCallChecklist": static,
         "acceptanceBinding": acceptance_binding,
         "structuralStatus": {

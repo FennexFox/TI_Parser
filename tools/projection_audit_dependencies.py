@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,18 @@ KNOWN_NORMALIZATIONS = {
     "publicOpinion": ("NationProjectionState.public_opinion", "public opinion and research context"),
     "resourceMarketValues": ("NationProjectionState.world_context.resourceMarketValues", "world market economy context"),
 }
+
+
+def _branch_context(function: ast.AST, target: ast.AST) -> list[dict[str, Any]]:
+    """Retain enclosing predicates as source evidence, never as branch outcomes."""
+    result = []
+    for node in ast.walk(function):
+        if isinstance(node, ast.If):
+            for arm, children in (("body", node.body), ("else", node.orelse)):
+                if any(target is child for statement in children for child in ast.walk(statement)):
+                    result.append({"line": node.lineno, "predicate": ast.unparse(node.test), "arm": arm,
+                                   "outcome": "unproven"})
+    return sorted(result, key=lambda row: row["line"])
 
 
 def _destination_evidence(function: ast.AST, source_key: str, destination: str) -> list[int]:
@@ -127,6 +140,7 @@ def source_inventory(tools: Path, call_counts: Any) -> dict[str, Any]:
                         "visibilityEvidence": [],
                         "buildApplicability": "parser source hash only; game build unresolved",
                         "blocking": True,
+                        "branchContext": _branch_context(function, node),
                     })
                 boundary = None
                 if isinstance(node, (ast.DictComp, ast.ListComp, ast.SetComp, ast.GeneratorExp)):
@@ -164,9 +178,115 @@ def reconcile(inventory: dict[str, Any], reads: list[dict[str, Any]]) -> dict[st
                      "candidateSourceLocations": [row["sourceLocation"] for row in candidates],
                      "destinationRoles": sorted({row["destinationRole"] for row in mapped}),
                      "reason": "source-derived normalization mapping" if status == "mapped" else "unclassified, ambiguous, container, or parameterized read requires lineage evidence"})
-    static_only = [dict(row, reconciliation="static-candidate-not-observed") for row in inventory["dependencies"]
+    static_only = [dict(row, reconciliation="static-candidate-not-observed",
+                        nonObservationExplanation="Enclosing source predicates are contextual evidence only; absence from a container trace does not establish an untaken or safe branch. Scalar and materialized lineage remain unproven.") for row in inventory["dependencies"]
                    if (row["consumer"], row["sourceLocation"]["line"]) not in observed]
     return {"dynamicToStatic": rows, "staticCandidatesNotObserved": static_only,
             "mappedDynamicReadCount": sum(row["status"] == "mapped" for row in rows),
             "unresolvedDynamicReadCount": sum(row["status"] != "mapped" for row in rows),
             "complete": bool(rows) and all(row["status"] == "mapped" for row in rows) and not static_only}
+
+
+def rule_source_inventory(tools: Path, call_counts: Any, rules: Any) -> dict[str, Any]:
+    """Map observed consumers to static rule candidates and literal dependency edges.
+
+    A rule reference inside an observed function is not an execution record.
+    Dynamic dispatch and branches remain explicit until reconciled separately.
+    """
+    references, edges, hashes = [], [], {}
+
+    def rule_id(node: ast.AST) -> str | None:
+        if (isinstance(node, ast.Attribute) and node.attr == "id"
+                and isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name) and node.value.value.id == "Rules"):
+            rule = getattr(rules, node.value.attr, None)
+            return getattr(rule, "id", f"unregistered:Rules.{node.value.attr}")
+        return None
+
+    for module in sorted({module for module, _name in call_counts}):
+        path = tools / f"{module}.py"
+        if not path.is_file():
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        hashes[f"tools/{path.name}"] = digest
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for function in ast.walk(tree):
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)) or not call_counts[(module, function.name)]:
+                continue
+            for node in ast.walk(function):
+                identifier = rule_id(node)
+                if identifier:
+                    references.append({"ruleId": identifier, "consumer": f"{module}.{function.name}",
+                                       "sourceLocation": {"file": f"tools/{path.name}", "line": node.lineno, "sha256": digest},
+                                       "branchContext": _branch_context(function, node), "executionStatus": "candidate-only"})
+                if isinstance(node, ast.Dict):
+                    entries = {key.value: value for key, value in zip(node.keys, node.values)
+                               if isinstance(key, ast.Constant) and isinstance(key.value, str)}
+                    parent = rule_id(entries["ruleId"]) if "ruleId" in entries else None
+                    if parent and "dependencies" in entries:
+                        for child in ast.walk(entries["dependencies"]):
+                            dependency = rule_id(child)
+                            if dependency:
+                                edges.append({"from": parent, "to": dependency, "sourceLocation":
+                                              {"file": f"tools/{path.name}", "line": child.lineno, "sha256": digest}})
+    return {"ruleReferences": references, "registeredLiteralEdges": edges, "sourceFileSha256": hashes}
+
+
+def execution_closure(executions: list[dict[str, Any]], source: dict[str, Any], registry: Any,
+                      *, required_predicates: dict[str, Any]) -> dict[str, Any]:
+    """Compute an exact bounded graph; report gaps rather than inventing edges."""
+    executed = {str(row.get("ruleId")) for row in executions}
+    edges = {(str(row.get("ruleId")), str(dependency)) for row in executions
+             for dependency in row.get("directDependencies", row.get("dependencies", []))}
+    registered_edges = {(row["from"], row["to"]) for row in source["registeredLiteralEdges"]}
+    closure = executed | {child for _parent, child in edges}
+    blockers = []
+    for identifier in sorted(closure):
+        if identifier not in registry:
+            blockers.append({"kind": "unknown-rule", "ruleId": identifier})
+    for parent, child in sorted(edges):
+        if (parent, child) not in registered_edges:
+            blockers.append({"kind": "unreconciled-dynamic-edge", "from": parent, "to": child,
+                             "reason": "No literal ruleId/dependencies source declaration in observed consumers; dynamic edge needs explicit source reconciliation."})
+        if child not in executed:
+            blockers.append({"kind": "dependency-not-recorded", "from": parent, "to": child})
+    graph = {identifier: {child for parent, child in edges if parent == identifier} for identifier in closure}
+    transitive = {}
+    for identifier in sorted(closure):
+        reached, pending = set(), list(graph.get(identifier, ()))
+        while pending:
+            child = pending.pop()
+            if child in reached:
+                continue
+            reached.add(child)
+            pending.extend(graph.get(child, ()))
+        transitive[identifier] = sorted(reached)
+        if identifier in reached:
+            blockers.append({"kind": "dependency-cycle", "ruleId": identifier})
+    unresolved_static = [row for row in source["ruleReferences"] if row["ruleId"] not in executed]
+    for row in unresolved_static:
+        blockers.append({"kind": "unexplained-static-path", "ruleId": row["ruleId"],
+                         "consumer": row["consumer"], "sourceLocation": row["sourceLocation"],
+                         "branchContext": row["branchContext"],
+                         "reason": "Observed function contains an unrecorded rule reference; source predicate alone cannot prove exclusion or scalar lineage."})
+    if not executions:
+        blockers.append({"kind": "missing-execution-records"})
+    coverage_records = sorted({(str(row.get("ruleId")), str(row.get("effectiveCoverage")),
+                               str(row.get("coverageResolverId")), str(row.get("provenance")))
+                              for row in executions})
+    static_candidates = {row["ruleId"] for row in source["ruleReferences"]}
+    report = {"executedRuleIds": sorted(executed), "directEdges": [{"from": p, "to": c} for p, c in sorted(edges)],
+              "closureRuleIds": sorted(closure), "transitiveDependencies": transitive,
+              "staticCandidateRuleIds": sorted(static_candidates),
+              "requiredRuleIds": sorted(closure | static_candidates),
+              "executionCoverageRecords": [{"ruleId": identifier, "effectiveCoverage": coverage,
+                                             "coverageResolverId": resolver, "provenance": provenance}
+                                            for identifier, coverage, resolver, provenance in coverage_records],
+              "registryEvidence": {identifier: registry[identifier].diagnostics()
+                                   for identifier in sorted(closure) if identifier in registry
+                                   and hasattr(registry[identifier], "diagnostics")},
+              "executionRecordCount": len(executions), "unrecordedStaticRuleReferences": unresolved_static,
+              "requiredDomainPredicates": required_predicates, "blockers": blockers,
+              "complete": not blockers, "sourceFileSha256": source["sourceFileSha256"]}
+    report["fingerprint"] = hashlib.sha256(json.dumps(report, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return report
