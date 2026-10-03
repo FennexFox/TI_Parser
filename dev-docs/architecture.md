@@ -19,6 +19,8 @@ packaged catalogs. Normal operation never discovers an installed game.
 | Mechanics provenance, validity, executed coverage | `ti_parser_mechanics`, `ti_parser_nation_validity`, `ti_parser_projection_coverage` |
 | Analysis IDs, arguments, dispatch | `ti_parser_registry`, `ti_parser_application` |
 | Fair-play exposure, sanitized inspection, save correlation and application-issued projection subject receipts | `ti_parser_registry`, `ti_parser_fairplay` |
+| Reported-input conditional model construction, assumptions and scenario provenance | `ti_parser_conditional_projection` |
+| Conditional profile schemas, immutable context/result receipts and generation validation | `ti_parser_conditional_application` |
 | One-save session and result envelopes | `ti_parser_session`, `ti_parser_schema` |
 | Bootstrap and capability inventory | `ti_parser_analysis`, `ti_parser_capabilities` |
 | CLI parsing and rendering | `ti_parser_cli`, `ti_parser_commands` |

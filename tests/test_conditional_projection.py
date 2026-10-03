@@ -167,6 +167,11 @@ def test_180_day_ab_uses_the_engine_and_labels_coverage_as_conditional():
         assert all("ruleId" not in item for item in plan["mechanicRuleDiagnostics"])
     assert result["catalogs"]["scenario"] == "ModernScenario"
     assert result["catalogs"]["catalogBundleFingerprint"]
+    knowledge_end = result["plans"][0]["engineProjection"]["checkpoints"][-1]["nation"]
+    welfare_end = result["plans"][1]["engineProjection"]["checkpoints"][-1]["nation"]
+    assert knowledge_end["education"] > original["observations"]["nation"]["education"]
+    assert welfare_end["inequality"] < original["observations"]["nation"]["inequality"]
+    assert welfare_end["education"] == original["observations"]["nation"]["education"]
 
 
 def test_unknown_or_missing_hidden_state_is_rejected_instead_of_zeroed():
