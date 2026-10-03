@@ -15,6 +15,8 @@ COVERAGE_MODES = frozenset({"static", "conditional"})
 AUDIT_STATUSES = frozenset({"verified", "partial", "pending", "deprecated"})
 TEST_EVIDENCE_TYPES = frozenset({"expectedValue", "stateTransition", "ordering", "coverageBranch", "contract"})
 ASSEMBLY_CSHARP_SHA256 = "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5"
+# Only rules explicitly re-audited against this build use this evidence hash.
+CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256 = "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350"
 REGISTRY_CONTRACT_TEST_ID = (
     "tests.test_mechanics_registry.MechanicsRegistryTests."
     "test_real_save_rule_contracts_are_registered"
@@ -175,12 +177,13 @@ class Rules:
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_condition_waits_for_multi_completion_transaction",),
     )
     NATION_PRIORITY_KNOWLEDGE_COMPLETE = MechanicRule(
-        "nation.priority.knowledge.complete", 1,
+        "nation.priority.knowledge.complete", 2,
         "Apply Knowledge education and cohesion completion effects.",
         "verified", "exact",
-        ("TINationState.OnKnowledgePriorityComplete", "TINationState.knowledgePriorityEducationChange", "TINationState.knowledgePriorityCohesionChange"),
+        ("TINationState.OnKnowledgePriorityComplete", "TINationState.knowledgePriorityEducationChange", "TINationState.knowledgePriorityCohesionChange", "TINationState.AddToEducation", "TINationState.AddToCohesion"),
         data_dependencies=("nationDevelopment.globalConfig.knowledgePriorityEducationIncrease", "nationDevelopment.globalConfig.populationBasedIPEffectScaling"),
-        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_knowledge_completion",),
+        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_knowledge_completion", "tests.test_nation_projection.NationProjectionTransactionTests.test_knowledge_completion_clamps_education_at_dll_setter_boundaries"),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_GOVERNMENT_COMPLETE = MechanicRule(
         "nation.priority.government.complete", 2,
@@ -347,6 +350,7 @@ class Rules:
         "Coordinate Welfare inequality and the conditionally activated colony/decolonization child rules.",
         "verified", "exact", ("TINationState.OnWelfarePriorityComplete",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_welfare_children_activate_only_on_the_executed_path",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_WELFARE_INEQUALITY = MechanicRule(
         "nation.priority.welfare.inequality", 1,
@@ -360,17 +364,19 @@ class Rules:
         "nation.priority.welfare.colony-trigger", 1,
         "Select and increment the deterministic colony-removal trigger when a colony candidate exists.",
         "verified", "exact",
-        ("TINationState.OnWelfarePriorityComplete", "TINationState.GetNextRegionToDecolonize"),
+        ("TINationState.OnWelfarePriorityComplete", "TINationState.GetNextDecolonizeRegion", "TINationState.CandidateDecolonizeRegions"),
         data_dependencies=("nationDevelopment.regions.*.colony",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_welfare_children_activate_only_on_the_executed_path",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_WELFARE_DECOLONIZATION = MechanicRule(
         "nation.priority.welfare.decolonization", 1,
         "Apply the threshold colony/permanent-state transition without activating it before threshold.",
         "verified", "exact",
-        ("TINationState.OnWelfarePriorityComplete", "TIRegionState.SetColonialStatus"),
+        ("TINationState.OnWelfarePriorityComplete", "TINationState.OnDecolonizeRegionPriorityComplete"),
         data_dependencies=("nationDevelopment.globalConfig.welfarePriorityDecolonizationThreshold",),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_welfare_children_activate_only_on_the_executed_path",),
+        source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM = MechanicRule(
         "nation.priority.welfare.decolonization-downstream", 1,

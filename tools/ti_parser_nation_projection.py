@@ -1725,7 +1725,7 @@ def _apply_completion(
             and "MissionControl" in context.priorities
             and not _priority_valid(state, "MissionControl", context)
         )
-        state.education = max(0.0, state.education + scale * change)
+        state.education = min(255.0, max(1.0, state.education + scale * change))
         state.cohesion = min(10.0, max(0.0, state.cohesion + scale * (0.01 if state.cohesion < 5 else -0.01 if state.cohesion > 5 else 0.0)))
         metric_inputs.append("internal.populationScaling")
         metric_outputs.extend(("nation.education", "nation.cohesion"))

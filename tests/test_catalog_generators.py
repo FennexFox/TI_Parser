@@ -26,6 +26,19 @@ def write_text(path: Path, content: str) -> None:
 
 
 class CatalogGeneratorTests(unittest.TestCase):
+    def test_ideology_missing_relation_groups_use_compiled_zero_defaults(self):
+        _, fields, defaults = runtime_builder.NATION_DEVELOPMENT_TEMPLATE_FIELDS["ideologyTemplates"]
+        rows = runtime_builder.normalized_development_collection(
+            {"TestIdeology": {"dataName": "TestIdeology"}}, fields, defaults,
+        )
+        self.assertEqual(rows["TestIdeology"]["willProxy"], 0)
+        self.assertEqual(rows["TestIdeology"]["willAppease"], 0)
+        rows = runtime_builder.normalized_development_collection(
+            {"TestIdeology": {"dataName": "TestIdeology", "willProxy": -1, "willAppease": 2}}, fields, defaults,
+        )
+        self.assertEqual(rows["TestIdeology"]["willProxy"], -1)
+        self.assertEqual(rows["TestIdeology"]["willAppease"], 2)
+
     def test_nation_development_rejects_boolean_numeric_config_values(self):
         payload = runtime_builder._nation_development_payload({
             "priority_MC": True,

@@ -21,6 +21,29 @@ from ti_parser_catalogs import RuntimeCatalogs
 
 
 class MechanicsRegistryTests(unittest.TestCase):
+    def test_current_build_evidence_is_bound_only_to_reaudited_rules(self):
+        current_hash = "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350"
+        historical_hash = "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5"
+        reviewed = (
+            Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE,
+            Rules.NATION_PRIORITY_WELFARE_COMPLETE,
+            Rules.NATION_PRIORITY_WELFARE_COLONY_TRIGGER,
+            Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION,
+        )
+        for rule in reviewed:
+            with self.subTest(rule=rule.id):
+                self.assertEqual(rule.source_hash, current_hash)
+        for rule in (
+            Rules.NATION_PRIORITY_WELFARE_INEQUALITY,
+            Rules.NATION_PRIORITY_WELFARE_DECOLONIZATION_DOWNSTREAM,
+        ):
+            with self.subTest(rule=rule.id):
+                self.assertEqual(rule.source_hash, historical_hash)
+        self.assertEqual(
+            {rule.id for rule in REGISTRY.values() if rule.source_hash == current_hash},
+            {rule.id for rule in reviewed},
+        )
+
     def test_registry_ids_are_unique_supported_rules_have_tests_and_diagnostics_resolve(self):
         validate_registry()
         self.assertEqual(len(REGISTRY), len(set(REGISTRY)))

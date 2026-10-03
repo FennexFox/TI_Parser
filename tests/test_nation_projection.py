@@ -433,6 +433,17 @@ class NationProjectionTransactionTests(unittest.TestCase):
         self.assertAlmostEqual(initial.education, before + 0.005 * 8.5 / 8.0)
         self.assertAlmostEqual(initial.cohesion, 4.01)
 
+    @mechanic_rule_test(Rules.NATION_PRIORITY_KNOWLEDGE_COMPLETE.id, evidence="expectedValue")
+    def test_knowledge_completion_clamps_education_at_dll_setter_boundaries(self):
+        # TINationState.AddToEducation clamps to [1, 255], independently of
+        # the initialization clamp and the Knowledge change formula.
+        for education, expected in ((0.0, 1.0), (255.0, 255.0)):
+            with self.subTest(education=education):
+                initial = state(progress={"Knowledge": 0.99})
+                initial.education = education
+                projection._run_investment_transaction(initial, context(), 1, 0)
+                self.assertEqual(initial.education, expected)
+
     def test_unity_fails_closed_without_explicit_public_opinion_policy(self):
         initial = unity_state()
         result = projection.run_projection(initial, projection.PriorityPlan("p", (projection.PlanSegment(None, None, None, None),)), unity_context(), days=1)

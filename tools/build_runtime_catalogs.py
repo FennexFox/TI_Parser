@@ -144,7 +144,7 @@ NATION_DEVELOPMENT_TEMPLATE_FIELDS: dict[str, tuple[str, tuple[str, ...], dict[s
             "dataName", "alien", "undecided", "sortOrder", "willProxy", "willAppease",
             "ideology", "ideologyCoordinates",
         ),
-        {"alien": False, "undecided": False, "willProxy": -1, "willAppease": -1},
+        {"alien": False, "undecided": False, "willProxy": 0, "willAppease": 0},
     ),
 }
 NATION_DEVELOPMENT_TEMPLATE_DEFAULT_ORIGINS = {
@@ -157,8 +157,8 @@ NATION_DEVELOPMENT_TEMPLATE_DEFAULT_ORIGINS = {
     "factionTemplates.isAlien": "TIFactionTemplate compiled field default",
     "ideologyTemplates.alien": "TIFactionIdeologyTemplate compiled field default",
     "ideologyTemplates.undecided": "TIFactionIdeologyTemplate compiled field default",
-    "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field initializer",
-    "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field initializer",
+    "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field default",
+    "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field default",
 }
 PRIORITY_DIVERSITY_BONUSES = {
     "Economy": 0.5,
