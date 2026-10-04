@@ -197,3 +197,9 @@ The `fair-play` profile remains limited to `capabilities` and sanitized
 hidden-state routes stay blocked there. The conditional profile is a separate
 visible-input scenario workflow, not a fallback for retrieving hidden save
 state. Do not present its outputs as current state or historical changes.
+
+Actual Companion integration and joint acceptance are tracked in
+[issue #9](https://github.com/FennexFox/TI_Parser/issues/9), with a separate
+implementation PR. The existing mock and Codex evidence establishes the
+TI_Parser-side foundation; it does not validate the real Companion's input or
+visibility contract.

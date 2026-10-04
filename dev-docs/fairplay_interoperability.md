@@ -390,11 +390,14 @@ launch command is invented here.
 | Real Codex routing with mock | Six canonical prompts reviewed | Current/history use Companion, correlation uses both with target unresolved, forecasts stay blocked, and hidden goals are refused without calls. [Synthetic client evidence](plan/issue_8/routing-evidence.json) records initial failures and corrected ownership; no mechanics approval follows. |
 | Separate conditional model and receipts | Regression-tested | Fresh reported inputs and acknowledged assumptions, strict six-CP ownership, immutable issuance, scope expiry and generation rejection are tested independently of raw-save approval. |
 | Conditional Codex routing with mock | Reviewed | Current/history use only their Companion tools; A/B uses registration, conditional projection, fresh Companion observation and verification. Hidden-state requests allow policy discovery only. [Conditional routing evidence](conditional_routing_evidence.json) preserves initial expectations and response-size limitations alongside the compact rerun. |
-| Actual Companion plus TI/Codex | Open | Substitute a runnable actual Companion (local branch/server is sufficient) and execute the approved 180-day A/B scenario. |
+| Actual Companion plus TI/Codex | Follow-up #9 | [Separate integration issue](https://github.com/FennexFox/TI_Parser/issues/9): use a runnable actual Companion (a local branch/server is sufficient), verify its reported inputs/identity, and execute the conditional 180-day A/B scenario in its own PR. |
 
-Local tooling does not complete Issue #8. Keep raw-save projection blocked until
+Actual Companion acceptance has been split from the Issue #8 foundation into
+[issue #9](https://github.com/FennexFox/TI_Parser/issues/9) and a separate PR.
+Keep raw-save projection blocked until
 structural completeness, authoritative visibility/correctness and the guarded
-execution policy pass; actual Companion/TI/Codex prediction acceptance then
-remains required. See the [active plan](plan/issue_8/00-master-plan.md) for open
+execution policy pass. The conditional integration follow-up is independent of
+those raw-save gates and requires its own actual Companion/TI/Codex evidence.
+See the [active plan](plan/issue_8/00-master-plan.md) for open
 gates and the [MCP runbook](../docs/MCP_SETUP.md#generation-sequence-and-advice-eligibility)
 for the required observation sequence and discard/retry behavior.
