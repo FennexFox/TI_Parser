@@ -8,7 +8,7 @@ import pytest
 
 from tests.test_current_build_monthly import rest_context, source_state
 from tests.test_nation_projection import context, state
-from ti_parser_mechanics import Rules
+from ti_parser_mechanics import Rules, mechanic_rule_test
 import ti_parser_nation_projection as projection
 
 
@@ -34,6 +34,7 @@ def source_control_point_state(count=6):
         (6.0, 8.0, 4.0, None, "AgriculturalSector"),
     ],
 )
+@mechanic_rule_test(Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id, evidence="expectedValue")
 def test_last_control_point_sector_thresholds_match_current_dll(
     democracy, education, cohesion, enemy_count, expected
 ):
@@ -50,6 +51,7 @@ def test_last_control_point_sector_thresholds_match_current_dll(
     assert last_position.control_point_type == expected
 
 
+@mechanic_rule_test(Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id, evidence="expectedValue")
 def test_each_control_point_position_uses_its_current_build_role():
     value = source_control_point_state()
     value.democracy = 5.0
@@ -71,6 +73,7 @@ def test_each_control_point_position_uses_its_current_build_role():
     }
 
 
+@mechanic_rule_test(Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id, evidence="stateTransition")
 def test_missing_enemy_inputs_stop_before_any_control_point_type_is_changed():
     value = source_control_point_state()
     value.democracy = 8.0
@@ -128,6 +131,7 @@ def test_live_faction_contribution_flags_follow_recomputed_sector_types():
     assert financial["funding"] == pytest.approx(financial_baseline["funding"] * 1.25)
 
 
+@mechanic_rule_test(Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id, evidence="coverageBranch")
 def test_monthly_commits_control_point_types_with_exact_rule_coverage():
     value = source_state()
     value.at = datetime(2030, 1, 31, 23)
@@ -151,6 +155,7 @@ def test_monthly_commits_control_point_types_with_exact_rule_coverage():
     )
 
 
+@mechanic_rule_test(Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id, evidence="coverageBranch")
 def test_exact_type_rule_retains_expected_coverage_from_mean_path_inputs():
     value = source_state()
     value.control_points = state(cp_count=4).control_points
@@ -179,6 +184,7 @@ def test_exact_type_rule_retains_expected_coverage_from_mean_path_inputs():
     assert sector_point.control_point_type == "TradeUnions"
 
 
+@mechanic_rule_test(Rules.NATION_PERIODIC_CONTROL_POINT_TYPES.id, evidence="stateTransition")
 def test_monthly_type_dependency_keeps_only_the_authoritative_prefix():
     value = source_state()
     value.at = datetime(2030, 1, 31, 23)

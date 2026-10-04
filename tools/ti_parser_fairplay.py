@@ -48,7 +48,8 @@ _FAIRPLAY_ERROR_MESSAGE = "The request could not be completed under the selected
 _SHA256_ALGORITHM = "sha256-canonical-save-json-v1"
 _SHA256_VALUE = re.compile(r"^[0-9a-f]{64}$")
 _ERROR_CODE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-_DATE_COMPONENTS = ("year", "month", "day", "hour", "minute", "second")
+_DATE_COMPONENTS = ("year", "month", "day", "hour", "minute", "second", "millisecond")
+_MILLISECOND_RANGE = (0, 999)
 
 
 def validate_profile(profile: str) -> str:
@@ -240,11 +241,11 @@ def _sanitize_date(value: Any) -> Any:
         return value
     if not isinstance(value, Mapping) or not value:
         return _INVALID
-    if any(key not in _DATE_COMPONENTS for key in value):
-        return _INVALID
     result = {}
     for key, component in value.items():
-        if type(component) is not int:
+        if key not in _DATE_COMPONENTS or type(component) is not int:
+            return _INVALID
+        if key == "millisecond" and not _MILLISECOND_RANGE[0] <= component <= _MILLISECOND_RANGE[1]:
             return _INVALID
         result[key] = component
     return result
@@ -360,13 +361,19 @@ def _safe_scalar_schema() -> dict[str, Any]:
 
 
 def _date_schema() -> dict[str, Any]:
-    component = {"type": "integer"}
     return {
         "anyOf": [
             _safe_scalar_schema(),
             {
                 "type": "object",
-                "properties": {key: component for key in _DATE_COMPONENTS},
+                "properties": {
+                    **{key: {"type": "integer"} for key in _DATE_COMPONENTS if key != "millisecond"},
+                    "millisecond": {
+                        "type": "integer",
+                        "minimum": _MILLISECOND_RANGE[0],
+                        "maximum": _MILLISECOND_RANGE[1],
+                    },
+                },
                 "additionalProperties": False,
                 "minProperties": 1,
             },
@@ -752,10 +759,13 @@ def compare_save_context(
 ) -> dict[str, str]:
     """Compare a companion snapshot with current parser identity evidence.
 
-    Exact status requires matching valid parser-issued save fingerprints and
-    matching campaign, date, player, and selected-nation context. If exact
-    fingerprints are unavailable, a caller's explicit pin can yield only a
-    provisional match after every context value has been checked.
+    Exact status requires matching valid parser-issued save fingerprints,
+    schema version 1 on both identities, and matching campaign, date, player,
+    and selected-nation context. If either identity omits its schema version,
+    equal supported fingerprints still yield only a provisional match, and
+    only when the caller explicitly pins the checked context. A pin can also
+    yield a provisional match when exact fingerprints are unavailable.
+    Unsupported schema versions are rejected.
     """
 
     if not isinstance(parser_identity, Mapping) or not isinstance(companion_identity, Mapping):
@@ -865,9 +875,12 @@ def _is_safe_context_value(value: Any) -> bool:
         return True
     if type(value) is float:
         return math.isfinite(value)
-    if isinstance(value, Mapping) and value and all(
-        key in _DATE_COMPONENTS and type(component) is int for key, component in value.items()
-    ):
+    if isinstance(value, Mapping) and value:
+        for key, component in value.items():
+            if key not in _DATE_COMPONENTS or type(component) is not int:
+                return False
+            if key == "millisecond" and not _MILLISECOND_RANGE[0] <= component <= _MILLISECOND_RANGE[1]:
+                return False
         return True
     return False
 

@@ -165,6 +165,7 @@ def test_default_profile_delegates_arguments_and_result_unchanged():
 
 def test_fairplay_inspection_returns_only_allowlisted_identity_and_compatibility():
     identity = _identity()
+    identity["gameDate"]["millisecond"] = 999
     session = Mock()
     session.inspect.return_value = {
         "save": {"filename": "private-save.gz"},
@@ -188,6 +189,7 @@ def test_fairplay_inspection_returns_only_allowlisted_identity_and_compatibility
         "schemaVersion", "fingerprint", "gameDate", "scenario", "latestSaveVersion",
         "campaignStartVersion", "campaign", "playerFaction",
     }
+    assert result["saveIdentity"]["gameDate"] == identity["gameDate"]
     assert result["compatibility"] == {
         "schemaVersion": 1,
         "status": "unverified",
@@ -200,7 +202,25 @@ def test_fairplay_inspection_returns_only_allowlisted_identity_and_compatibility
         assert private not in encoded
 
     import jsonschema
-    jsonschema.validate(result, get_profile_output_schema("fair-play", "inspect-save"))
+    schema = get_profile_output_schema("fair-play", "inspect-save")
+    jsonschema.validate(result, schema)
+    invalid_result = deepcopy(result)
+    invalid_result["saveIdentity"]["gameDate"]["millisecond"] = 1000
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(invalid_result, schema)
+
+
+@pytest.mark.parametrize("value", [-1, 1000])
+def test_fairplay_inspection_rejects_out_of_range_millisecond(value):
+    identity = _identity()
+    identity["gameDate"]["millisecond"] = value
+    session = Mock()
+    session.inspect.return_value = {"saveIdentity": identity, "compatibility": {"status": "verified", "reasons": []}}
+
+    result = run_profile(session, "inspect-save", profile="fair-play")
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "player-identity-unresolved"
 
 
 def test_fairplay_rejects_unresolved_identity_without_candidate_details():
@@ -325,6 +345,11 @@ def test_compare_save_context_rejects_malformed_hash_even_with_matching_context_
 def test_compare_save_context_requires_supported_identity_schema_for_exact_status():
     parser, companion = _identity(), _identity()
     parser.pop("schemaVersion")
+    assert compare_save_context(parser, companion, 48, 48, pinned=True) == {
+        "status": "provisional", "reason": "pinned-context-match-without-exact-fingerprint"
+    }
+    parser["schemaVersion"] = 1
+    companion.pop("schemaVersion")
     assert compare_save_context(parser, companion, 48, 48, pinned=True) == {
         "status": "provisional", "reason": "pinned-context-match-without-exact-fingerprint"
     }

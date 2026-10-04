@@ -96,9 +96,11 @@ and [the beta data notice](BETA_DATA_NOTICE.md) for data boundaries.
 
 ## Fair-play profile boundary
 
-The MCP adapter accepts `--profile default|fair-play`; omitting the option
+The MCP adapter accepts `--profile default|fair-play|conditional`; omitting the option
 preserves the default route set. `run_profile(session, analysis, *,
-profile="default", **kwargs)` applies the same policy to session calls. In
+profile="default", **kwargs)` supports default/fair-play routing for session calls.
+The MCP-only conditional profile uses the separate
+[conditional workflow](CONDITIONAL_PROJECTION.md). In
 fair-play, only `inspect-save` is an analysis route. `capabilities` remains an
 inventory tool and lists only `inspect-save`; every other registry route is
 denied before its handler runs. `nation-projection` is globally blocked
@@ -122,8 +124,8 @@ previous_parser_fingerprint=None)` helper compares save context; it is not an
 MCP tool. Exact matching requires schema version 1 on both identities, equal
 supported canonical-save SHA-256 fingerprints, and equal campaign start, game
 date, resolved player faction ID and template, and selected nation ID. A
-provisional match is allowed only when an exact fingerprint is unavailable,
-the save is pinned, and every context value is present and equal. A present
+provisional match requires an unavailable exact fingerprint or a missing
+`schemaVersion`, a pinned save, and every context value present and equal. A present
 supported algorithm with an invalid digest, a previous-fingerprint change, a
 mismatch, or a missing/changed context field rejects comparison; fingerprint
 mismatch never falls back to weak fields.

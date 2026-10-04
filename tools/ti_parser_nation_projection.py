@@ -3743,13 +3743,13 @@ def _own_army_unrest_impact(state: NationProjectionState, context: ProjectionCon
     region_ids = set(state.regions)
     source_backed = state.rest_state_context.get("sourceBacked") is True
     own_base_ip = state.rest_state_context.get("ownBaseInvestmentPointsMonth")
-    if source_backed and any(army.current_region_id in region_ids for army in state.armies) and not isinstance(own_base_ip, (int, float)):
+    if source_backed and any(army.current_region_id in region_ids for army in state.standard_armies) and not isinstance(own_base_ip, (int, float)):
         raise ProjectionRuntimeStop("Own army unrest requires the saved base-IP cache", dependencies=({"field": "baseInvestmentPoints_month", "source": "save.TINationState"},))
     rows = [
         {"strength": army.strength, "currentRegionId": army.current_region_id,
          "factionId": army.faction_id, "armyType": army.army_type,
          "homeBaseInvestmentPointsMonth": own_base_ip if source_backed else _base_ip(state, context)}
-        for army in (state.armies if source_backed else state.standard_armies)
+        for army in state.standard_armies
         if not source_backed or not state.rest_state_context.get("alienNation") or army.army_type in {"Human", "AlienInvader"}
     ]
     rows.extend(state.rest_state_context.get("alliedArmies", []))

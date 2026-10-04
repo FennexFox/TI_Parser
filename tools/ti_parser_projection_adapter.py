@@ -665,6 +665,8 @@ def _extract_projection_rest_inputs(
         ally_is_alien = _required_projection_bool(indexed, ally, "alienNation", source="save-field", rule_id=rule_id)
         for army_ref in refs(ally, "armies"):
             army = resolve(army_ref, "ally.armies", "TIArmyState")
+            if army.get("destroyed"):
+                continue
             army_type = _required_projection_army_type(indexed, army, "armyType", source="save-field", rule_id=rule_id)
             if ally_is_alien and army_type == "AlienMegafauna":
                 continue

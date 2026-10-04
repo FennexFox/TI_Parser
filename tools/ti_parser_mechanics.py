@@ -128,7 +128,7 @@ class Rules:
         "nation.ip.economy-score", 2,
         "Recompute GDP-derived economy score after the bounded ModifyGDP setter path.",
         "partial", "exact",
-        ("TINationState.ModifyGDP"),
+        ("TINationState.ModifyGDP",),
         ("TIRegionState.GrowPopulationByMonth", "TINationState.SetBaseInvestmentPoints_month"),
         ("nationDevelopment.globalConfig.controlPointIPScaling", "nationDevelopment.globalConfig.controlPointIPFactor"),
         test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_economy_score_recomputes_from_literal_gdp",),
@@ -168,7 +168,7 @@ class Rules:
         "partial", "exact",
         ("TINationState.ValidPriority", "TIControlPoint.RecordAndFixControlPointValues"),
         ("TINationState.DailyNationUpdate", "TIControlPoint.SetControlPointPriority"),
-        test_ids=("tests.test_nation_validity.NationPriorityValidityTests.test_government_cap_requires_hostile_region",),
+        test_ids=("tests.test_nation_validity.NationPriorityValidityTests.test_government_cap_requires_cached_legitimize_availability",),
         source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PRIORITY_COMPLETION_ORDER = MechanicRule(
@@ -572,7 +572,14 @@ class Rules:
         "partial", "exact",
         ("TINationState.UpdateControlPointTypes", "TIControlPoint.SetControlPointType"),
         ("TINationState.MonthlyNationUpdate",),
-        test_ids=("tests.test_nation_projection.NationProjectionTransactionTests.test_monthly_cohesion_and_unrest",),
+        test_ids=(
+            "tests.test_current_build_cp_types.test_last_control_point_sector_thresholds_match_current_dll",
+            "tests.test_current_build_cp_types.test_each_control_point_position_uses_its_current_build_role",
+            "tests.test_current_build_cp_types.test_missing_enemy_inputs_stop_before_any_control_point_type_is_changed",
+            "tests.test_current_build_cp_types.test_monthly_commits_control_point_types_with_exact_rule_coverage",
+            "tests.test_current_build_cp_types.test_exact_type_rule_retains_expected_coverage_from_mean_path_inputs",
+            "tests.test_current_build_cp_types.test_monthly_type_dependency_keeps_only_the_authoritative_prefix",
+        ),
         source_hash=CURRENT_AUDITED_ASSEMBLY_CSHARP_SHA256,
     )
     NATION_PERIODIC_POPULATION = MechanicRule(
@@ -727,6 +734,10 @@ def validate_registry(rules: Iterable[MechanicRule] | None = None) -> None:
     for rule in values:
         if not rule.id or rule.id != rule.id.lower() or " " in rule.id:
             raise ValueError(f"Invalid mechanic rule ID: {rule.id!r}")
+        if not isinstance(rule.dll_symbols, tuple) or any(
+            not isinstance(symbol, str) for symbol in rule.dll_symbols
+        ):
+            raise ValueError(f"Invalid DLL symbols for {rule.id}")
         if rule.implementation_revision < 1:
             raise ValueError(f"Invalid implementation revision for {rule.id}")
         if rule.audit_status not in AUDIT_STATUSES:

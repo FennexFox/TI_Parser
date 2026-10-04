@@ -34,9 +34,10 @@ remains unapproved. The exact xenoforming value remains mandatory and not
 exposed as an exact number by the inspected current-DLL UI. The entity-visibility
 predicate is intel-gated below stage 3 (zero is hidden; ownership does not
 bypass it), while the UI exposes gated color or severity categories. Strict
-raw-save projection remains denied. A future visible-input plus
-explicit-assumption extension is a separate, unimplemented policy seam, not an
-exception to this gate.
+raw-save projection remains denied. The visible-input plus explicit-assumption
+extension is implemented separately in the `conditional` profile; see the
+[conditional workflow](../../../docs/CONDITIONAL_PROJECTION.md).
+It does not grant an exception to this gate.
 Mechanics repair does not grant visibility or production-policy acceptance.
 The final bounded audit confirms parity but leaves source closure incomplete.
 

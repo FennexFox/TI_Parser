@@ -70,5 +70,6 @@ acceptance. The successful prediction case remains blocked by earlier gates.
 The exact xenoforming input remains a mandatory raw-save blocker: current-DLL
 UI paths provide gated color or severity categories, not the exact numeric
 level used by the population formula. Mock protocol success does not alter that
-denial. A visible-input plus explicit-assumption mode would be a separate,
-unimplemented policy seam.
+denial. The separate `conditional` profile implements a visible-input plus
+explicit-assumption model; see the
+[conditional workflow](../../../docs/CONDITIONAL_PROJECTION.md).

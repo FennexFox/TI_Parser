@@ -88,6 +88,15 @@ class MechanicsRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unregistered"):
             mechanic_diagnostics(["nation.unknown"])
 
+    def test_dll_symbols_are_stored_as_tuples(self):
+        self.assertEqual(
+            Rules.NATION_IP_ECONOMY_SCORE.dll_symbols,
+            ("TINationState.ModifyGDP",),
+        )
+        malformed = replace(Rules.NATION_IP_ECONOMY_SCORE, dll_symbols="TINationState.ModifyGDP")
+        with self.assertRaisesRegex(ValueError, "Invalid DLL symbols"):
+            validate_registry((malformed,))
+
     @mechanic_rule_test(
         "nation.ip.economy-score",
         "nation.ip.control-point-default-economy",

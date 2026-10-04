@@ -22,6 +22,24 @@ def _normalise_mapping(raw):
     return {str(key): float(value) for key, value in raw.items()}
 
 
+@pytest.mark.parametrize("error, expected", [
+    (audit.AuditInputError("The selected save must name ModernScenario"),
+     "The selected save must name ModernScenario"),
+    (ValueError("private-save-value"), "ValueError"),
+])
+def test_main_reports_input_reason_without_leaking_other_exception_values(
+    monkeypatch, tmp_path, capsys, error, expected,
+):
+    def fail():
+        raise error
+
+    monkeypatch.setattr(audit, "_load_fixture", fail)
+    output = tmp_path / "report.json"
+    assert audit.main(["--output", str(output)]) == 2
+    assert capsys.readouterr().err == f"projection read audit failed: {expected}\n"
+    assert not output.exists()
+
+
 def test_traced_containers_record_common_reads_and_normalization_without_values():
     shared = {"value": 2.5}
     raw = {

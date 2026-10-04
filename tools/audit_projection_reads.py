@@ -1238,7 +1238,8 @@ def main(argv: list[str] | None = None) -> int:
                           "readPathCount": len(report["dynamicReads"]["reads"])}, ensure_ascii=False))
         return exit_code
     except Exception as exc:
-        print(f"projection read audit failed: {type(exc).__name__}", file=sys.stderr)
+        detail = str(exc) if isinstance(exc, AuditInputError) else type(exc).__name__
+        print(f"projection read audit failed: {detail}", file=sys.stderr)
         return 2
 
 

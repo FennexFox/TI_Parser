@@ -45,7 +45,7 @@ Audit instrumentation is developer-only; ordinary runtime behavior must be uncha
 Implemented developer-only save/catalog payload tracing and copy/normalization
 tests. The controlled ModernScenario A/B fixture completes with baseline/traced
 result, status and coverage parity. Input/catalog hashes stay unchanged, index
-aliases remain intact and no raw-container mutations are recorded. This bounded
+aliases remain intact and no raw-container mutations are recorded.
 The observed fixture execution edges are closed by source-bound helper returns
 and execution records. This does not establish complete source-read coverage
 or production-domain closure: unobserved static candidates remain blockers.

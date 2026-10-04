@@ -111,7 +111,8 @@ serialization is stable across path, mtime, gzip compression, whitespace, and
 key order when parsed content is equal. See [API save identity](API.md#save-identity).
 
 The Python `compare_save_context` helper permits a provisional match only when
-exact fingerprints are unavailable, the save is pinned, and every required
+exact fingerprints are unavailable or either identity omits `schemaVersion`,
+the save is pinned, and every required
 field is present and equal on both observations: campaign identity
 (`campaign.realWorldCampaignStart`), `gameDate`, resolved player faction ID
 and template, and the selected nation ID. Missing/unresolved or changed values
@@ -238,9 +239,10 @@ routing success does not approve a prediction or prove actual Companion visibili
 
 Exact regional xenoforming is a required population-growth operand, but the
 reviewed game UI exposes gated color and severity cues rather than that exact
-value. The raw-save prediction therefore remains blocked. A future projection
-using visible inputs and explicit assumptions requires its own input contract
-and policy review; that alternative is not implemented or approved.
+value. The raw-save prediction therefore remains blocked. The separate
+`conditional` profile implements a model using reported visible inputs and
+explicit assumptions under its own input contract. See the
+[conditional workflow](CONDITIONAL_PROJECTION.md).
 
 Current guarded projection remains disabled: the bounded execution review found
 unclosed rule/source paths, current-DLL mechanics differences and required
