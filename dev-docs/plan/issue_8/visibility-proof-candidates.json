@@ -1,0 +1,644 @@
+{
+  "schemaVersion": 1,
+  "recordKind": "candidate-current-build-visibility-source-proof",
+  "status": "blocking-exact-raw-value-not-certified",
+  "purpose": "Read-only, source-bound investigation of the exact xenoforming level consumed by the bounded ModernScenario projection. This record is evidence for review, not a visibility approval packet.",
+  "repository": {
+    "head": "434b310fdcb51828189799e1933c7fa8079d0f9d",
+    "existingEvidencePath": "dev-docs/projection_execution_evidence.json",
+    "existingEvidenceSha256": "2134f96ba0c2be0a975fef6356e120817c607df190deb1b82742ae8e2371bb3f",
+    "scenario": "ModernScenario",
+    "advisors": [],
+    "scopeNote": "Source-binding candidate only. Legacy fixture-count context is omitted; no current execution closure or visibility approval is claimed."
+  },
+  "buildBinding": {
+    "assemblyPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Terra Invicta\\TerraInvicta_Data\\Managed\\Assembly-CSharp.dll",
+    "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+    "ilspycmdVersion": "9.1.0.7988",
+    "ilReferenceDumpTemporaryPath": "%TEMP%\\ti-current-dll-all.il",
+    "ilReferenceDumpSha256": "81922e43b9298a7ef248c0c763767d7e2b16c3a8e803921af346ab439e9675de",
+    "unityCoreModulePath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Terra Invicta\\TerraInvicta_Data\\Managed\\UnityEngine.CoreModule.dll",
+    "unityCoreModuleSha256": "33435ff1025f34c7ac661477dbcaa329af7c5d7ae2bac81bcb8b0d636ca07aee",
+    "sourceFilesAreTemporaryDecompilationLocators": true,
+    "temporaryDecompiledSourceSha256": {
+      "regionController": "dd2b0b53cc29760afeb2bf8fa2b17a07c5248070b343cc0200ee51a91e300b20",
+      "alienMarkerController": "35c57558e13fd03b4c1db2ef1c2e9277708ab30d2c00dabdd0d79b27c7d3c627",
+      "unityColor": "ebb03db393573a782f214b3cc9255f1037894eb49da5092f9006ee7abad0b293",
+      "xenoformingState": "eb53ffdc0db8c4854d5a6c2f16468c60d0601018625268ab4908b26c8b770b53",
+      "regionState": "24b74977e81674bb78288daa6e0b0595f6647d89a31d95e082af9b8fe3f06b93",
+      "nationInfoController": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035"
+    }
+  },
+  "dependencies": [
+    {
+      "id": "xenoforming-level",
+      "savePathPatterns": [
+        "$.gamestates.TIRegionState[*].Value.xenoforming",
+        "$.gamestates.TIRegionXenoformingState[*].Value.xenoformingLevel"
+      ],
+      "parserConsumer": "extract_nation_projection_state -> _annual_population_growth -> monthly population",
+      "parserSources": [
+        {
+          "path": "tools/ti_parser_projection_adapter.py",
+          "symbol": "extract_nation_projection_state",
+          "lines": [
+            847,
+            914
+          ],
+          "sourceSha256": "a38705e2d09b6e4193bfaf951197453cbc86b4fa3783f597b05289b5cd0ebe3c"
+        },
+        {
+          "path": "tools/ti_parser_nation_projection.py",
+          "symbol": "_annual_population_growth",
+          "lines": [
+            3274,
+            3317
+          ],
+          "sourceSha256": "526845f2593cb9f8d24695518837bc99559f95fe284b6497f9785282e06877c9"
+        },
+        {
+          "path": "tools/ti_parser_nation_projection.py",
+          "symbol": "_run_monthly_transaction",
+          "lines": [
+            3331,
+            3456
+          ],
+          "sourceSha256": "526845f2593cb9f8d24695518837bc99559f95fe284b6497f9785282e06877c9"
+        }
+      ],
+      "requiredMechanics": {
+        "symbol": "TIRegionState.annualPopulationGrowth",
+        "sourceFile": "TIRegionState.cs",
+        "decompiledLines": [
+          369,
+          375
+        ],
+        "sourceSha256": "24b74977e81674bb78288daa6e0b0595f6647d89a31d95e082af9b8fe3f06b93",
+        "operation": "subtracts xenoforming.xenoformingLevel / 200f inside annual population growth; the result feeds monthly population growth"
+      },
+      "existingFinding": {
+        "classification": "unresolved",
+        "blocking": true,
+        "blockingReason": "Strict raw-save projection requires this exact numeric operand. In the inspected current DLL, zero is hidden, levels below stage 3 require faction intel, and ownership does not bypass that gate; stage 3 is visible. Inspected UI paths expose only gated color (saturated at stage 3), severity categories, markers, or aggregate P2 population growth, not the exact level. This is a bounded denial, not a universal claim that no UI path exists anywhere.",
+        "classificationScope": "Exact raw xenoforming level remains undisclosed/unproved even when entity visibility is satisfied; this classification concerns the exact operand, not the entity-discovery predicate."
+      }
+    },
+    {
+      "id": "annual-population-modifier",
+      "savePathPatterns": [
+        "$.gamestates.TIRegionState[*].Value.annualPopGrowthModifier"
+      ],
+      "parserConsumer": "extract_nation_projection_state -> _annual_population_growth",
+      "parserSources": [
+        {
+          "path": "tools/ti_parser_projection_adapter.py",
+          "symbol": "extract_nation_projection_state",
+          "lines": [
+            706
+          ],
+          "sourceSha256": "a5343e83fa686eb3af1760929a4d0dac41e0b8ecddfbf3a4e48b0884209b65e5"
+        },
+        {
+          "path": "tools/ti_parser_nation_projection.py",
+          "symbol": "_annual_population_growth",
+          "lines": [
+            2735,
+            2769,
+            2771
+          ],
+          "sourceSha256": "23176d18aea7745acd92773960d615dcf722eb1d38cfc0a15d593f4e2d6c9b81"
+        }
+      ],
+      "visibilityStatus": "unresolved-required",
+      "blockingReason": "No inspected nation/region UI getter exposes constituent saved modifier; aggregate visibility is insufficient.",
+      "relatedUi": {
+        "symbol": "NationInfoController.BuildPopulationTooltip",
+        "sourceFile": "NationInfoController.cs",
+        "decompiledLines": [
+          1944,
+          1951
+        ],
+        "sourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035",
+        "display": "aggregate annual population rate formatted P2; does not expose annualPopGrowthModifier or the exact raw constituents"
+      }
+    }
+  ],
+  "visibilityPredicate": {
+    "symbol": "TIRegionXenoformingState.VisibleToFaction",
+    "sourceFile": "TIRegionXenoformingState.cs",
+    "decompiledLines": [
+      274,
+      285
+    ],
+    "sourceSha256": "eb53ffdc0db8c4854d5a6c2f16468c60d0601018625268ab4908b26c8b770b53",
+    "assemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350",
+    "logic": [
+      {
+        "condition": "xenoformingLevel >= stage3Xenoforming",
+        "result": true,
+        "threshold": 75.0
+      },
+      {
+        "condition": "0 < xenoformingLevel < stage3Xenoforming",
+        "result": "faction?.SufficientIntel(this, (autodetectThreshold - faction.alienInvestigations) / 100f) ?? false",
+        "autodetectThreshold": 65.0
+      },
+      {
+        "condition": "xenoformingLevel == 0",
+        "result": false
+      }
+    ],
+    "ownershipDoesNotBypassPredicate": true,
+    "fixtureZeroProvesVisibility": false,
+    "predicateScope": "This predicate gates entity discovery/visual disclosure; it does not establish exact numeric-level disclosure."
+  },
+  "actualUiPaths": [
+    {
+      "symbol": "RegionController.GetRegionFillColor",
+      "sourceFile": "RegionController.cs",
+      "decompiledLines": [
+        239,
+        244
+      ],
+      "sourceSha256": "dd2b0b53cc29760afeb2bf8fa2b17a07c5248070b343cc0200ee51a91e300b20",
+      "style": "MapColorationStyle.byXenoformingLevel",
+      "gate": "region.xenoforming.VisibleToFaction(GameControl.control.activePlayer)",
+      "visibleOutput": "Color.Lerp(Blue, red, xenoformingLevel / stage3Xenoforming)",
+      "hiddenOutput": "TransparentWhite",
+      "displayPrecision": "Color value only; no raw numeric label or exact saved-float readout"
+    },
+    {
+      "symbol": "UnityEngine.Color.Lerp",
+      "sourceFile": "UnityEngine.CoreModule.dll / UnityEngine.Color",
+      "decompiledLines": [
+        180,
+        184
+      ],
+      "decompiledSourceSha256": "ebb03db393573a782f214b3cc9255f1037894eb49da5092f9006ee7abad0b293",
+      "logic": "clamps t with Mathf.Clamp01 before interpolation",
+      "consequence": "for xenoformingLevel >= 75, all values map to the same red endpoint; e.g. 76 and 99 are indistinguishable in this mode",
+      "assemblySha256": "33435ff1025f34c7ac661477dbcaa329af7c5d7ae2bac81bcb8b0d636ca07aee",
+      "gameBuildAssemblySha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350"
+    },
+    {
+      "symbol": "RegionController.RegionTooltip",
+      "sourceFile": "RegionController.cs",
+      "decompiledLines": [
+        466,
+        550
+      ],
+      "sourceSha256": "dd2b0b53cc29760afeb2bf8fa2b17a07c5248070b343cc0200ee51a91e300b20",
+      "xenoformingCaseLines": [
+        545,
+        550
+      ],
+      "gate": "region.xenoforming.VisibleToFaction(GameControl.control.activePlayer)",
+      "visibleOutput": "severityDescription only",
+      "severityBands": [
+        {
+          "name": "light",
+          "condition": "level < 30"
+        },
+        {
+          "name": "heavy",
+          "condition": "30 <= level < 75"
+        },
+        {
+          "name": "severe",
+          "condition": "level >= 75"
+        }
+      ]
+    },
+    {
+      "symbol": "AlienMarkerController.UpdateXenoformingMarker",
+      "sourceFile": "AlienMarkerController.cs",
+      "decompiledLines": [
+        490,
+        503
+      ],
+      "sourceSha256": "35c57558e13fd03b4c1db2ef1c2e9277708ab30d2c00dabdd0d79b27c7d3c627",
+      "gate": "xenoforming != null && xenoformingLevel > 0 && VisibleToFaction(activePlayer)",
+      "visibleOutput": "marker presence and asset icon; no numeric level"
+    },
+    {
+      "symbol": "AlienMarkerController.SetAnimationOnMarker",
+      "sourceFile": "AlienMarkerController.cs",
+      "decompiledLines": [
+        370,
+        397
+      ],
+      "sourceSha256": "35c57558e13fd03b4c1db2ef1c2e9277708ab30d2c00dabdd0d79b27c7d3c627",
+      "visibleOutput": "special alert animation only at level >= 75; no numeric level"
+    },
+    {
+      "symbol": "TIRegionXenoformingState.GetIconResourcePath / GetIllustrationPath / get_severityDescription",
+      "sourceFile": "TIRegionXenoformingState.cs",
+      "decompiledLines": [
+        27,
+        40,
+        87,
+        110
+      ],
+      "sourceSha256": "eb53ffdc0db8c4854d5a6c2f16468c60d0601018625268ab4908b26c8b770b53",
+      "visibleOutput": "stage-selected assets and light/heavy/severe descriptions"
+    },
+    {
+      "symbol": "NationInfoController.BuildRegionDataTooltip",
+      "sourceFile": "NationInfoController.cs",
+      "decompiledLines": [
+        1752,
+        1835
+      ],
+      "sourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035",
+      "visibleOutput": "generic AlienEntityPresent marker when active faction KnownAlienEntities has any entity in the region; not the exact xenoforming level"
+    },
+    {
+      "symbol": "NationInfoController.OnRegionEntityUpdated",
+      "sourceFile": "NationInfoController.cs",
+      "decompiledLines": [
+        3593,
+        3599
+      ],
+      "sourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035",
+      "gate": "closes the selected alien-entity panel when VisibleToFaction(activePlayer) becomes false"
+    },
+    {
+      "symbol": "NationInfoController.BuildPopulationTooltip",
+      "sourceFile": "NationInfoController.cs",
+      "decompiledLines": [
+        1944,
+        1951
+      ],
+      "sourceSha256": "c79598535ae9732b02c96476c12b79eb285092819a220b63ae5be2e35f245035",
+      "visibleOutput": "aggregate population change and annual rate formatted P2; no exact raw xenoforming constituent"
+    }
+  ],
+  "fullAssemblyGetterReferenceInventory": {
+    "search": "all IL direct call/callvirt references to TIRegionXenoformingState.get_xenoformingLevel()",
+    "callOccurrenceCount": 58,
+    "uniqueMethodCount": 36,
+    "referenceDumpSha256": "81922e43b9298a7ef248c0c763767d7e2b16c3a8e803921af346ab439e9675de",
+    "methods": [
+      {
+        "symbol": "TIRegionCondition_fXenoforming::PassesCondition",
+        "ilLines": [
+          38574
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIMissionModifier_AlienAssetDefense::GetModifier",
+        "ilLines": [
+          92748
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIMissionTarget_AlienAsset::ValidateSingleTarget",
+        "ilLines": [
+          98823
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIObjectiveTemplate::ValidObjectiveTarget",
+        "ilLines": [
+          149141
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "AlienMarkerController::SetAnimationOnMarker",
+        "ilLines": [
+          472010
+        ],
+        "reviewClass": "direct-ui-consumer"
+      },
+      {
+        "symbol": "AlienMarkerController::UpdateXenoformingMarker",
+        "ilLines": [
+          472529
+        ],
+        "reviewClass": "direct-ui-consumer"
+      },
+      {
+        "symbol": "RegionController::GetRegionFillColor",
+        "ilLines": [
+          499834
+        ],
+        "reviewClass": "direct-ui-consumer"
+      },
+      {
+        "symbol": "TIFactionState::SetIntel",
+        "ilLines": [
+          740375
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIFactionState::GetAdvice",
+        "ilLines": [
+          766374,
+          766397
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIMissionState::DetectionPhase",
+        "ilLines": [
+          777394
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIAlienArmyState::get_dailyHealRate",
+        "ilLines": [
+          786353
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIArmyState::RegionMeetsDestinationCriteria",
+        "ilLines": [
+          796438
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIMegafaunaArmyState::CanHealInRegion",
+        "ilLines": [
+          809266
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIMegafaunaArmyState::AI_DesiredRegion",
+        "ilLines": [
+          809508
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "'<>c'::'<get_xenoformingImpactOnUnrest>b__490_0'",
+        "ilLines": [
+          811433
+        ],
+        "reviewClass": "derived-rest-state-mechanics"
+      },
+      {
+        "symbol": "TINationState::PeriodicInvoluntaryRegionTransferAwayCheck",
+        "ilLines": [
+          856208,
+          856221
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIRegionState::ApplyDamageToRegion",
+        "ilLines": [
+          876875
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIRegionState::get_annualPopulationGrowth",
+        "ilLines": [
+          880791
+        ],
+        "reviewClass": "required-mechanics-consumer"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::GetIconResourcePath",
+        "ilLines": [
+          885992,
+          886001
+        ],
+        "reviewClass": "ui-visibility-or-formatting-helper"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::GetIllustrationPath",
+        "ilLines": [
+          886025,
+          886034
+        ],
+        "reviewClass": "ui-visibility-or-formatting-helper"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::ChangeXenoformingLevel",
+        "ilLines": [
+          886076,
+          886083
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::SetXenoformingLevel",
+        "ilLines": [
+          886109,
+          886117,
+          886122
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::get_severityDescription",
+        "ilLines": [
+          886143,
+          886152
+        ],
+        "reviewClass": "ui-visibility-or-formatting-helper"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::Extant",
+        "ilLines": [
+          886174
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::UpdateIntel",
+        "ilLines": [
+          886258,
+          886269
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::DailyXenoformingGrowth",
+        "ilLines": [
+          886322,
+          886357,
+          886363,
+          886366,
+          886389,
+          886623,
+          886627,
+          886636
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::VisibleToFaction",
+        "ilLines": [
+          886724,
+          886729
+        ],
+        "reviewClass": "ui-visibility-or-formatting-helper"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::AlienAttributeBonus",
+        "ilLines": [
+          886805
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TIRegionXenoformingState::ResolveAssault",
+        "ilLines": [
+          886857,
+          886905,
+          887000,
+          887006
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "'<>c'::'<MonthlyGlobalEnvironmentalChanges>b__228_0'",
+        "ilLines": [
+          911522
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "'<>c'::'<AttemptBombardXenofauna>b__310_4'",
+        "ilLines": [
+          1088543
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "TISpaceShipState::Bombard",
+        "ilLines": [
+          1137901,
+          1137919
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "AIEvaluators::SelectAlienArmyLandingRegion",
+        "ilLines": [
+          1216362
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "AICouncilorMissionPlanner::AssaultAlienAssetPayoff",
+        "ilLines": [
+          1593340
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "AICouncilorMissionPlanner::BuildFacilityPayoff",
+        "ilLines": [
+          1593665
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      },
+      {
+        "symbol": "AICouncilorMissionPlanner::XenoformingPayoff",
+        "ilLines": [
+          1598308,
+          1598329
+        ],
+        "reviewClass": "game-mechanics-ai-or-internal-consumer"
+      }
+    ]
+  },
+  "relatedUnresolvedBlockingDependencies": [
+    {
+      "id": "annual-population-modifier",
+      "classification": "unresolved-required",
+      "classificationScope": "Exact regional modifier in bounded monthly-growth path.",
+      "blockingReason": "No inspected nation/region UI getter exposes constituent saved modifier; aggregate visibility is insufficient."
+    },
+    {
+      "id": "priority-progress",
+      "classification": "visible-formatted-aggregate-precision-unresolved",
+      "classificationScope": "Displayed Knowledge/Welfare progress only.",
+      "blockingReason": "Exact raw numeric precision and arbitrary progress-map membership are not established by formatted UI."
+    },
+    {
+      "id": "national-stats",
+      "classification": "visible-formatted-statistics-precision-unresolved",
+      "classificationScope": "Displayed national statistics, not arbitrary saved float precision.",
+      "blockingReason": "Formatted display does not establish permission for exact saved precision used by simulation."
+    },
+    {
+      "id": "regional-population",
+      "classification": "visible-formatted-statistic-precision-unresolved",
+      "classificationScope": "Displayed regional population amount.",
+      "blockingReason": "Exact underlying regional float precision not proved by N2 text."
+    },
+    {
+      "id": "welfare-colony-counter",
+      "classification": "selected-candidate-visible-other-reads-unresolved",
+      "classificationScope": "Only next colony's counter when canAccumulateDecolonizeTriggers; no blanket classification.",
+      "blockingReason": "Adapter still reads every region counter; nonselected/noncolony counter visibility is not established."
+    },
+    {
+      "id": "pcgdp-history-tracker",
+      "classification": "unresolved-required-raw-history",
+      "classificationScope": "Serialized quarter-keyed tracker, not displayed derived effect.",
+      "blockingReason": "Raw tracker/maximum visibility not established by derived impact; empty fixture tracker is not authoritative valid game-state proof."
+    },
+    {
+      "id": "serialized-rest-caches",
+      "classification": "live-aggregate-visible-saved-cache-unresolved",
+      "classificationScope": "Live UI getter evidence only, not equality with serialized cache.",
+      "blockingReason": "Saved-cache/live-getter equivalence not proved; parser chooses raw5 for transformed cached5 and fixed unrest10.5 at clamped endpoints."
+    },
+    {
+      "id": "councilor-preparation",
+      "classification": "unresolved-incidental-preparation",
+      "classificationScope": "Executed preparation and static root expansion; not proof every nested field read in fixture.",
+      "blockingReason": "No reviewed councilor/org UI/intel closure; foreign councilors are scanned before roster filtering; empty advisors does not authorize reads."
+    },
+    {
+      "id": "mission-preparation",
+      "classification": "unresolved-incidental-preparation",
+      "classificationScope": "Mission event and assignment inputs reached by adapter.",
+      "blockingReason": "No current-build UI visibility evidence for saved event/cadence/internal mission state."
+    },
+    {
+      "id": "faction-effects",
+      "classification": "unresolved-required-and-preparation",
+      "classificationScope": "Per-faction effect names/expiration times; visible bonus aggregate is narrower.",
+      "blockingReason": "Aggregate bonus visibility does not establish raw effect or foreign-faction expiration permission."
+    },
+    {
+      "id": "topbar-preparation",
+      "classification": "unresolved-incidental-preparation",
+      "classificationScope": "Source root checklist, not exhaustive field inventory nor blanket hidden classification.",
+      "blockingReason": "Raw income/research/hab/fleet preparation still needs source-specific proof; output-only scope does not erase prior reads."
+    }
+  ],
+  "assessment": {
+    "exactRawLevelUiProof": false,
+    "sourceSearchProvesNoUiVisibilityAnywhere": false,
+    "approvalReady": false,
+    "reason": "The exact raw xenoforming level is required by the monthly population formula. The inspected current-DLL UI gates disclosure below stage 3 on faction intel (zero is hidden; ownership does not bypass it); map color saturates at stage 3 and tooltip output is categorical, while marker and population tooltip paths disclose no exact level. The bounded source review does not prove universal UI absence. Fixture zero, ownership, categorical/color output, and aggregate P2 growth do not establish exact-value visibility.",
+    "nextEvidenceBoundary": "Keep strict raw-save projection denied while exact xenoforming visibility is unproved. A future visible-input plus explicit-assumption mode is a separate, unimplemented policy seam requiring its own approval and evidence; this source record grants no exception."
+  },
+  "parserBindingScope": {
+    "hashAlgorithm": "sha256-utf8-lf",
+    "currentReviewedScope": [
+      "xenoforming-level operand binding only"
+    ],
+    "staleOrUnresolvedScopes": [
+      "annual-population-modifier parser binding",
+      "all other copied visibility parser bindings"
+    ],
+    "note": "The current source binding and current-DLL UI denial do not certify visibility. Other parser fingerprints remain historical until individually reviewed."
+  }
+}

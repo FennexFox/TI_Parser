@@ -7,15 +7,15 @@
   "sourceFiles": [
     {
       "name": "2003Scenario/TIProjectTemplate.json",
-      "sha256": "30dbd8e785bbd3d3b89a3b0ae1aebfb0dd413ff9629304f078e650a5df7d3154"
+      "sha256": "2494fdc59a54c13bf5329dbe78cb73d167887e3da2f664b7fd148d0b78f02fd7"
     },
     {
       "name": "2003Scenario/TITechTemplate.json",
-      "sha256": "767a1125878e274464224d7683c39aa879f495977a34ab99f32d7d8b5821791b"
+      "sha256": "2207a5676f5645a298420c5821feaf1213db0fc6ed960a100c89187f4b8bb512"
     },
     {
       "name": "BrokenEarthScenario/TIProjectTemplate.json",
-      "sha256": "2272853270f9af6c7e406854f25780bce5d46749c71c98f857badf726aa7ad13"
+      "sha256": "ae8ba9e9a09f7fb10576b20e7310e98d3a01a3468cc29466d504dfa4c425fa21"
     },
     {
       "name": "BrokenEarthScenario/TITechTemplate.json",
@@ -42065,7 +42065,7 @@
             "Effect_BS_SpaceScienceBonusA",
             "Effect_BS_MilitaryScienceBonusA"
           ],
-          "AI_techRole": "SpaceDevelopment",
+          "AI_techRole": "Blocker",
           "AI_criticalTech": true,
           "endGameTech": false,
           "kind": "tech",
@@ -42089,7 +42089,7 @@
             "Effect_BS_SocialScienceBonusA",
             "Effect_BS_InformationScienceBonusA"
           ],
-          "AI_techRole": "EarthPolitics",
+          "AI_techRole": "Blocker",
           "AI_criticalTech": true,
           "endGameTech": false,
           "kind": "tech",
@@ -42111,7 +42111,7 @@
             "Effect_BS_LifeScienceBonusA",
             "Effect_BS_EnergyScienceBonusA"
           ],
-          "AI_techRole": "Income",
+          "AI_techRole": "Blocker",
           "AI_criticalTech": true,
           "endGameTech": false,
           "kind": "tech",
@@ -43798,6 +43798,7 @@
           "initialUnlockChance": 0,
           "deltaUnlockChance": 10,
           "maxUnlockChance": 50,
+          "factionAlways": "CooperateCouncil",
           "resourcesGranted": [],
           "kind": "project",
           "requirements": {
@@ -43812,8 +43813,7 @@
             "Project_BS_ExploringOurOptions"
           ],
           "factionPrereq": [],
-          "disable": false,
-          "factionAlways": []
+          "disable": false
         },
         "Project_BS_MakingHistoryIII": {
           "dataName": "Project_BS_MakingHistoryIII",
@@ -53179,7 +53179,7 @@
       }
     }
   },
-  "payloadFingerprint": "e4e1275eb46f1de57a5e1e41fe1722efa65d7e9256f3086d6e56964533b21aca",
+  "payloadFingerprint": "2f8fd17cd6642bc36349c5b51ecbd0b980b939e2d46eca308a12d8a0fd33633f",
   "source": {
     "templateRoot": "TerraInvicta_Data/StreamingAssets/Templates",
     "techTemplate": {

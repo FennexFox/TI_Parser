@@ -93,3 +93,87 @@ verified tuples. Consent is narrow: package catalogs remain mandatory, and
 unsupported mechanics, unresolved required references, and missing blocking
 dependencies stay explicit. See [Commands](COMMANDS.md) for the CLI contract
 and [the beta data notice](BETA_DATA_NOTICE.md) for data boundaries.
+
+## Fair-play profile boundary
+
+The MCP adapter accepts `--profile default|fair-play|conditional`; omitting the option
+preserves the default route set. `run_profile(session, analysis, *,
+profile="default", **kwargs)` supports default/fair-play routing for session calls.
+The MCP-only conditional profile uses the separate
+[conditional workflow](CONDITIONAL_PROJECTION.md). In
+fair-play, only `inspect-save` is an analysis route. `capabilities` remains an
+inventory tool and lists only `inspect-save`; every other registry route is
+denied before its handler runs. `nation-projection` is globally blocked
+pending the authoritative visibility audit described in the
+[interoperability audit](../dev-docs/fairplay_interoperability.md).
+
+Fair-play keeps the envelope fields `schemaVersion`, `parserVersion`,
+`analysis`, `saveIdentity`, `compatibility`, and `status`. Its save identity
+allowlist contains the supported fingerprint, observed game date/scenario and
+version facts, campaign start, and resolved player faction identity; unresolved
+player identity is rejected. Compatibility contains only status, reason codes,
+and a valid catalog fingerprint, without observations, context, or mod
+internals. Errors are reduced to
+`schemaVersion`, `status`, and a generic error code/message, preventing
+profile-denied details from leaking through diagnostics. Compatibility checks
+remain in force; `allow_unverified` does not grant access to denied routes.
+
+The Python `compare_save_context(parser_identity, companion_identity,
+parser_nation_id, companion_nation_id, *, pinned,
+previous_parser_fingerprint=None)` helper compares save context; it is not an
+MCP tool. Exact matching requires schema version 1 on both identities, equal
+supported canonical-save SHA-256 fingerprints, and equal campaign start, game
+date, resolved player faction ID and template, and selected nation ID. A
+provisional match requires an unavailable exact fingerprint or a missing
+`schemaVersion`, a pinned save, and every context value present and equal. A present
+supported algorithm with an invalid digest, a previous-fingerprint change, a
+mismatch, or a missing/changed context field rejects comparison; fingerprint
+mismatch never falls back to weak fields.
+`inspect-save` does not expose a selected nation ID, so an MCP-only workflow
+must leave that comparison unresolved unless the ID is provided by another
+authoritative approved source. See the [MCP runbook](MCP_SETUP.md#matching-the-pinned-save)
+for operator steps.
+
+`validate_advice_generation(context_envelope, ti_inspection_envelope,
+projection_envelope, ti_reinspect_envelope,
+companion_reobserved_context_envelope, *, pinned, subject_binding=None)` checks a complete advice
+observation batch. It is a Python correlation helper, not a policy approval or
+MCP tool. Peer envelopes require `status="complete"`, `saveIdentity`,
+`selectedNationId`, and `result.nation.id` equal to that selected ID. Identities
+must describe the snapshot that produced each result, not a later lookup.
+
+TI envelopes use schema version 1, the expected analysis, and their response
+`saveIdentity`. Inspection and reinspection remain save-only and retain their
+matching `result.saveIdentity`; they need no selected nation field. All three
+TI fingerprints must be supported and identical.
+
+The helper additionally requires `subject_binding=receipt`, an opaque,
+process-local receipt issued by the trusted application operation. The
+operation resolves the strict player and selected nation, verifies every CP's
+type, nation, count and player ownership, executes the existing session
+projection, and seals that exact result object, its complete content and its
+save identity. A JSON `selectedNationId`, guessed ID, copied or altered result,
+or receipt from another result cannot supply attestation. The receipt's nation
+must match both Companion observations. This is subject/correlation evidence;
+it grants no visibility, mechanics or fair-play approval.
+
+Issuance is currently a private application contract tested with real sessions
+and packaged calculations. It is not a serialized MCP token or a new public
+tool. Fair-play admission remains owned by `run_profile`, which still denies
+projection before any subject or save preparation. Current public MCP tools
+cannot finish the successful advice sequence. A future approved adapter must
+issue and validate the receipt within the application boundary; callers must
+not add guessed IDs to inspection responses.
+
+A future approved adapter's complete projection needs usable plans and
+comparison data. An incomplete result must retain its authoritative prefix;
+the helper returns `outcomeStatus="incomplete"` rather than converting it to a
+complete prediction. Deferred/error results reject the batch. Pinned weak peer
+identity can return only `provisional`, even after reobservation. Any conflict
+or missing observation requires discarding the batch and observing again.
+
+Fair-play capabilities include `fairPlayPolicy` with the pending, disabled
+`fair-play-projection-v1` identity. Registry target classification and an
+approved execution policy are separate; no projection domain is approved yet.
+Companion MCP and mechanics behavior still require external acceptance. Local
+profile support and mock-client routing do not establish those results.

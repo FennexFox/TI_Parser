@@ -100,12 +100,20 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
         pytest.skip("MCP adapter is not present in the committed HEAD")
     if not _tracked_in_head("tools/ti_parser_schema.py"):
         pytest.skip("Output-schema helper is not present in the committed HEAD")
-
     archive = tmp_path / "ti-parser-mcp.zip"
     build_beta_distribution(REPOSITORY_ROOT, archive, ref="HEAD")
     extracted = tmp_path / "extracted"
     extract_verified(archive, extracted)
     assert (extracted / "tools" / "ti_parser_schema.py").is_file()
+    assert not (extracted / "tests").exists()
+    assert not (extracted / "tools" / "audit_projection_reads.py").exists()
+    assert not (extracted / "tools" / "projection_audit_dependencies.py").exists()
+    assert not (extracted / "tools" / "projection_audit_evidence.py").exists()
+    assert not (extracted / "dev-docs" / "projection_execution_evidence.json").exists()
+    assert not (extracted / "tools" / "run_fairplay_routing.py").exists()
+    if _tracked_in_head("tools/ti_parser_fairplay.py"):
+        assert (extracted / "tools" / "ti_parser_fairplay.py").is_file()
+        assert not (extracted / "dev-docs").exists()
 
     save = tmp_path / "외부 세이브 경로" / "campaign copy.gz"
     _synthetic_save(save)
@@ -172,12 +180,108 @@ def test_extracted_zip_serves_application_over_stdio(tmp_path: Path) -> None:
     assert inspected["saveIdentity"] == deferred["saveIdentity"] == allowed["saveIdentity"]
     assert save.read_bytes() == original_save_bytes
 
+    if _tracked_in_head("tools/ti_parser_fairplay.py"):
+        async def exercise_fairplay():
+            from mcp import ClientSession, StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            from jsonschema import validate
+
+            params = StdioServerParameters(command=sys.executable, args=[
+                str(extracted / "tools" / "ti_parser_mcp.py"), "--profile", "fair-play",
+            ], cwd=str(tmp_path))
+            async with stdio_client(params) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    listed = await session.list_tools()
+                    by_name = {tool.name: tool for tool in listed.tools}
+                    assert set(by_name) == {"inspect-save", "capabilities"}
+                    inventory = await session.call_tool("capabilities", {})
+                    inventory_payload = _envelope(inventory)
+                    validate(inventory_payload, by_name["capabilities"].output_schema)
+                    assert inventory_payload["fairPlayPolicy"]["id"] == "fair-play-projection-v1"
+                    assert inventory_payload["fairPlayPolicy"]["enabled"] is False
+                    result = await session.call_tool("inspect-save", {"save_path": str(save)})
+                    assert not result.is_error
+                    payload = _envelope(result)
+                    validate(payload, by_name["inspect-save"].output_schema)
+                    assert payload["saveIdentity"] == inspected["saveIdentity"]
+                    assert "modEvidence" not in payload["compatibility"]
+
+        asyncio.run(exercise_fairplay())
+        assert save.read_bytes() == original_save_bytes
+
+
+@pytest.mark.skipif(not MCP_AVAILABLE, reason="optional MCP dependency is not installed")
+def test_extracted_zip_conditional_profile_inventory_and_forged_receipt(tmp_path: Path) -> None:
+    required = (
+        "tools/ti_parser_mcp.py",
+        "tools/ti_parser_conditional_application.py",
+        "tools/ti_parser_conditional_projection.py",
+        "docs/CONDITIONAL_PROJECTION.md",
+    )
+    if any(not _tracked_in_head(path) for path in required):
+        pytest.skip("conditional profile sources and runbook are not present in committed HEAD yet")
+
+    archive = tmp_path / "ti-parser-conditional.zip"
+    build_beta_distribution(REPOSITORY_ROOT, archive, ref="HEAD")
+    extracted = tmp_path / "conditional-extracted"
+    extract_verified(archive, extracted)
+    for relative in required[1:]:
+        assert (extracted / relative).is_file()
+
+    async def exercise_conditional_stdio() -> None:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+        from jsonschema import validate
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=[str(extracted / "tools" / "ti_parser_mcp.py"), "--profile", "conditional"],
+            cwd=str(tmp_path),
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream, read_timeout_seconds=120) as session:
+                await session.initialize()
+                listed = await session.list_tools()
+                by_name = {tool.name: tool for tool in listed.tools}
+                assert set(by_name) == {
+                    "inspect-save", "capabilities", "register-visible-context",
+                    "conditional-nation-projection", "verify-visible-generation",
+                }
+                for tool in listed.tools:
+                    assert tool.output_schema is not None
+                    from jsonschema import Draft202012Validator
+                    Draft202012Validator.check_schema(tool.input_schema)
+                    Draft202012Validator.check_schema(tool.output_schema)
+
+                capabilities_result = await session.call_tool("capabilities", {})
+                assert not capabilities_result.is_error
+                capabilities = _envelope(capabilities_result)
+                validate(capabilities, by_name["capabilities"].output_schema)
+                assert capabilities["profile"] == "conditional"
+                assert capabilities["policy"]["rawSaveProjectionEnabled"] is False
+
+                denied_result = await session.call_tool("conditional-nation-projection", {
+                    "receipt": "forged-receipt",
+                    "plans": [
+                        {"name": "knowledge", "pips": {"Knowledge": 3, "Welfare": 1}},
+                        {"name": "welfare", "pips": {"Knowledge": 1, "Welfare": 3}},
+                    ],
+                })
+                assert denied_result.is_error
+                denied = _envelope(denied_result)
+                validate(denied, by_name["conditional-nation-projection"].output_schema)
+                assert denied["error"]["code"] == "conditional-receipt-invalid"
+
+    asyncio.run(exercise_conditional_stdio())
+
 
 def test_missing_optional_dependency_is_stderr_only(tmp_path: Path) -> None:
     isolated_entrypoint = (
         "import runpy, sys; "
         "sys.path.insert(0, sys.argv[1]); "
-        "runpy.run_path(sys.argv[2], run_name='__main__')"
+        "entrypoint = sys.argv[2]; sys.argv = [entrypoint]; "
+        "runpy.run_path(entrypoint, run_name='__main__')"
     )
     process = subprocess.Popen(
         [

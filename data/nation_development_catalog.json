@@ -46181,6 +46181,10 @@
         "value": 4.0,
         "valueOrigin": "TIGlobalConfig compiled field initializer"
       },
+      "basePassiveDemocracyIncreaseFromNeighbor": {
+        "value": 0.005,
+        "valueOrigin": "TIGlobalConfig compiled field initializer"
+      },
       "cohesionImpactMultiplierIfSeparatistMovement": {
         "value": 1.0,
         "valueOrigin": "TIGlobalConfig compiled field initializer"
@@ -46516,1817 +46520,2180 @@
       "map_Aceh": {
         "dataName": "map_Aceh",
         "latitude": 4.2,
-        "longitude": 97.2
+        "longitude": 97.2,
+        "solarBody": null
       },
       "map_Aden": {
         "dataName": "map_Aden",
         "latitude": 16,
-        "longitude": 48
+        "longitude": 48,
+        "solarBody": null
       },
       "map_Afghanistan": {
         "dataName": "map_Afghanistan",
         "latitude": 33.5,
-        "longitude": 65
+        "longitude": 65,
+        "solarBody": null
       },
       "map_Ahvaz": {
         "dataName": "map_Ahvaz",
         "latitude": 31.24,
-        "longitude": 49.16
+        "longitude": 49.16,
+        "solarBody": null
       },
       "map_Alaska": {
         "dataName": "map_Alaska",
         "latitude": 64.55,
-        "longitude": -151.15
+        "longitude": -151.15,
+        "solarBody": null
       },
       "map_Albania": {
         "dataName": "map_Albania",
         "latitude": 40.3,
-        "longitude": 20.1
+        "longitude": 20.1,
+        "solarBody": null
       },
       "map_Alberta": {
         "dataName": "map_Alberta",
         "latitude": 53.5,
-        "longitude": -114.67
+        "longitude": -114.67,
+        "solarBody": null
       },
       "map_Alexandria": {
         "dataName": "map_Alexandria",
         "latitude": 29.36,
-        "longitude": 28
+        "longitude": 28,
+        "solarBody": null
       },
       "map_Algeria": {
         "dataName": "map_Algeria",
         "latitude": 36.17,
-        "longitude": 2.5
+        "longitude": 2.5,
+        "solarBody": null
       },
       "map_Almaty": {
         "dataName": "map_Almaty",
         "latitude": 48.98,
-        "longitude": 76.523
+        "longitude": 76.523,
+        "solarBody": null
       },
       "map_Amazonia": {
         "dataName": "map_Amazonia",
         "latitude": -4,
-        "longitude": -64
+        "longitude": -64,
+        "solarBody": null
       },
       "map_AmericanCaribbean": {
         "dataName": "map_AmericanCaribbean",
         "latitude": 18.19,
-        "longitude": -66.24
+        "longitude": -66.24,
+        "solarBody": null
       },
       "map_AmericanPacific": {
         "dataName": "map_AmericanPacific",
         "latitude": 21.45,
-        "longitude": -157.99
+        "longitude": -157.99,
+        "solarBody": null
       },
       "map_Anatolia": {
         "dataName": "map_Anatolia",
         "latitude": 39.25,
-        "longitude": 35.57
+        "longitude": 35.57,
+        "solarBody": null
       },
       "map_AndhraPradesh": {
         "dataName": "map_AndhraPradesh",
         "latitude": 16.29,
-        "longitude": 80.17
+        "longitude": 80.17,
+        "solarBody": null
       },
       "map_Angola": {
         "dataName": "map_Angola",
         "latitude": -11.5,
-        "longitude": 14.75
+        "longitude": 14.75,
+        "solarBody": null
       },
       "map_Anhui": {
         "dataName": "map_Anhui",
         "latitude": 32.02,
-        "longitude": 117.32
+        "longitude": 117.32,
+        "solarBody": null
       },
       "map_Arequipa": {
         "dataName": "map_Arequipa",
         "latitude": -13.75,
-        "longitude": -72
+        "longitude": -72,
+        "solarBody": null
       },
       "map_Arkhangelsk": {
         "dataName": "map_Arkhangelsk",
         "latitude": 65,
-        "longitude": 50
+        "longitude": 50,
+        "solarBody": null
       },
       "map_Armenia": {
         "dataName": "map_Armenia",
         "latitude": 40.06,
-        "longitude": 44.91
+        "longitude": 44.91,
+        "solarBody": null
       },
       "map_ArunchalPradesh": {
         "dataName": "map_ArunchalPradesh",
         "latitude": 28.25,
-        "longitude": 94.46
+        "longitude": 94.46,
+        "solarBody": null
       },
       "map_Assam": {
         "dataName": "map_Assam",
         "latitude": 26.08,
-        "longitude": 92.69
+        "longitude": 92.69,
+        "solarBody": null
       },
       "map_Astana": {
         "dataName": "map_Astana",
         "latitude": 48.18,
-        "longitude": 57.6
+        "longitude": 57.6,
+        "solarBody": null
       },
       "map_Austria": {
         "dataName": "map_Austria",
         "latitude": 47.3,
-        "longitude": 14.4
+        "longitude": 14.4,
+        "solarBody": null
       },
       "map_Azerbaijan": {
         "dataName": "map_Azerbaijan",
         "latitude": 40.33,
-        "longitude": 48.08
+        "longitude": 48.08,
+        "solarBody": null
       },
       "map_Azores": {
         "dataName": "map_Azores",
         "latitude": 35.7,
-        "longitude": -22.4
+        "longitude": -22.4,
+        "solarBody": null
       },
       "map_Baghdad": {
         "dataName": "map_Baghdad",
         "latitude": 31.6,
-        "longitude": 44.58
+        "longitude": 44.58,
+        "solarBody": null
       },
       "map_Bahamas": {
         "dataName": "map_Bahamas",
         "latitude": 24.56,
-        "longitude": -77.8
+        "longitude": -77.8,
+        "solarBody": null
       },
       "map_Baluchistan": {
         "dataName": "map_Baluchistan",
         "latitude": 30.09,
-        "longitude": 66.95
+        "longitude": 66.95,
+        "solarBody": null
       },
       "map_Bangalore": {
         "dataName": "map_Bangalore",
         "latitude": 12.38,
-        "longitude": 76.5
+        "longitude": 76.5,
+        "solarBody": null
       },
       "map_Bangladesh": {
         "dataName": "map_Bangladesh",
         "latitude": 24,
-        "longitude": 90
+        "longitude": 90,
+        "solarBody": null
       },
       "map_Barcelona": {
         "dataName": "map_Barcelona",
         "latitude": 41.38,
-        "longitude": 0.92
+        "longitude": 0.92,
+        "solarBody": null
       },
       "map_BasqueCountry": {
         "dataName": "map_BasqueCountry",
         "latitude": 43.15,
-        "longitude": -2.46
+        "longitude": -2.46,
+        "solarBody": null
       },
       "map_Bavaria": {
         "dataName": "map_Bavaria",
         "latitude": 49,
-        "longitude": 10.4
+        "longitude": 10.4,
+        "solarBody": null
       },
       "map_Beijing": {
         "dataName": "map_Beijing",
         "latitude": 39.75,
-        "longitude": 116.5
+        "longitude": 116.5,
+        "solarBody": null
       },
       "map_Belarus": {
         "dataName": "map_Belarus",
         "latitude": 55,
-        "longitude": 30
+        "longitude": 30,
+        "solarBody": null
       },
       "map_Belem": {
         "dataName": "map_Belem",
         "latitude": -2,
-        "longitude": -54
+        "longitude": -54,
+        "solarBody": null
       },
       "map_Belgium": {
         "dataName": "map_Belgium",
         "latitude": 50.5,
-        "longitude": 5
+        "longitude": 5,
+        "solarBody": null
       },
       "map_Belgrade": {
         "dataName": "map_Belgrade",
         "latitude": 44.23,
-        "longitude": 20.78
+        "longitude": 20.78,
+        "solarBody": null
       },
       "map_Belize": {
         "dataName": "map_Belize",
         "latitude": 17.02,
-        "longitude": -88.7
+        "longitude": -88.7,
+        "solarBody": null
       },
       "map_Bhutan": {
         "dataName": "map_Bhutan",
         "latitude": 27.28,
-        "longitude": 90
+        "longitude": 90,
+        "solarBody": null
       },
       "map_Bihar": {
         "dataName": "map_Bihar",
         "latitude": 25,
-        "longitude": 85
+        "longitude": 85,
+        "solarBody": null
       },
       "map_Boise": {
         "dataName": "map_Boise",
         "latitude": 45,
-        "longitude": -110.5
+        "longitude": -110.5,
+        "solarBody": null
       },
       "map_Bolivia": {
         "dataName": "map_Bolivia",
         "latitude": -17,
-        "longitude": -65
+        "longitude": -65,
+        "solarBody": null
       },
       "map_Borneo": {
         "dataName": "map_Borneo",
         "latitude": -0.67,
-        "longitude": 113.55
+        "longitude": 113.55,
+        "solarBody": null
       },
       "map_BosniaMontenegro": {
         "dataName": "map_BosniaMontenegro",
         "latitude": 43.75,
-        "longitude": 18.25
+        "longitude": 18.25,
+        "solarBody": null
       },
       "map_Botswana": {
         "dataName": "map_Botswana",
         "latitude": -22.5,
-        "longitude": 23.5
+        "longitude": 23.5,
+        "solarBody": null
       },
       "map_Brasilia": {
         "dataName": "map_Brasilia",
         "latitude": -12.8,
-        "longitude": -47.8
+        "longitude": -47.8,
+        "solarBody": null
       },
       "map_BritishColumbia": {
         "dataName": "map_BritishColumbia",
         "latitude": 53.5,
-        "longitude": -124.5
+        "longitude": -124.5,
+        "solarBody": null
       },
       "map_BritishWestIndies": {
         "dataName": "map_BritishWestIndies",
         "latitude": 25.07,
-        "longitude": -66.98
+        "longitude": -66.98,
+        "solarBody": null
       },
       "map_Brunei": {
         "dataName": "map_Brunei",
         "latitude": 4.6,
-        "longitude": 114.5
+        "longitude": 114.5,
+        "solarBody": null
       },
       "map_Bulgaria": {
         "dataName": "map_Bulgaria",
         "latitude": 42.7,
-        "longitude": 25.21
+        "longitude": 25.21,
+        "solarBody": null
       },
       "map_BurkinaFaso": {
         "dataName": "map_BurkinaFaso",
         "latitude": 12.36,
-        "longitude": -1.38
+        "longitude": -1.38,
+        "solarBody": null
       },
       "map_CaboVerde": {
         "dataName": "map_CaboVerde",
         "latitude": 14.9,
-        "longitude": -23.5
+        "longitude": -23.5,
+        "solarBody": null
       },
       "map_California": {
         "dataName": "map_California",
         "latitude": 37.21,
-        "longitude": -119.04
+        "longitude": -119.04,
+        "solarBody": null
       },
       "map_Cambodia": {
         "dataName": "map_Cambodia",
         "latitude": 12.5,
-        "longitude": 104.99
+        "longitude": 104.99,
+        "solarBody": null
       },
       "map_Cameroon": {
         "dataName": "map_Cameroon",
         "latitude": 5.9,
-        "longitude": 13.07
+        "longitude": 13.07,
+        "solarBody": null
       },
       "map_CanadianArctic": {
         "dataName": "map_CanadianArctic",
         "latitude": 64,
-        "longitude": -116
+        "longitude": -116,
+        "solarBody": null
       },
       "map_CanaryIslands": {
         "dataName": "map_CanaryIslands",
         "latitude": 28,
-        "longitude": -16
+        "longitude": -16,
+        "solarBody": null
       },
       "map_CapeTown": {
         "dataName": "map_CapeTown",
         "latitude": -32.01,
-        "longitude": 21.29
+        "longitude": 21.29,
+        "solarBody": null
       },
       "map_Cascadia": {
         "dataName": "map_Cascadia",
         "latitude": 45,
-        "longitude": -120
+        "longitude": -120,
+        "solarBody": null
       },
       "map_CentralAfricanRepublic": {
         "dataName": "map_CentralAfricanRepublic",
         "latitude": 5.6,
-        "longitude": 17
+        "longitude": 17,
+        "solarBody": null
       },
       "map_Chad": {
         "dataName": "map_Chad",
         "latitude": 11.8,
-        "longitude": 18.26
+        "longitude": 18.26,
+        "solarBody": null
       },
       "map_Chennai": {
         "dataName": "map_Chennai",
         "latitude": 10.5,
-        "longitude": 78.25
+        "longitude": 78.25,
+        "solarBody": null
       },
       "map_Chongqing": {
         "dataName": "map_Chongqing",
         "latitude": 30,
-        "longitude": 105
+        "longitude": 105,
+        "solarBody": null
       },
       "map_Colombia": {
         "dataName": "map_Colombia",
         "latitude": 6.2,
-        "longitude": -75.75
+        "longitude": -75.75,
+        "solarBody": null
       },
       "map_CongoBrazzaville": {
         "dataName": "map_CongoBrazzaville",
         "latitude": -1.5,
-        "longitude": 15.5
+        "longitude": 15.5,
+        "solarBody": null
       },
       "map_CostaRica": {
         "dataName": "map_CostaRica",
         "latitude": 9.56,
-        "longitude": -84.5
+        "longitude": -84.5,
+        "solarBody": null
       },
       "map_Crimea": {
         "dataName": "map_Crimea",
         "latitude": 45.3,
-        "longitude": 34.4
+        "longitude": 34.4,
+        "solarBody": null
       },
       "map_CroatiaSlovenia": {
         "dataName": "map_CroatiaSlovenia",
         "latitude": 45.35,
-        "longitude": 15.88
+        "longitude": 15.88,
+        "solarBody": null
       },
       "map_Cuba": {
         "dataName": "map_Cuba",
         "latitude": 22,
-        "longitude": -79.1
+        "longitude": -79.1,
+        "solarBody": null
       },
       "map_Cuiaba": {
         "dataName": "map_Cuiaba",
         "latitude": -14.6,
-        "longitude": -55.2
+        "longitude": -55.2,
+        "solarBody": null
       },
       "map_Cumberland": {
         "dataName": "map_Cumberland",
         "latitude": 36.7,
-        "longitude": -86
+        "longitude": -86,
+        "solarBody": null
       },
       "map_Cyrenaica": {
         "dataName": "map_Cyrenaica",
         "latitude": 30,
-        "longitude": 22.25
+        "longitude": 22.25,
+        "solarBody": null
       },
       "map_Czechia": {
         "dataName": "map_Czechia",
         "latitude": 49.89,
-        "longitude": 15.04
+        "longitude": 15.04,
+        "solarBody": null
       },
       "map_Dakota": {
         "dataName": "map_Dakota",
         "latitude": 46,
-        "longitude": -97.5
+        "longitude": -97.5,
+        "solarBody": null
       },
       "map_Darfur": {
         "dataName": "map_Darfur",
         "latitude": 15,
-        "longitude": 25
+        "longitude": 25,
+        "solarBody": null
       },
       "map_Denmark": {
         "dataName": "map_Denmark",
         "latitude": 55.43,
-        "longitude": 12.34
+        "longitude": 12.34,
+        "solarBody": null
       },
       "map_DireDiwa": {
         "dataName": "map_DireDiwa",
         "latitude": 7.5,
-        "longitude": 44
+        "longitude": 44,
+        "solarBody": null
       },
       "map_Dixie": {
         "dataName": "map_Dixie",
         "latitude": 31.6,
-        "longitude": -82.17
+        "longitude": -82.17,
+        "solarBody": null
       },
       "map_Diyarbakir": {
         "dataName": "map_Diyarbakir",
         "latitude": 39.25,
-        "longitude": 42.38
+        "longitude": 42.38,
+        "solarBody": null
       },
       "map_Djibouti": {
         "dataName": "map_Djibouti",
         "latitude": 11.7,
-        "longitude": 42.5
+        "longitude": 42.5,
+        "solarBody": null
       },
       "map_Donetsk": {
         "dataName": "map_Donetsk",
         "latitude": 47.8,
-        "longitude": 37.6
+        "longitude": 37.6,
+        "solarBody": null
       },
       "map_DutchCaribbean": {
         "dataName": "map_DutchCaribbean",
         "latitude": 12.17,
-        "longitude": -68.99
+        "longitude": -68.99,
+        "solarBody": null
       },
       "map_EastAngola": {
         "dataName": "map_EastAngola",
         "latitude": -12,
-        "longitude": 20
+        "longitude": 20,
+        "solarBody": null
       },
       "map_EastGermany": {
         "dataName": "map_EastGermany",
         "latitude": 52.52,
-        "longitude": 13.405
+        "longitude": 13.405,
+        "solarBody": null
       },
       "map_EastHispanola": {
         "dataName": "map_EastHispanola",
         "latitude": 19,
-        "longitude": -70.5
+        "longitude": -70.5,
+        "solarBody": null
       },
       "map_EastTimor": {
         "dataName": "map_EastTimor",
         "latitude": -8.8,
-        "longitude": 125.8
+        "longitude": 125.8,
+        "solarBody": null
       },
       "map_Ecuador": {
         "dataName": "map_Ecuador",
         "latitude": -1.6,
-        "longitude": -78.5
+        "longitude": -78.5,
+        "solarBody": null
       },
       "map_Egypt": {
         "dataName": "map_Egypt",
         "latitude": 30.5,
-        "longitude": 32.25
+        "longitude": 32.25,
+        "solarBody": null
       },
       "map_ElSalvador": {
         "dataName": "map_ElSalvador",
         "latitude": 13.56,
-        "longitude": -88.86
+        "longitude": -88.86,
+        "solarBody": null
       },
       "map_England": {
         "dataName": "map_England",
         "latitude": 51.4,
-        "longitude": 0
+        "longitude": 0,
+        "solarBody": null
       },
       "map_EnglishMidlands": {
         "dataName": "map_EnglishMidlands",
         "latitude": 52.6,
-        "longitude": -1.8
+        "longitude": -1.8,
+        "solarBody": null
       },
       "map_EquatorialGuinea": {
         "dataName": "map_EquatorialGuinea",
         "latitude": 2.5,
-        "longitude": 9.2
+        "longitude": 9.2,
+        "solarBody": null
       },
       "map_Eritrea": {
         "dataName": "map_Eritrea",
         "latitude": 15.2,
-        "longitude": 38.55
+        "longitude": 38.55,
+        "solarBody": null
       },
       "map_Estonia": {
         "dataName": "map_Estonia",
         "latitude": 58.8,
-        "longitude": 25.6
+        "longitude": 25.6,
+        "solarBody": null
       },
       "map_Eswatini": {
         "dataName": "map_Eswatini",
         "latitude": -26.6,
-        "longitude": 31.46
+        "longitude": 31.46,
+        "solarBody": null
       },
       "map_Ethiopia": {
         "dataName": "map_Ethiopia",
         "latitude": 7,
-        "longitude": 37
+        "longitude": 37,
+        "solarBody": null
       },
       "map_Faridabad": {
         "dataName": "map_Faridabad",
         "latitude": 30.75,
-        "longitude": 77
+        "longitude": 77,
+        "solarBody": null
       },
       "map_Finland": {
         "dataName": "map_Finland",
         "latitude": 60.1,
-        "longitude": 24.56
+        "longitude": 24.56,
+        "solarBody": null
       },
       "map_Fortaleza": {
         "dataName": "map_Fortaleza",
         "latitude": -5,
-        "longitude": -40
+        "longitude": -40,
+        "solarBody": null
       },
       "map_FrenchGuiana": {
         "dataName": "map_FrenchGuiana",
         "latitude": 3.85,
-        "longitude": -53.2
+        "longitude": -53.2,
+        "solarBody": null
       },
       "map_FrenchPacific": {
         "dataName": "map_FrenchPacific",
         "latitude": -19.5,
-        "longitude": 169.37
+        "longitude": 169.37,
+        "solarBody": null
       },
       "map_FrenchRatnakara": {
         "dataName": "map_FrenchRatnakara",
         "latitude": -15.21,
-        "longitude": 53.78
+        "longitude": 53.78,
+        "solarBody": null
       },
       "map_FrenchWestIndies": {
         "dataName": "map_FrenchWestIndies",
         "latitude": 15.5,
-        "longitude": -60
+        "longitude": -60,
+        "solarBody": null
       },
       "map_Fujian": {
         "dataName": "map_Fujian",
         "latitude": 26.24,
-        "longitude": 118.07
+        "longitude": 118.07,
+        "solarBody": null
       },
       "map_Gambia": {
         "dataName": "map_Gambia",
         "latitude": 13.55,
-        "longitude": -15.34
+        "longitude": -15.34,
+        "solarBody": null
       },
       "map_Gansu": {
         "dataName": "map_Gansu",
         "latitude": 37.97,
-        "longitude": 102.59
+        "longitude": 102.59,
+        "solarBody": null
       },
       "map_Gao": {
         "dataName": "map_Gao",
         "latitude": 19,
-        "longitude": -1
+        "longitude": -1,
+        "solarBody": null
       },
       "map_Gdansk": {
         "dataName": "map_Gdansk",
         "latitude": 54.1,
-        "longitude": 18.17
+        "longitude": 18.17,
+        "solarBody": null
       },
       "map_Georgia": {
         "dataName": "map_Georgia",
         "latitude": 42.06,
-        "longitude": 43.8
+        "longitude": 43.8,
+        "solarBody": null
       },
       "map_Germany": {
         "dataName": "map_Germany",
         "latitude": 52,
-        "longitude": 8.7
+        "longitude": 8.7,
+        "solarBody": null
       },
       "map_Ghana": {
         "dataName": "map_Ghana",
         "latitude": 8.2,
-        "longitude": -1
+        "longitude": -1,
+        "solarBody": null
       },
       "map_GranChaco": {
         "dataName": "map_GranChaco",
         "latitude": -29,
-        "longitude": -62
+        "longitude": -62,
+        "solarBody": null
       },
       "map_Greece": {
         "dataName": "map_Greece",
         "latitude": 39.07,
-        "longitude": 22.05
+        "longitude": 22.05,
+        "solarBody": null
       },
       "map_Greenland": {
         "dataName": "map_Greenland",
         "latitude": 65.55,
-        "longitude": -46
+        "longitude": -46,
+        "solarBody": null
       },
       "map_Guangzhou": {
         "dataName": "map_Guangzhou",
         "latitude": 23.18,
-        "longitude": 114.5
+        "longitude": 114.5,
+        "solarBody": null
       },
       "map_Guatemala": {
         "dataName": "map_Guatemala",
         "latitude": 14.65,
-        "longitude": -90.5
+        "longitude": -90.5,
+        "solarBody": null
       },
       "map_Guinea": {
         "dataName": "map_Guinea",
         "latitude": 11.1,
-        "longitude": -11.5
+        "longitude": -11.5,
+        "solarBody": null
       },
       "map_GuineaBissau": {
         "dataName": "map_GuineaBissau",
         "latitude": 12,
-        "longitude": -15
+        "longitude": -15,
+        "solarBody": null
       },
       "map_Guizhou": {
         "dataName": "map_Guizhou",
         "latitude": 27.1,
-        "longitude": 107
+        "longitude": 107,
+        "solarBody": null
       },
       "map_Gujarat": {
         "dataName": "map_Gujarat",
         "latitude": 23,
-        "longitude": 71.75
+        "longitude": 71.75,
+        "solarBody": null
       },
       "map_GulfStates": {
         "dataName": "map_GulfStates",
         "latitude": 25.8,
-        "longitude": 51.1
+        "longitude": 51.1,
+        "solarBody": null
       },
       "map_Guyana": {
         "dataName": "map_Guyana",
         "latitude": 5.246,
-        "longitude": -58.98
+        "longitude": -58.98,
+        "solarBody": null
       },
       "map_Halifax": {
         "dataName": "map_Halifax",
         "latitude": 50,
-        "longitude": -60.7
+        "longitude": -60.7,
+        "solarBody": null
       },
       "map_Hangzhou": {
         "dataName": "map_Hangzhou",
         "latitude": 27.75,
-        "longitude": 119.5
+        "longitude": 119.5,
+        "solarBody": null
       },
       "map_Hanoi": {
         "dataName": "map_Hanoi",
         "latitude": 20.12,
-        "longitude": 105.48
+        "longitude": 105.48,
+        "solarBody": null
       },
       "map_HighPlains": {
         "dataName": "map_HighPlains",
         "latitude": 40,
-        "longitude": -96
+        "longitude": -96,
+        "solarBody": null
       },
       "map_Hijaz": {
         "dataName": "map_Hijaz",
         "latitude": 22.26,
-        "longitude": 39.62
+        "longitude": 39.62,
+        "solarBody": null
       },
       "map_Himalayas": {
         "dataName": "map_Himalayas",
         "latitude": 27.58,
-        "longitude": 85.1
+        "longitude": 85.1,
+        "solarBody": null
       },
       "map_HoChiMinhCity": {
         "dataName": "map_HoChiMinhCity",
         "latitude": 10.9,
-        "longitude": 106.99
+        "longitude": 106.99,
+        "solarBody": null
       },
       "map_Hokkaido": {
         "dataName": "map_Hokkaido",
         "latitude": 43.21,
-        "longitude": 142.59
+        "longitude": 142.59,
+        "solarBody": null
       },
       "map_Honduras": {
         "dataName": "map_Honduras",
         "latitude": 14.57,
-        "longitude": -86.8
+        "longitude": -86.8,
+        "solarBody": null
       },
       "map_HongKong": {
         "dataName": "map_HongKong",
         "latitude": 22.35,
-        "longitude": 114.8
+        "longitude": 114.8,
+        "solarBody": null
       },
       "map_Hunan": {
         "dataName": "map_Hunan",
         "latitude": 27.83,
-        "longitude": 111.86
+        "longitude": 111.86,
+        "solarBody": null
       },
       "map_Hungary": {
         "dataName": "map_Hungary",
         "latitude": 46.84,
-        "longitude": 19.14
+        "longitude": 19.14,
+        "solarBody": null
       },
       "map_Hyderabad": {
         "dataName": "map_Hyderabad",
         "latitude": 17.73,
-        "longitude": 78.87
+        "longitude": 78.87,
+        "solarBody": null
       },
       "map_Iceland": {
         "dataName": "map_Iceland",
         "latitude": 64.84,
-        "longitude": -18.6
+        "longitude": -18.6,
+        "solarBody": null
       },
       "map_Indore": {
         "dataName": "map_Indore",
         "latitude": 23.5,
-        "longitude": 78
+        "longitude": 78,
+        "solarBody": null
       },
       "map_InnerMongolia": {
         "dataName": "map_InnerMongolia",
         "latitude": 42.25,
-        "longitude": 112.75
+        "longitude": 112.75,
+        "solarBody": null
       },
       "map_Ireland": {
         "dataName": "map_Ireland",
         "latitude": 53.01,
-        "longitude": -8.26
+        "longitude": -8.26,
+        "solarBody": null
       },
       "map_Irkutsk": {
         "dataName": "map_Irkutsk",
         "latitude": 55,
-        "longitude": 105
+        "longitude": 105,
+        "solarBody": null
       },
       "map_Isfahan": {
         "dataName": "map_Isfahan",
         "latitude": 31.25,
-        "longitude": 51.75
+        "longitude": 51.75,
+        "solarBody": null
       },
       "map_Israel": {
         "dataName": "map_Israel",
         "latitude": 31.29,
-        "longitude": 35.14
+        "longitude": 35.14,
+        "solarBody": null
       },
       "map_Istanbul": {
         "dataName": "map_Istanbul",
         "latitude": 39.25,
-        "longitude": 27.79
+        "longitude": 27.79,
+        "solarBody": null
       },
       "map_Italy": {
         "dataName": "map_Italy",
         "latitude": 42.82,
-        "longitude": 12.44
+        "longitude": 12.44,
+        "solarBody": null
       },
       "map_IvoryCoast": {
         "dataName": "map_IvoryCoast",
         "latitude": 7.305,
-        "longitude": -5.5
+        "longitude": -5.5,
+        "solarBody": null
       },
       "map_Jaipur": {
         "dataName": "map_Jaipur",
         "latitude": 26.25,
-        "longitude": 73.5
+        "longitude": 73.5,
+        "solarBody": null
       },
       "map_Jamaica": {
         "dataName": "map_Jamaica",
         "latitude": 18.12,
-        "longitude": -77.3
+        "longitude": -77.3,
+        "solarBody": null
       },
       "map_JammuandKashmir": {
         "dataName": "map_JammuandKashmir",
         "latitude": 34,
-        "longitude": 76
+        "longitude": 76,
+        "solarBody": null
       },
       "map_Java": {
         "dataName": "map_Java",
         "latitude": -7.5,
-        "longitude": 110.25
+        "longitude": 110.25,
+        "solarBody": null
       },
       "map_Jilin": {
         "dataName": "map_Jilin",
         "latitude": 43.797,
-        "longitude": 125.86
+        "longitude": 125.86,
+        "solarBody": null
       },
       "map_Johannesburg": {
         "dataName": "map_Johannesburg",
         "latitude": -26.05,
-        "longitude": 28.6
+        "longitude": 28.6,
+        "solarBody": null
       },
       "map_Jordan": {
         "dataName": "map_Jordan",
         "latitude": 31.13,
-        "longitude": 36.49
+        "longitude": 36.49,
+        "solarBody": null
       },
       "map_Kaliningrad": {
         "dataName": "map_Kaliningrad",
         "latitude": 54.7,
-        "longitude": 21.6
+        "longitude": 21.6,
+        "solarBody": null
       },
       "map_Kamchatka": {
         "dataName": "map_Kamchatka",
         "latitude": 63,
-        "longitude": 163
+        "longitude": 163,
+        "solarBody": null
       },
       "map_Kano": {
         "dataName": "map_Kano",
         "latitude": 11.8,
-        "longitude": 8.8
+        "longitude": 8.8,
+        "solarBody": null
       },
       "map_Karakalpakstan": {
         "dataName": "map_Karakalpakstan",
         "latitude": 43.19,
-        "longitude": 60.36
+        "longitude": 60.36,
+        "solarBody": null
       },
       "map_Karelia": {
         "dataName": "map_Karelia",
         "latitude": 65.13,
-        "longitude": 33.48
+        "longitude": 33.48,
+        "solarBody": null
       },
       "map_Katowice": {
         "dataName": "map_Katowice",
         "latitude": 50.58,
-        "longitude": 17.56
+        "longitude": 17.56,
+        "solarBody": null
       },
       "map_Kenya": {
         "dataName": "map_Kenya",
         "latitude": 0,
-        "longitude": 36
+        "longitude": 36,
+        "solarBody": null
       },
       "map_Kharkiv": {
         "dataName": "map_Kharkiv",
         "latitude": 50.3,
-        "longitude": 33.6
+        "longitude": 33.6,
+        "solarBody": null
       },
       "map_Kiev": {
         "dataName": "map_Kiev",
         "latitude": 50.7,
-        "longitude": 27.8
+        "longitude": 27.8,
+        "solarBody": null
       },
       "map_Kinshasa": {
         "dataName": "map_Kinshasa",
         "latitude": -3.5,
-        "longitude": 18.3
+        "longitude": 18.3,
+        "solarBody": null
       },
       "map_Kirov": {
         "dataName": "map_Kirov",
         "latitude": 56.4,
-        "longitude": 43.9
+        "longitude": 43.9,
+        "solarBody": null
       },
       "map_Kisangani": {
         "dataName": "map_Kisangani",
         "latitude": 1,
-        "longitude": 27
+        "longitude": 27,
+        "solarBody": null
       },
       "map_Kolkata": {
         "dataName": "map_Kolkata",
         "latitude": 23.5,
-        "longitude": 86.5
+        "longitude": 86.5,
+        "solarBody": null
       },
       "map_Kosovo": {
         "dataName": "map_Kosovo",
         "latitude": 42.49,
-        "longitude": 20.91
+        "longitude": 20.91,
+        "solarBody": null
       },
       "map_Kuwait": {
         "dataName": "map_Kuwait",
         "latitude": 29.6,
-        "longitude": 47.61
+        "longitude": 47.61,
+        "solarBody": null
       },
       "map_Kyrgyzstan": {
         "dataName": "map_Kyrgyzstan",
         "latitude": 41.26,
-        "longitude": 74.59
+        "longitude": 74.59,
+        "solarBody": null
       },
       "map_KyushuandShikoku": {
         "dataName": "map_KyushuandShikoku",
         "latitude": 32.73,
-        "longitude": 131.48
+        "longitude": 131.48,
+        "solarBody": null
       },
       "map_Lagos": {
         "dataName": "map_Lagos",
         "latitude": 7.3,
-        "longitude": 4
+        "longitude": 4,
+        "solarBody": null
       },
       "map_Laos": {
         "dataName": "map_Laos",
         "latitude": 17.88,
-        "longitude": 104.9
+        "longitude": 104.9,
+        "solarBody": null
       },
       "map_Latvia": {
         "dataName": "map_Latvia",
         "latitude": 56.9,
-        "longitude": 25.1
+        "longitude": 25.1,
+        "solarBody": null
       },
       "map_Lebanon": {
         "dataName": "map_Lebanon",
         "latitude": 34,
-        "longitude": 35.75
+        "longitude": 35.75,
+        "solarBody": null
       },
       "map_LeonGalicia": {
         "dataName": "map_LeonGalicia",
         "latitude": 42.5,
-        "longitude": -5
+        "longitude": -5,
+        "solarBody": null
       },
       "map_Lesotho": {
         "dataName": "map_Lesotho",
         "latitude": -29.5,
-        "longitude": 28.24
+        "longitude": 28.24,
+        "solarBody": null
       },
       "map_LesserSundas": {
         "dataName": "map_LesserSundas",
         "latitude": -8.5,
-        "longitude": 118.5
+        "longitude": 118.5,
+        "solarBody": null
       },
       "map_Liaoning": {
         "dataName": "map_Liaoning",
         "latitude": 41.28,
-        "longitude": 122.55
+        "longitude": 122.55,
+        "solarBody": null
       },
       "map_Liberia": {
         "dataName": "map_Liberia",
         "latitude": 6.2,
-        "longitude": -9.4
+        "longitude": -9.4,
+        "solarBody": null
       },
       "map_Libya": {
         "dataName": "map_Libya",
         "latitude": 30,
-        "longitude": 14.25
+        "longitude": 14.25,
+        "solarBody": null
       },
       "map_Lithuania": {
         "dataName": "map_Lithuania",
         "latitude": 55.4,
-        "longitude": 24
+        "longitude": 24,
+        "solarBody": null
       },
       "map_Logone": {
         "dataName": "map_Logone",
         "latitude": 7.6,
-        "longitude": 22.6
+        "longitude": 22.6,
+        "solarBody": null
       },
       "map_LowerGuinea": {
         "dataName": "map_LowerGuinea",
         "latitude": -0.25,
-        "longitude": 11.7
+        "longitude": 11.7,
+        "solarBody": null
       },
       "map_Lubumbashi": {
         "dataName": "map_Lubumbashi",
         "latitude": -8,
-        "longitude": 26.5
+        "longitude": 26.5,
+        "solarBody": null
       },
       "map_Luxor": {
         "dataName": "map_Luxor",
         "latitude": 24.5,
-        "longitude": 30.25
+        "longitude": 30.25,
+        "solarBody": null
       },
       "map_Luzon": {
         "dataName": "map_Luzon",
         "latitude": 16.22,
-        "longitude": 121.306
+        "longitude": 121.306,
+        "solarBody": null
       },
       "map_Lyon": {
         "dataName": "map_Lyon",
         "latitude": 45,
-        "longitude": 5
+        "longitude": 5,
+        "solarBody": null
       },
       "map_Madagascar": {
         "dataName": "map_Madagascar",
         "latitude": -19,
-        "longitude": 46.64
+        "longitude": 46.64,
+        "solarBody": null
       },
       "map_Malawi": {
         "dataName": "map_Malawi",
         "latitude": -13,
-        "longitude": 34
+        "longitude": 34,
+        "solarBody": null
       },
       "map_MalayPeninsula": {
         "dataName": "map_MalayPeninsula",
         "latitude": 3.31,
-        "longitude": 102.02
+        "longitude": 102.02,
+        "solarBody": null
       },
       "map_Maldives": {
         "dataName": "map_Maldives",
         "latitude": 4.1,
-        "longitude": 73.5
+        "longitude": 73.5,
+        "solarBody": null
       },
       "map_Mali": {
         "dataName": "map_Mali",
         "latitude": 13.25,
-        "longitude": -7.25
+        "longitude": -7.25,
+        "solarBody": null
       },
       "map_Manchuria": {
         "dataName": "map_Manchuria",
         "latitude": 47.21,
-        "longitude": 128.5
+        "longitude": 128.5,
+        "solarBody": null
       },
       "map_Manitoba": {
         "dataName": "map_Manitoba",
         "latitude": 53.5,
-        "longitude": -97.5
+        "longitude": -97.5,
+        "solarBody": null
       },
       "map_Mashhad": {
         "dataName": "map_Mashhad",
         "latitude": 32.5,
-        "longitude": 59.25
+        "longitude": 59.25,
+        "solarBody": null
       },
       "map_Mauritania": {
         "dataName": "map_Mauritania",
         "latitude": 19.7,
-        "longitude": -10.42
+        "longitude": -10.42,
+        "solarBody": null
       },
       "map_Mauritius": {
         "dataName": "map_Mauritius",
         "latitude": -20.37,
-        "longitude": 57.57
+        "longitude": 57.57,
+        "solarBody": null
       },
       "map_Mekelle": {
         "dataName": "map_Mekelle",
         "latitude": 12.5,
-        "longitude": 38.5
+        "longitude": 38.5,
+        "solarBody": null
       },
       "map_Melanesia": {
         "dataName": "map_Melanesia",
         "latitude": -15,
-        "longitude": 166.5
+        "longitude": 166.5,
+        "solarBody": null
       },
       "map_Merida": {
         "dataName": "map_Merida",
         "latitude": 18.5,
-        "longitude": -91
+        "longitude": -91,
+        "solarBody": null
       },
       "map_MexicoCity": {
         "dataName": "map_MexicoCity",
         "latitude": 19.3,
-        "longitude": -99
+        "longitude": -99,
+        "solarBody": null
       },
       "map_Micronesia": {
         "dataName": "map_Micronesia",
         "latitude": 7.79,
-        "longitude": 154.51
+        "longitude": 154.51,
+        "solarBody": null
       },
       "map_Milan": {
         "dataName": "map_Milan",
         "latitude": 45.75,
-        "longitude": 10.25
+        "longitude": 10.25,
+        "solarBody": null
       },
       "map_MississippiDelta": {
         "dataName": "map_MississippiDelta",
         "latitude": 32.5,
-        "longitude": -91
+        "longitude": -91,
+        "solarBody": null
       },
       "map_Moldova": {
         "dataName": "map_Moldova",
         "latitude": 47.25,
-        "longitude": 28.5
+        "longitude": 28.5,
+        "solarBody": null
       },
       "map_MoluccasandSulawesi": {
         "dataName": "map_MoluccasandSulawesi",
         "latitude": -3.03,
-        "longitude": 129.4
+        "longitude": 129.4,
+        "solarBody": null
       },
       "map_Mombasa": {
         "dataName": "map_Mombasa",
         "latitude": -0.5,
-        "longitude": 40
+        "longitude": 40,
+        "solarBody": null
       },
       "map_Mongolia": {
         "dataName": "map_Mongolia",
         "latitude": 46.33,
-        "longitude": 102.79
+        "longitude": 102.79,
+        "solarBody": null
       },
       "map_Montenegro": {
         "dataName": "map_Montenegro",
         "latitude": 42.78,
-        "longitude": 19.2
+        "longitude": 19.2,
+        "solarBody": null
       },
       "map_Monterrey": {
         "dataName": "map_Monterrey",
         "latitude": 24,
-        "longitude": -100
+        "longitude": -100,
+        "solarBody": null
       },
       "map_Morocco": {
         "dataName": "map_Morocco",
         "latitude": 31.32,
-        "longitude": -6.89
+        "longitude": -6.89,
+        "solarBody": null
       },
       "map_Moskva": {
         "dataName": "map_Moskva",
         "latitude": 55.62,
-        "longitude": 37.6
+        "longitude": 37.6,
+        "solarBody": null
       },
       "map_Mosul": {
         "dataName": "map_Mosul",
         "latitude": 35.47,
-        "longitude": 43.33
+        "longitude": 43.33,
+        "solarBody": null
       },
       "map_Mozambique": {
         "dataName": "map_Mozambique",
         "latitude": -21.77,
-        "longitude": 33.83
+        "longitude": 33.83,
+        "solarBody": null
       },
       "map_Mumbai": {
         "dataName": "map_Mumbai",
         "latitude": 19.5,
-        "longitude": 75.75
+        "longitude": 75.75,
+        "solarBody": null
       },
       "map_Myanmar": {
         "dataName": "map_Myanmar",
         "latitude": 18.8,
-        "longitude": 95.6
+        "longitude": 95.6,
+        "solarBody": null
       },
       "map_Najd": {
         "dataName": "map_Najd",
         "latitude": 24.5,
-        "longitude": 47
+        "longitude": 47,
+        "solarBody": null
       },
       "map_Namibia": {
         "dataName": "map_Namibia",
         "latitude": -22.47,
-        "longitude": 17.16
+        "longitude": 17.16,
+        "solarBody": null
       },
       "map_Nanchang": {
         "dataName": "map_Nanchang",
         "latitude": 27.86,
-        "longitude": 115.47
+        "longitude": 115.47,
+        "solarBody": null
       },
       "map_Nanning": {
         "dataName": "map_Nanning",
         "latitude": 22.75,
-        "longitude": 108.25
+        "longitude": 108.25,
+        "solarBody": null
       },
       "map_Nantes": {
         "dataName": "map_Nantes",
         "latitude": 48.5,
-        "longitude": -1
+        "longitude": -1,
+        "solarBody": null
       },
       "map_Naples": {
         "dataName": "map_Naples",
         "latitude": 39.5,
-        "longitude": 16
+        "longitude": 16,
+        "solarBody": null
       },
       "map_Netherlands": {
         "dataName": "map_Netherlands",
         "latitude": 52.3,
-        "longitude": 5.8
+        "longitude": 5.8,
+        "solarBody": null
       },
       "map_NewDelhi": {
         "dataName": "map_NewDelhi",
         "latitude": 27.5,
-        "longitude": 79
+        "longitude": 79,
+        "solarBody": null
       },
       "map_NewEngland": {
         "dataName": "map_NewEngland",
         "latitude": 43,
-        "longitude": -70.85
+        "longitude": -70.85,
+        "solarBody": null
       },
       "map_NewGuinea": {
         "dataName": "map_NewGuinea",
         "latitude": -4.49,
-        "longitude": 138.03
+        "longitude": 138.03,
+        "solarBody": null
       },
       "map_NewSouthWales": {
         "dataName": "map_NewSouthWales",
         "latitude": -33,
-        "longitude": 146.5
+        "longitude": 146.5,
+        "solarBody": null
       },
       "map_NewYork": {
         "dataName": "map_NewYork",
         "latitude": 41.96,
-        "longitude": -75.92
+        "longitude": -75.92,
+        "solarBody": null
       },
       "map_NewZealand": {
         "dataName": "map_NewZealand",
         "latitude": -38.62,
-        "longitude": 176.08
+        "longitude": 176.08,
+        "solarBody": null
       },
       "map_Nicaragua": {
         "dataName": "map_Nicaragua",
         "latitude": 12.5,
-        "longitude": -85.4
+        "longitude": -85.4,
+        "solarBody": null
       },
       "map_Niger": {
         "dataName": "map_Niger",
         "latitude": 17.01,
-        "longitude": 9.3
+        "longitude": 9.3,
+        "solarBody": null
       },
       "map_NorthCaucasus": {
         "dataName": "map_NorthCaucasus",
         "latitude": 43.5,
-        "longitude": 45
+        "longitude": 45,
+        "solarBody": null
       },
       "map_NorthHonshu": {
         "dataName": "map_NorthHonshu",
         "latitude": 37.75,
-        "longitude": 140
+        "longitude": 140,
+        "solarBody": null
       },
       "map_NorthKorea": {
         "dataName": "map_NorthKorea",
         "latitude": 39.7,
-        "longitude": 126.56
+        "longitude": 126.56,
+        "solarBody": null
       },
       "map_NorthKrasnoyarsk": {
         "dataName": "map_NorthKrasnoyarsk",
         "latitude": 67,
-        "longitude": 96
+        "longitude": 96,
+        "solarBody": null
       },
       "map_NorthMacedonia": {
         "dataName": "map_NorthMacedonia",
         "latitude": 41.5,
-        "longitude": 21.8
+        "longitude": 21.8,
+        "solarBody": null
       },
       "map_NorthMozambique": {
         "dataName": "map_NorthMozambique",
         "latitude": -13.76,
-        "longitude": 38.11
+        "longitude": 38.11,
+        "solarBody": null
       },
       "map_NorthThailand": {
         "dataName": "map_NorthThailand",
         "latitude": 17.5,
-        "longitude": 100.57
+        "longitude": 100.57,
+        "solarBody": null
       },
       "map_NorthUrals": {
         "dataName": "map_NorthUrals",
         "latitude": 63,
-        "longitude": 73
+        "longitude": 73,
+        "solarBody": null
       },
       "map_NorthernAustralia": {
         "dataName": "map_NorthernAustralia",
         "latitude": -20,
-        "longitude": 133.5
+        "longitude": 133.5,
+        "solarBody": null
       },
       "map_NorthernChad": {
         "dataName": "map_NorthernChad",
         "latitude": 18.46,
-        "longitude": 19.08
+        "longitude": 19.08,
+        "solarBody": null
       },
       "map_NorthernChile": {
         "dataName": "map_NorthernChile",
         "latitude": -25.27,
-        "longitude": -69.4
+        "longitude": -69.4,
+        "solarBody": null
       },
       "map_NorthernIreland": {
         "dataName": "map_NorthernIreland",
         "latitude": 55,
-        "longitude": -6.5
+        "longitude": -6.5,
+        "solarBody": null
       },
       "map_NorthernSudan": {
         "dataName": "map_NorthernSudan",
         "latitude": 20.85,
-        "longitude": 30.66
+        "longitude": 30.66,
+        "solarBody": null
       },
       "map_Norway": {
         "dataName": "map_Norway",
         "latitude": 59.56,
-        "longitude": 10.41
+        "longitude": 10.41,
+        "solarBody": null
       },
       "map_Novgorod": {
         "dataName": "map_Novgorod",
         "latitude": 60.36,
-        "longitude": 38.5
+        "longitude": 38.5,
+        "solarBody": null
       },
       "map_Novosibirsk": {
         "dataName": "map_Novosibirsk",
         "latitude": 56,
-        "longitude": 83
+        "longitude": 83,
+        "solarBody": null
       },
       "map_Odesa": {
         "dataName": "map_Odesa",
         "latitude": 47.1,
-        "longitude": 31.35
+        "longitude": 31.35,
+        "solarBody": null
       },
       "map_Odisha": {
         "dataName": "map_Odisha",
         "latitude": 20.46,
-        "longitude": 84.16
+        "longitude": 84.16,
+        "solarBody": null
       },
       "map_Oman": {
         "dataName": "map_Oman",
         "latitude": 20.37,
-        "longitude": 56.44
+        "longitude": 56.44,
+        "solarBody": null
       },
       "map_Ontario": {
         "dataName": "map_Ontario",
         "latitude": 50.2,
-        "longitude": -85.8
+        "longitude": -85.8,
+        "solarBody": null
       },
       "map_Palestine": {
         "dataName": "map_Palestine",
         "latitude": 31.98,
-        "longitude": 35.36
+        "longitude": 35.36,
+        "solarBody": null
       },
       "map_Pampas": {
         "dataName": "map_Pampas",
         "latitude": -35.5,
-        "longitude": -65
+        "longitude": -65,
+        "solarBody": null
       },
       "map_Panama": {
         "dataName": "map_Panama",
         "latitude": 8.79,
-        "longitude": -79.899
+        "longitude": -79.899,
+        "solarBody": null
       },
       "map_PapuaNewGuinea": {
         "dataName": "map_PapuaNewGuinea",
         "latitude": -6,
-        "longitude": 144.25
+        "longitude": 144.25,
+        "solarBody": null
       },
       "map_Paraguay": {
         "dataName": "map_Paraguay",
         "latitude": -25.5,
-        "longitude": -58.5
+        "longitude": -58.5,
+        "solarBody": null
       },
       "map_Paris": {
         "dataName": "map_Paris",
         "latitude": 48.5,
-        "longitude": 3.5
+        "longitude": 3.5,
+        "solarBody": null
       },
       "map_Patagonia": {
         "dataName": "map_Patagonia",
         "latitude": -42.5,
-        "longitude": -68.5
+        "longitude": -68.5,
+        "solarBody": null
       },
       "map_Peru": {
         "dataName": "map_Peru",
         "latitude": -10.9,
-        "longitude": -75.29
+        "longitude": -75.29,
+        "solarBody": null
       },
       "map_Peshawar": {
         "dataName": "map_Peshawar",
         "latitude": 33.98,
-        "longitude": 71.52
+        "longitude": 71.52,
+        "solarBody": null
       },
       "map_Poland": {
         "dataName": "map_Poland",
         "latitude": 52.27,
-        "longitude": 21.8
+        "longitude": 21.8,
+        "solarBody": null
       },
       "map_Polynesia": {
         "dataName": "map_Polynesia",
         "latitude": -10.5,
-        "longitude": -168.73
+        "longitude": -168.73,
+        "solarBody": null
       },
       "map_PortHarcourt": {
         "dataName": "map_PortHarcourt",
         "latitude": 6.5,
-        "longitude": 9
+        "longitude": 9,
+        "solarBody": null
       },
       "map_PortoAlegre": {
         "dataName": "map_PortoAlegre",
         "latitude": -26,
-        "longitude": -52
+        "longitude": -52,
+        "solarBody": null
       },
       "map_Portugal": {
         "dataName": "map_Portugal",
         "latitude": 39.5,
-        "longitude": -8.32
+        "longitude": -8.32,
+        "solarBody": null
       },
       "map_Prairies": {
         "dataName": "map_Prairies",
         "latitude": 53.5,
-        "longitude": -105.5
+        "longitude": -105.5,
+        "solarBody": null
       },
       "map_Punjab": {
         "dataName": "map_Punjab",
         "latitude": 33.27,
-        "longitude": 72.9
+        "longitude": 72.9,
+        "solarBody": null
       },
       "map_Qassimah": {
         "dataName": "map_Qassimah",
         "latitude": 30.5,
-        "longitude": 40
+        "longitude": 40,
+        "solarBody": null
       },
       "map_Qinghai": {
         "dataName": "map_Qinghai",
         "latitude": 35.5,
-        "longitude": 96.5
+        "longitude": 96.5,
+        "solarBody": null
       },
       "map_Quebec": {
         "dataName": "map_Quebec",
         "latitude": 51.8,
-        "longitude": -72
+        "longitude": -72,
+        "solarBody": null
       },
       "map_Queensland": {
         "dataName": "map_Queensland",
         "latitude": -23,
-        "longitude": 145
+        "longitude": 145,
+        "solarBody": null
       },
       "map_Raipur": {
         "dataName": "map_Raipur",
         "latitude": 21.34,
-        "longitude": 81.55
+        "longitude": 81.55,
+        "solarBody": null
       },
       "map_Ratnakara": {
         "dataName": "map_Ratnakara",
         "latitude": -11.8,
-        "longitude": 43.97
+        "longitude": 43.97,
+        "solarBody": null
       },
       "map_Recife": {
         "dataName": "map_Recife",
         "latitude": -12,
-        "longitude": -40
+        "longitude": -40,
+        "solarBody": null
       },
       "map_RiodeJaneiro": {
         "dataName": "map_RiodeJaneiro",
         "latitude": -21,
-        "longitude": -44
+        "longitude": -44,
+        "solarBody": null
       },
       "map_RockyMountains": {
         "dataName": "map_RockyMountains",
         "latitude": 37,
-        "longitude": -108
+        "longitude": -108,
+        "solarBody": null
       },
       "map_Romania": {
         "dataName": "map_Romania",
         "latitude": 45.05,
-        "longitude": 27
+        "longitude": 27,
+        "solarBody": null
       },
       "map_Rostovskaya": {
         "dataName": "map_Rostovskaya",
         "latitude": 47,
-        "longitude": 41.25
+        "longitude": 41.25,
+        "solarBody": null
       },
       "map_RussianFarEast": {
         "dataName": "map_RussianFarEast",
         "latitude": 51,
-        "longitude": 135.5
+        "longitude": 135.5,
+        "solarBody": null
       },
       "map_RustBelt": {
         "dataName": "map_RustBelt",
         "latitude": 42.04,
-        "longitude": -86.19
+        "longitude": -86.19,
+        "solarBody": null
       },
       "map_RwandaBurundi": {
         "dataName": "map_RwandaBurundi",
         "latitude": -2.75,
-        "longitude": 29.75
+        "longitude": 29.75,
+        "solarBody": null
       },
       "map_Ryukus": {
         "dataName": "map_Ryukus",
         "latitude": 26.5,
-        "longitude": 128
+        "longitude": 128,
+        "solarBody": null
       },
       "map_Sakha": {
         "dataName": "map_Sakha",
         "latitude": 65,
-        "longitude": 127
+        "longitude": 127,
+        "solarBody": null
       },
       "map_SakhalinKurils": {
         "dataName": "map_SakhalinKurils",
         "latitude": 50,
-        "longitude": 148
+        "longitude": 148,
+        "solarBody": null
       },
       "map_SaoPaulo": {
         "dataName": "map_SaoPaulo",
         "latitude": -23.3,
-        "longitude": -46.8
+        "longitude": -46.8,
+        "solarBody": null
       },
       "map_SaoTomePrincipe": {
         "dataName": "map_SaoTomePrincipe",
         "latitude": 0.25,
-        "longitude": 6.57
+        "longitude": 6.57,
+        "solarBody": null
       },
       "map_SarawakandSabah": {
         "dataName": "map_SarawakandSabah",
         "latitude": 2.83,
-        "longitude": 113.89
+        "longitude": 113.89,
+        "solarBody": null
       },
       "map_Scotland": {
         "dataName": "map_Scotland",
         "latitude": 56.3,
-        "longitude": -3.9
+        "longitude": -3.9,
+        "solarBody": null
       },
       "map_Senegambia": {
         "dataName": "map_Senegambia",
         "latitude": 14.3,
-        "longitude": -15.28
+        "longitude": -15.28,
+        "solarBody": null
       },
       "map_Seychelles": {
         "dataName": "map_Seychelles",
         "latitude": -4.48,
-        "longitude": 55.5
+        "longitude": 55.5,
+        "solarBody": null
       },
       "map_Shandong": {
         "dataName": "map_Shandong",
         "latitude": 36.5,
-        "longitude": 118
+        "longitude": 118,
+        "solarBody": null
       },
       "map_Shanghai": {
         "dataName": "map_Shanghai",
         "latitude": 32.35,
-        "longitude": 120
+        "longitude": 120,
+        "solarBody": null
       },
       "map_Shanxi": {
         "dataName": "map_Shanxi",
         "latitude": 37.83,
-        "longitude": 112.18
+        "longitude": 112.18,
+        "solarBody": null
       },
       "map_Shenandoah": {
         "dataName": "map_Shenandoah",
         "latitude": 38.28,
-        "longitude": -79.25
+        "longitude": -79.25,
+        "solarBody": null
       },
       "map_SierraLeone": {
         "dataName": "map_SierraLeone",
         "latitude": 8.6,
-        "longitude": -11.8
+        "longitude": -11.8,
+        "solarBody": null
       },
       "map_Sindh": {
         "dataName": "map_Sindh",
         "latitude": 25.22,
-        "longitude": 67.01
+        "longitude": 67.01,
+        "solarBody": null
       },
       "map_Singapore": {
         "dataName": "map_Singapore",
         "latitude": 1.344,
-        "longitude": 103.95
+        "longitude": 103.95,
+        "solarBody": null
       },
       "map_Slovakia": {
         "dataName": "map_Slovakia",
         "latitude": 48.87,
-        "longitude": 19.72
+        "longitude": 19.72,
+        "solarBody": null
       },
       "map_Slovenia": {
         "dataName": "map_Slovenia",
         "latitude": 46.21,
-        "longitude": 14.89
+        "longitude": 14.89,
+        "solarBody": null
       },
       "map_Somalia": {
         "dataName": "map_Somalia",
         "latitude": 5,
-        "longitude": 47
+        "longitude": 47,
+        "solarBody": null
       },
       "map_Somaliland": {
         "dataName": "map_Somaliland",
         "latitude": 9.5,
-        "longitude": 45
+        "longitude": 45,
+        "solarBody": null
       },
       "map_SouthAlgeria": {
         "dataName": "map_SouthAlgeria",
         "latitude": 27.5,
-        "longitude": 3
+        "longitude": 3,
+        "solarBody": null
       },
       "map_SouthHonshu": {
         "dataName": "map_SouthHonshu",
         "latitude": 35,
-        "longitude": 135
+        "longitude": 135,
+        "solarBody": null
       },
       "map_SouthKorea": {
         "dataName": "map_SouthKorea",
         "latitude": 36.35,
-        "longitude": 127.85
+        "longitude": 127.85,
+        "solarBody": null
       },
       "map_SouthSudan": {
         "dataName": "map_SouthSudan",
         "latitude": 7.08,
-        "longitude": 30.11
+        "longitude": 30.11,
+        "solarBody": null
       },
       "map_SouthThailand": {
         "dataName": "map_SouthThailand",
         "latitude": 11.16,
-        "longitude": 99.43
+        "longitude": 99.43,
+        "solarBody": null
       },
       "map_SouthernAustralia": {
         "dataName": "map_SouthernAustralia",
         "latitude": -30,
-        "longitude": 136
+        "longitude": 136,
+        "solarBody": null
       },
       "map_SouthernChile": {
         "dataName": "map_SouthernChile",
         "latitude": -38.16,
-        "longitude": -72.21
+        "longitude": -72.21,
+        "solarBody": null
       },
       "map_Spain": {
         "dataName": "map_Spain",
         "latitude": 38.5,
-        "longitude": -3.6
+        "longitude": -3.6,
+        "solarBody": null
       },
       "map_SriLanka": {
         "dataName": "map_SriLanka",
         "latitude": 7.4,
-        "longitude": 80.81
+        "longitude": 80.81,
+        "solarBody": null
       },
       "map_Sudan": {
         "dataName": "map_Sudan",
         "latitude": 13.85,
-        "longitude": 30.4
+        "longitude": 30.4,
+        "solarBody": null
       },
       "map_Sulawesi": {
         "dataName": "map_Sulawesi",
         "latitude": -2,
-        "longitude": 120.56
+        "longitude": 120.56,
+        "solarBody": null
       },
       "map_Sumatra": {
         "dataName": "map_Sumatra",
         "latitude": -0.5,
-        "longitude": 101.75
+        "longitude": 101.75,
+        "solarBody": null
       },
       "map_Suriname": {
         "dataName": "map_Suriname",
         "latitude": 4.49,
-        "longitude": -56.03
+        "longitude": -56.03,
+        "solarBody": null
       },
       "map_Sweden": {
         "dataName": "map_Sweden",
         "latitude": 59.3,
-        "longitude": 18.4
+        "longitude": 18.4,
+        "solarBody": null
       },
       "map_Switzerland": {
         "dataName": "map_Switzerland",
         "latitude": 46.75,
-        "longitude": 8.5
+        "longitude": 8.5,
+        "solarBody": null
       },
       "map_Syria": {
         "dataName": "map_Syria",
         "latitude": 34.74,
-        "longitude": 38.46
+        "longitude": 38.46,
+        "solarBody": null
       },
       "map_Tabriz": {
         "dataName": "map_Tabriz",
         "latitude": 37,
-        "longitude": 47.5
+        "longitude": 47.5,
+        "solarBody": null
       },
       "map_Taiwan": {
         "dataName": "map_Taiwan",
         "latitude": 23.69,
-        "longitude": 120.96
+        "longitude": 120.96,
+        "solarBody": null
       },
       "map_Tajikistan": {
         "dataName": "map_Tajikistan",
         "latitude": 38.86,
-        "longitude": 70.98
+        "longitude": 70.98,
+        "solarBody": null
       },
       "map_Tanzania": {
         "dataName": "map_Tanzania",
         "latitude": -7,
-        "longitude": 38
+        "longitude": 38,
+        "solarBody": null
       },
       "map_TeWaipounamu": {
         "dataName": "map_TeWaipounamu",
         "latitude": -43.66,
-        "longitude": 171.04
+        "longitude": 171.04,
+        "solarBody": null
       },
       "map_Tehran": {
         "dataName": "map_Tehran",
         "latitude": 36.25,
-        "longitude": 52
+        "longitude": 52,
+        "solarBody": null
       },
       "map_Texas": {
         "dataName": "map_Texas",
         "latitude": 31.54,
-        "longitude": -96.81
+        "longitude": -96.81,
+        "solarBody": null
       },
       "map_Tibet": {
         "dataName": "map_Tibet",
         "latitude": 30.85,
-        "longitude": 88.72
+        "longitude": 88.72,
+        "solarBody": null
       },
       "map_Tijuana": {
         "dataName": "map_Tijuana",
         "latitude": 27.5,
-        "longitude": -108
+        "longitude": -108,
+        "solarBody": null
       },
       "map_Togo": {
         "dataName": "map_Togo",
         "latitude": 8.3,
-        "longitude": 1.1
+        "longitude": 1.1,
+        "solarBody": null
       },
       "map_TogoBenin": {
         "dataName": "map_TogoBenin",
         "latitude": 9,
-        "longitude": 2.2
+        "longitude": 2.2,
+        "solarBody": null
       },
       "map_Toulouse": {
         "dataName": "map_Toulouse",
         "latitude": 44,
-        "longitude": 1
+        "longitude": 1,
+        "solarBody": null
       },
       "map_Transylvania": {
         "dataName": "map_Transylvania",
         "latitude": 46.6,
-        "longitude": 23.58
+        "longitude": 23.58,
+        "solarBody": null
       },
       "map_Tunisia": {
         "dataName": "map_Tunisia",
         "latitude": 33.85,
-        "longitude": 9.64
+        "longitude": 9.64,
+        "solarBody": null
       },
       "map_Turkmenistan": {
         "dataName": "map_Turkmenistan",
         "latitude": 39.25,
-        "longitude": 59.25
+        "longitude": 59.25,
+        "solarBody": null
       },
       "map_Uganda": {
         "dataName": "map_Uganda",
         "latitude": 1.4,
-        "longitude": 32.5
+        "longitude": 32.5,
+        "solarBody": null
       },
       "map_UnitedArabEmirates": {
         "dataName": "map_UnitedArabEmirates",
         "latitude": 23.8,
-        "longitude": 54.6
+        "longitude": 54.6,
+        "solarBody": null
       },
       "map_UpperMyanmar": {
         "dataName": "map_UpperMyanmar",
         "latitude": 24.5,
-        "longitude": 96.4
+        "longitude": 96.4,
+        "solarBody": null
       },
       "map_Urals": {
         "dataName": "map_Urals",
         "latitude": 57.5,
-        "longitude": 60
+        "longitude": 60,
+        "solarBody": null
       },
       "map_Uruguay": {
         "dataName": "map_Uruguay",
         "latitude": -33.08,
-        "longitude": -56.15
+        "longitude": -56.15,
+        "solarBody": null
       },
       "map_Uzbekistan": {
         "dataName": "map_Uzbekistan",
         "latitude": 40.92,
-        "longitude": 69
+        "longitude": 69,
+        "solarBody": null
       },
       "map_Venezuela": {
         "dataName": "map_Venezuela",
         "latitude": 6.69,
-        "longitude": -66.2
+        "longitude": -66.2,
+        "solarBody": null
       },
       "map_ViasyasyMindanao": {
         "dataName": "map_ViasyasyMindanao",
         "latitude": 8.2,
-        "longitude": 124.51
+        "longitude": 124.51,
+        "solarBody": null
       },
       "map_Victoria": {
         "dataName": "map_Victoria",
         "latitude": -37,
-        "longitude": 144.6
+        "longitude": 144.6,
+        "solarBody": null
       },
       "map_Villavicencio": {
         "dataName": "map_Villavicencio",
         "latitude": 2.5,
-        "longitude": -72.25
+        "longitude": -72.25,
+        "solarBody": null
       },
       "map_Visayas": {
         "dataName": "map_Visayas",
         "latitude": 10.5,
-        "longitude": 123.75
+        "longitude": 123.75,
+        "solarBody": null
       },
       "map_Volga": {
         "dataName": "map_Volga",
         "latitude": 55.4,
-        "longitude": 49.34
+        "longitude": 49.34,
+        "solarBody": null
       },
       "map_Voronezh": {
         "dataName": "map_Voronezh",
         "latitude": 52.6,
-        "longitude": 37.6
+        "longitude": 37.6,
+        "solarBody": null
       },
       "map_Wales": {
         "dataName": "map_Wales",
         "latitude": 51.8,
-        "longitude": -3.77
+        "longitude": -3.77,
+        "solarBody": null
       },
       "map_WestCameroon": {
         "dataName": "map_WestCameroon",
         "latitude": 5.72,
-        "longitude": 9.67
+        "longitude": 9.67,
+        "solarBody": null
       },
       "map_WestHispanola": {
         "dataName": "map_WestHispanola",
         "latitude": 19,
-        "longitude": -72.5
+        "longitude": -72.5,
+        "solarBody": null
       },
       "map_WestIndies": {
         "dataName": "map_WestIndies",
         "latitude": 14.3,
-        "longitude": -60.5
+        "longitude": -60.5,
+        "solarBody": null
       },
       "map_WestTanzania": {
         "dataName": "map_WestTanzania",
         "latitude": -4.5,
-        "longitude": 32
+        "longitude": 32,
+        "solarBody": null
       },
       "map_WesternSahara": {
         "dataName": "map_WesternSahara",
         "latitude": 24.45,
-        "longitude": -13.87
+        "longitude": -13.87,
+        "solarBody": null
       },
       "map_Westralia": {
         "dataName": "map_Westralia",
         "latitude": -26,
-        "longitude": 121
+        "longitude": 121,
+        "solarBody": null
       },
       "map_Wuhan": {
         "dataName": "map_Wuhan",
         "latitude": 30.9,
-        "longitude": 112
+        "longitude": 112,
+        "solarBody": null
       },
       "map_Xian": {
         "dataName": "map_Xian",
         "latitude": 35.28,
-        "longitude": 109
+        "longitude": 109,
+        "solarBody": null
       },
       "map_Xinjiang": {
         "dataName": "map_Xinjiang",
         "latitude": 40,
-        "longitude": 85.6
+        "longitude": 85.6,
+        "solarBody": null
       },
       "map_Yemen": {
         "dataName": "map_Yemen",
         "latitude": 15.5,
-        "longitude": 44
+        "longitude": 44,
+        "solarBody": null
       },
       "map_Yukon": {
         "dataName": "map_Yukon",
         "latitude": 63,
-        "longitude": -135.5
+        "longitude": -135.5,
+        "solarBody": null
       },
       "map_Yunnan": {
         "dataName": "map_Yunnan",
         "latitude": 24.83,
-        "longitude": 101.3
+        "longitude": 101.3,
+        "solarBody": null
       },
       "map_Zambia": {
         "dataName": "map_Zambia",
         "latitude": -14.17,
-        "longitude": 27.95
+        "longitude": 27.95,
+        "solarBody": null
       },
       "map_Zanzibar": {
         "dataName": "map_Zanzibar",
         "latitude": -5.6,
-        "longitude": 39.56
+        "longitude": 39.56,
+        "solarBody": null
       },
       "map_Zhengzhou": {
         "dataName": "map_Zhengzhou",
         "latitude": 34.69,
-        "longitude": 113.71
+        "longitude": 113.71,
+        "solarBody": null
       },
       "map_Zimbabwe": {
         "dataName": "map_Zimbabwe",
         "latitude": -19.43,
-        "longitude": 30
+        "longitude": 30,
+        "solarBody": null
       }
     },
     "nationTemplates": {
@@ -60729,8 +61096,8 @@
       "factionTemplates.isAlien": "TIFactionTemplate compiled field default",
       "ideologyTemplates.alien": "TIFactionIdeologyTemplate compiled field default",
       "ideologyTemplates.undecided": "TIFactionIdeologyTemplate compiled field default",
-      "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field initializer",
-      "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field initializer",
+      "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field default",
+      "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field default",
       "nationTemplates.popGrowthModifier": "TINationTemplate compiled field default",
       "regionTemplates.annualPopGrowthModifier": "TIRegionTemplate compiled field default",
       "regionTemplates.environment": "TIRegionTemplate compiled field initializer",
@@ -60743,7 +61110,7 @@
     "name": "build_runtime_catalogs",
     "version": "1"
   },
-  "payloadFingerprint": "be71db7b44575f895afb63e8a0219dccc718bf3ce4a1363f7235178c4821d40a",
+  "payloadFingerprint": "df416fe6fcbe8bd9b3cfad30d00faa366cb06d585754923b20fe047b392a8aca",
   "scenarioOverrides": {
     "2003Scenario": {
       "bilateralTemplates": {
@@ -96510,7 +96877,7 @@
     },
     {
       "name": "2003Scenario/TIStartTimeTemplate.json",
-      "sha256": "3fa5c0b3a611cf8f3b7ea13b5479fda545947deadc80bb241d3df987be50c546"
+      "sha256": "9f38d67ea43808fb0afade00788aca56f889c14c04ae48e8d4afff5c498f8842"
     },
     {
       "name": "BrokenEarthScenario/TIBilateralTemplate.json",
@@ -96522,7 +96889,7 @@
     },
     {
       "name": "BrokenEarthScenario/TIGlobalConfig.json",
-      "sha256": "51def1f2b1188a8f89b0ffa3a7fa665944a114def663fb9ae5abcb226d803dc4"
+      "sha256": "24c653079dbdd0b8b8310df8cf6d77b282fd687abe1d1c2a5c903a61fe691a46"
     },
     {
       "name": "BrokenEarthScenario/TIMetaTemplate.json",
@@ -96542,7 +96909,7 @@
     },
     {
       "name": "TerraInvicta_Data/Managed/Assembly-CSharp.dll",
-      "sha256": "ff7916c2085ddbafa5acf1e8ea185d37e629096752be388ba6fa1f627f027bb5"
+      "sha256": "4a4b9aae4154e444e9727204205d2d42ae8ed9e1c5f92cdc1280074a259d8350"
     },
     {
       "name": "base/TIBilateralTemplate.json",

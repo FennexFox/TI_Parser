@@ -248,11 +248,53 @@ def _nation_ui_priority_validity(
                 for region, weight in zip(region_values, weights)
             )
 
-    hostile = nation.get("hostileClaims")
-    hostile_known = isinstance(hostile, list)
-    boost_known = regions_complete and bool(region_values) and all(
-        isinstance(region.get("boostPerYear_dekatons"), (int, float)) for region in region_values
+    cached_annual_boost = nation.get("rawBoostPerYear_dekatons")
+    annual_boost = (
+        float(cached_annual_boost)
+        if isinstance(cached_annual_boost, (int, float)) and not isinstance(cached_annual_boost, bool)
+        else sum(float(region["boostPerYear_dekatons"]) for region in region_values)
+        if regions_complete and all(
+            isinstance(region.get("boostPerYear_dekatons"), (int, float))
+            and not isinstance(region.get("boostPerYear_dekatons"), bool)
+            for region in region_values
+        )
+        else None
     )
+    cached_complete_defenses = nation.get("completeAntiSpaceDefenses")
+    complete_defenses = (
+        cached_complete_defenses
+        if isinstance(cached_complete_defenses, bool)
+        else all(region["antiSpaceDefenses"] for region in region_values)
+        if regions_complete and all(isinstance(region.get("antiSpaceDefenses"), bool) for region in region_values)
+        else None
+    )
+    cached_sto_capacity = nation.get("hasSTOFighterCapacity")
+    sto_capacity: bool | None = cached_sto_capacity if isinstance(cached_sto_capacity, bool) else None
+    if sto_capacity is None and regions_complete:
+        region_capacity: list[bool] = []
+        capacity_complete = True
+        for region in region_values:
+            fighter_count = region.get("numSTOFighters")
+            max_fighters = region.get("maxSTOFighters")
+            monthly_boost = region.get("boostPerMonth_dekatons")
+            if not (isinstance(monthly_boost, (int, float)) and not isinstance(monthly_boost, bool)):
+                yearly_boost = region.get("boostPerYear_dekatons")
+                if isinstance(yearly_boost, (int, float)) and not isinstance(yearly_boost, bool):
+                    monthly_boost = float(yearly_boost) / 12.0
+                else:
+                    monthly_boost = None
+            if not (
+                isinstance(fighter_count, (int, float)) and not isinstance(fighter_count, bool)
+                and isinstance(monthly_boost, (int, float)) and not isinstance(monthly_boost, bool)
+            ):
+                capacity_complete = False
+                break
+            if not (isinstance(max_fighters, (int, float)) and not isinstance(max_fighters, bool)):
+                rate = float(monthly_boost)
+                max_fighters = min(64, max(1, math.ceil(rate / 4.0))) if rate >= 1.0 else 0
+            region_capacity.append(float(fighter_count) < float(max_fighters))
+        if capacity_complete:
+            sto_capacity = any(region_capacity)
     ocean_types = [region.get("oceanType") for region in region_values]
     coastal_regions = (
         sum(ocean_type in {"Yes", "Seasonal"} for ocean_type in ocean_types)
@@ -272,7 +314,16 @@ def _nation_ui_priority_validity(
     })
     view = {
         "democracy": nation.get("democracy"),
-        "hasHostileRegion": bool(hostile) if hostile_known else None,
+        "canAccumulateLegitimizeClaimTriggers": (
+            nation.get("canAccumulateLegitimizeClaimTriggers")
+            if isinstance(nation.get("canAccumulateLegitimizeClaimTriggers"), bool) else None
+        ),
+        "sustainability": nation.get("sustainability"),
+        "bestCurrentSustainabilityValue": nation.get("bestCurrentSustainabilityValue"),
+        "canAccumulateDecontaminateTriggers": (
+            nation.get("canAccumulateDecontaminateTriggers")
+            if isinstance(nation.get("canAccumulateDecontaminateTriggers"), bool) else None
+        ),
         "fundingYear": nation.get("spaceFunding_year"),
         "gdp": nation.get("GDP"),
         "spaceFlightProgram": nation.get("spaceFlightProgram") if isinstance(nation.get("spaceFlightProgram"), bool) else None,
@@ -282,10 +333,15 @@ def _nation_ui_priority_validity(
         "currentArmies": current_armies,
         "canBuildNavy": build_navy,
         "military": nation.get("military") if isinstance(nation.get("military"), bool) else None,
+        "militaryTechLevel": nation.get("militaryTechLevel"),
+        "maxMilitaryTechLevel": nation.get("maxMilitaryTechLevel"),
         "nuclearProgram": nation.get("nuclearProgram") if isinstance(nation.get("nuclearProgram"), bool) else None,
+        "policy_noNukes": nation.get("policy_noNukes") if isinstance(nation.get("policy_noNukes"), bool) else None,
         "canBuildSpaceDefenses": nation.get("canBuildSpaceDefenses") if isinstance(nation.get("canBuildSpaceDefenses"), bool) else None,
+        "completeAntiSpaceDefenses": complete_defenses,
         "canBuildSTO": nation.get("canBuildSTOSquadrons") if isinstance(nation.get("canBuildSTOSquadrons"), bool) else None,
-        "hasBoostRegion": any(float(region["boostPerYear_dekatons"]) > 0 for region in region_values) if boost_known else None,
+        "rawBoostPerYear_dekatons": annual_boost,
+        "hasSTOFighterCapacity": sto_capacity,
     }
     raw_names = {
         str(priority)

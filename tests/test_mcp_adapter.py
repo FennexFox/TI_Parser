@@ -116,6 +116,11 @@ class _FakeSession:
     maximum_active = 0
     active_lock = threading.Lock()
 
+    def inspect(self):
+        envelope = _fake_envelope("inspect-save", self.path)
+        return {"saveIdentity": envelope["saveIdentity"],
+                "compatibility": envelope["compatibility"]}
+
     def __init__(self, path: Path):
         self.path = Path(path)
         type(self).instances.append(self)
@@ -613,3 +618,64 @@ def test_real_stdio_server_lists_capabilities(tmp_path):
     assert "capabilities" in {tool.name for tool in listed.tools}
     assert result.is_error is False
     assert result.structured_content["analyses"]
+
+
+def test_fairplay_profile_denies_hidden_tools_before_loading(fake_adapter, tmp_path):
+    server = fake_adapter.create_server(profile="fair-play")
+    listed = anyio.run(_list_tools, server)
+    assert {tool.name for tool in listed.tools} == {"inspect-save", "capabilities"}
+    for name in ("nation-projection", "analyze", "ai-fleet-diagnostics", "raw"):
+        result = anyio.run(_call, server, name, {
+            "save_path": str(tmp_path / "secret.gz"), "faction_name": "Hidden faction",
+            "nation_name": "Secret", "days": 180, "diagnostics": True,
+        })
+        assert result.is_error
+        assert "secret" not in json.dumps(result.structured_content).lower()
+        assert "Hidden faction" not in json.dumps(result.structured_content)
+    assert not _FakeSession.instances
+
+
+def test_fairplay_pre_session_errors_strip_path(fake_adapter, tmp_path):
+    server = fake_adapter.create_server(profile="fair-play")
+    result = anyio.run(_call, server, "inspect-save", {
+        "save_path": str(tmp_path / "private-campaign.gz"),
+    })
+    assert result.is_error
+    assert "private-campaign" not in json.dumps(result.structured_content)
+    assert "context" not in result.structured_content["error"]
+
+
+def test_fairplay_inspection_schema_and_save_change(fake_adapter, tmp_path):
+    server = fake_adapter.create_server(profile="fair-play")
+    path = _save(tmp_path)
+    first = anyio.run(_call, server, "inspect-save", {"save_path": str(path)})
+    tools = anyio.run(_list_tools, server)
+    schema = next(tool.output_schema for tool in tools.tools if tool.name == "inspect-save")
+    _validate_result(first, schema)
+    assert not first.is_error
+    assert "modEvidence" not in first.structured_content["compatibility"]
+    path.write_bytes(b"changed-save")
+    second = anyio.run(_call, server, "inspect-save", {"save_path": str(path)})
+    _validate_result(second, schema)
+    assert len(_FakeSession.instances) == 2
+
+
+def test_fairplay_cli_profile_over_real_stdio():
+    script = Path(__file__).resolve().parents[1] / "tools" / "ti_parser_mcp.py"
+
+    async def run_stdio():
+        params = StdioServerParameters(command=sys.executable,
+                                      args=[str(script), "--profile", "fair-play"])
+        async with Client(params, mode="legacy") as client:
+            listed = await client.list_tools()
+            result = await client.call_tool("capabilities", {})
+            return listed, result
+
+    listed, result = anyio.run(run_stdio)
+    assert {tool.name for tool in listed.tools} == {"inspect-save", "capabilities"}
+    assert [row["command"] for row in result.structured_content["analyses"]] == ["inspect-save"]
+    assert "blocked" in result.structured_content["bootstrapPolicy"]
+    from ti_parser_fairplay import get_profile_capabilities_output_schema
+    assert result.structured_content["fairPlayPolicy"]["enabled"] is False
+    assert result.structured_content["fairPlayPolicy"]["id"] == "fair-play-projection-v1"
+    _validate_result(result, get_profile_capabilities_output_schema("fair-play"))

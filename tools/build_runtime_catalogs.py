@@ -63,6 +63,7 @@ COMPILED_NATION_GLOBALS: dict[str, int | float] = {
     "populationCohesionImpactPower": 0.2,
     "publicEliteIdeologicalDistanceCohesionMultiplier": 2.0,
     "publicOpinionDispersionCohesionMultiplier": 6.0,
+    "basePassiveDemocracyIncreaseFromNeighbor": 0.005,
     "controlPointIPScaling": 0.35,
     "controlPointIPFactor": 1.0,
     "controlPointCountScaling": 0.18,
@@ -120,8 +121,8 @@ NATION_DEVELOPMENT_TEMPLATE_FIELDS: dict[str, tuple[str, tuple[str, ...], dict[s
     ),
     "mapRegionTemplates": (
         "TIMapRegionTemplate.json",
-        ("dataName", "latitude", "longitude"),
-        {},
+        ("dataName", "latitude", "longitude", "solarBody"),
+        {"solarBody": None},
     ),
     "startTimeTemplates": (
         "TIStartTimeTemplate.json",
@@ -144,7 +145,7 @@ NATION_DEVELOPMENT_TEMPLATE_FIELDS: dict[str, tuple[str, tuple[str, ...], dict[s
             "dataName", "alien", "undecided", "sortOrder", "willProxy", "willAppease",
             "ideology", "ideologyCoordinates",
         ),
-        {"alien": False, "undecided": False, "willProxy": -1, "willAppease": -1},
+        {"alien": False, "undecided": False, "willProxy": 0, "willAppease": 0},
     ),
 }
 NATION_DEVELOPMENT_TEMPLATE_DEFAULT_ORIGINS = {
@@ -157,8 +158,8 @@ NATION_DEVELOPMENT_TEMPLATE_DEFAULT_ORIGINS = {
     "factionTemplates.isAlien": "TIFactionTemplate compiled field default",
     "ideologyTemplates.alien": "TIFactionIdeologyTemplate compiled field default",
     "ideologyTemplates.undecided": "TIFactionIdeologyTemplate compiled field default",
-    "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field initializer",
-    "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field initializer",
+    "ideologyTemplates.willProxy": "TIFactionIdeologyTemplate compiled field default",
+    "ideologyTemplates.willAppease": "TIFactionIdeologyTemplate compiled field default",
 }
 PRIORITY_DIVERSITY_BONUSES = {
     "Economy": 0.5,
@@ -174,6 +175,7 @@ EFFECT_FIELDS = (
     "dataName",
     "operation",
     "value",
+    "strValue",
     "effectTarget",
     "effectDuration",
     "stackable",
@@ -625,11 +627,16 @@ def resolved_override(
     fields: Iterable[str],
     *,
     kind: str | None = None,
+    compiled_defaults: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     if overlay_path is None or not overlay_path.is_file():
         return {}
-    resolved = normalized_collection(merge_raw_rows(base_rows, overlay_path), fields, kind=kind)
-    base = normalized_collection(base_rows, fields, kind=kind)
+    if compiled_defaults is None:
+        resolved = normalized_collection(merge_raw_rows(base_rows, overlay_path), fields, kind=kind)
+        base = normalized_collection(base_rows, fields, kind=kind)
+    else:
+        resolved = normalized_development_collection(merge_raw_rows(base_rows, overlay_path), fields, compiled_defaults)
+        base = normalized_development_collection(base_rows, fields, compiled_defaults)
     changed_names = sorted(name for name, row in resolved.items() if base.get(name) != row)
     return {name: resolved[name] for name in changed_names}
 
@@ -754,6 +761,7 @@ def build_row_catalog(
     filename: str,
     collection: str,
     fields: Iterable[str],
+    compiled_defaults: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     base_path = templates_dir / filename
     base_rows = index_raw_rows(base_path)
@@ -767,11 +775,22 @@ def build_row_catalog(
         if not overlay_path.is_file():
             continue
         sources.append(source_entry(overlay_path, f"{scenario}/{filename}"))
-        changed = resolved_override(base_rows, overlay_path, fields)
+        changed = resolved_override(
+            base_rows,
+            overlay_path,
+            fields,
+            compiled_defaults=compiled_defaults,
+        )
         if changed:
             overrides[scenario] = {collection: changed}
     return make_envelope(
-        base={collection: normalized_collection(base_rows, fields)},
+        base={
+            collection: (
+                normalized_collection(base_rows, fields)
+                if compiled_defaults is None
+                else normalized_development_collection(base_rows, fields, compiled_defaults)
+            )
+        },
         scenario_overrides=overrides,
         source_files=sources,
         supported_scenarios=supported_scenarios,
@@ -1073,6 +1092,7 @@ def build_all(
             filename="TIEffectTemplate.json",
             collection="effects",
             fields=EFFECT_FIELDS,
+            compiled_defaults={"strValue": ""},
         ),
         "trait_catalog.json": build_row_catalog(
             templates_dir=templates,

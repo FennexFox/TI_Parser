@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "actual-codex-conditional-routing-probe",
+  "runDate": "2026-10-03",
+  "client": "Codex CLI exec",
+  "profile": "conditional",
+  "runner": "tools/run_fairplay_routing.py",
+  "fixtureOnly": true,
+  "runtimeSourceRef": {
+    "revision": "309d336",
+    "conditionalRuntimeImplementation": "f464c80",
+    "relation": "The conditional runtime code is unchanged from f464c80 through 309d336; 309d336 adds outcome-direction and documentation-ownership tests.",
+    "compactRunWorkingTreeSourceSha256Utf8Lf": {
+      "tools/ti_parser_conditional_projection.py": "506e246ca6726956bef6a5621180331adf70331f23323318aac4b1f0a02e7b46",
+      "tools/ti_parser_conditional_application.py": "4b988b3e15b48f6bd9298735e284176de1b9a1e74e79349ca1f15a1dd000f438",
+      "tools/ti_parser_mcp.py": "79ca0108538c5107c00ccb91104f9e232438b4e386aecbd91c8d0bfec325d9fd"
+    },
+    "catalogBundleSha256": "aaa7a0eee908ef5935530b1446def50131b3b895af33f0c0130e9735855931b0",
+    "catalogLimit": "The packaged catalog bundle is a runtime input. This routing probe does not independently validate catalog authority, every mechanics formula, or exact xenoforming visibility."
+  },
+  "syntheticFixture": {
+    "generation": "tests/test_conditional_integration.py helpers (_write_save and _context)",
+    "saveIdentity": {
+      "fingerprintAlgorithm": "sha256-canonical-save-json-v1",
+      "fingerprint": "8f8a3c4d2aa75a22b917c16e6f873c041bca67cadb48e962379a11b4e755ccb7",
+      "scenario": "ModernScenario",
+      "gameDate": "2035-01-10",
+      "latestSaveVersion": "0.4.35",
+      "campaignStartVersion": "0.4.35",
+      "realWorldCampaignStart": 2024,
+      "selectedNationId": 20,
+      "playerFactionId": 2,
+      "reportedControlPointCount": 6,
+      "reportedRegion": "California"
+    },
+    "inputDisclosure": "All reported values and history are synthetic fixture data, not captured game UI. Conditional observations are caller-reported; assumptions are caller-invented. The mock Companion is not a visibility oracle. Assumed xenoforming does not prove exact-value visibility."
+  },
+  "canonicalRuns": {
+    "conditional-current": {
+      "routing": "passed",
+      "toolExecution": "completed",
+      "calls": [
+        {"server": "companion", "tool": "companion_current_nation", "transportStatus": "completed", "resultStatus": "complete"}
+      ],
+      "answerReview": "Reported synthetic current-state observations and excluded assumptions from the state report. No history, TI Parser, save-inspection, registration, or projection call occurred."
+    },
+    "conditional-history": {
+      "routing": "passed",
+      "toolExecution": "completed",
+      "calls": [
+        {"server": "companion", "tool": "companion_recent_changes", "transportStatus": "completed", "resultStatus": "complete"}
+      ],
+      "answerReview": "Reported only the single synthetic fixture history entry and inferred no unreported change. No current-state, TI Parser, save-inspection, registration, or projection call occurred."
+    },
+    "conditional-ab": {
+      "runtimeSourceRef": "Working tree at repository revision 309d336; source hashes are listed at runtimeSourceRef.compactRunWorkingTreeSourceSha256Utf8Lf.",
+      "routing": "passed",
+      "toolExecution": "completed",
+      "mechanicsOutcome": "complete",
+      "requiredSequence": [
+        "ti-parser.register-visible-context",
+        "ti-parser.conditional-nation-projection",
+        "companion.companion_current_nation",
+        "ti-parser.verify-visible-generation"
+      ],
+      "observedCalls": [
+        {"server": "ti-parser", "tool": "capabilities", "transportStatus": "completed"},
+        {"server": "companion", "tool": "companion_current_nation", "transportStatus": "completed", "resultStatus": "complete"},
+        {"server": "companion", "tool": "companion_current_nation", "transportStatus": "completed", "resultStatus": "complete"},
+        {"server": "ti-parser", "tool": "register-visible-context", "transportStatus": "completed", "resultStatus": "complete", "adviceStatus": "not-calculated", "scopeFingerprint": "f7063513de18b81e49c1ff41183a3937bc6e1a7a2a275013223e8fda5200d40d", "contextDigest": "7e0ddb80ef659bfed0239a927ae1233399c9f05f5c32ea2575d96e2b09e24464"},
+        {"server": "ti-parser", "tool": "conditional-nation-projection", "transportStatus": "completed", "resultStatus": "complete", "adviceStatus": "pending-reobservation", "scopeFingerprint": "f7063513de18b81e49c1ff41183a3937bc6e1a7a2a275013223e8fda5200d40d", "contextDigest": "7e0ddb80ef659bfed0239a927ae1233399c9f05f5c32ea2575d96e2b09e24464"},
+        {"server": "companion", "tool": "companion_current_nation", "transportStatus": "completed", "resultStatus": "complete"},
+        {"server": "ti-parser", "tool": "verify-visible-generation", "transportStatus": "completed", "resultStatus": "complete", "adviceStatus": "conditional-only", "scopeFingerprint": "f7063513de18b81e49c1ff41183a3937bc6e1a7a2a275013223e8fda5200d40d", "contextDigest": "7e0ddb80ef659bfed0239a927ae1233399c9f05f5c32ea2575d96e2b09e24464"}
+      ],
+      "sharedScopeBinding": {
+        "scopeFingerprint": "f7063513de18b81e49c1ff41183a3937bc6e1a7a2a275013223e8fda5200d40d",
+        "contextDigest": "7e0ddb80ef659bfed0239a927ae1233399c9f05f5c32ea2575d96e2b09e24464",
+        "matchesAcross": ["register-visible-context", "conditional-nation-projection", "verify-visible-generation"]
+      },
+      "answerReview": "The model reported both 180-day plans completed and described education, inequality, cohesion, unrest, and sustainability. It labeled inputs synthetic, assumptions invented, xenoforming non-visible, and results conditional rather than game predictions. The MCP projection response independently reported status complete; verification reported conditional-only."
+    },
+    "conditional-hidden-goal": {
+      "initialStrictZeroCallCheck": {
+        "routing": "failed-under-original-zero-call-expectation",
+        "failureCategory": "policy",
+        "calls": [
+          {"server": "ti-parser", "tool": "capabilities", "transportStatus": "completed"}
+        ],
+        "answerReview": "The model refused hidden faction goals, exact hidden xenoforming, private state, and a forecast. It called only capabilities metadata; it did not inspect the save, read Companion state, register context, or project."
+      },
+      "correctedMetadataAllowanceCheck": {
+        "routing": "passed",
+        "toolExecution": "completed",
+        "allowedMetadataTool": "ti-parser.capabilities",
+        "calls": [
+          {"server": "ti-parser", "tool": "capabilities", "transportStatus": "completed"}
+        ],
+        "stillForbidden": [
+          "inspect-save", "companion_current_nation", "companion_recent_changes",
+          "register-visible-context", "conditional-nation-projection",
+          "verify-visible-generation", "raw/default projection routes"
+        ],
+        "answerReview": "The model refused the requested private values and prediction. Capability metadata did not disclose save or Companion state."
+      }
+    }
+  },
+  "exploratoryCombinedRuns": {
+    "note": "Earlier versions of conditional-current and conditional-history also requested an A/B projection. Preserve these actual runs as combined current/history-plus-scenario probes; they do not establish the canonical read-only current/history routes above.",
+    "conditional-current-plus-scenario": {
+      "runtimeSourceRef": "309d336 (conditional runtime unchanged since f464c80)",
+      "routing": "passed",
+      "toolExecution": "completed",
+      "sequence": [
+        "companion.companion_current_nation",
+        "ti-parser.capabilities",
+        "companion.companion_current_nation",
+        "ti-parser.register-visible-context",
+        "ti-parser.conditional-nation-projection",
+        "companion.companion_current_nation",
+        "ti-parser.verify-visible-generation"
+      ],
+      "mechanicsOutcome": "unreported-by-Codex-event",
+      "scopeFingerprint": "not captured",
+      "contextDigest": "not captured"
+    },
+    "conditional-history-plus-scenario": {
+      "runtimeSourceRef": "309d336 (conditional runtime unchanged since f464c80)",
+      "routing": "passed",
+      "toolExecution": "completed",
+      "sequence": [
+        "ti-parser.capabilities",
+        "companion.companion_current_nation",
+        "companion.companion_recent_changes",
+        "ti-parser.register-visible-context",
+        "ti-parser.conditional-nation-projection",
+        "companion.companion_current_nation",
+        "ti-parser.verify-visible-generation"
+      ],
+      "mechanicsOutcome": "unreported-by-Codex-event",
+      "scopeFingerprint": "not captured",
+      "contextDigest": "not captured"
+    }
+  },
+  "preCompactConditionalAbRun": {
+    "runtimeSourceRef": "309d336; conditional mechanics code unchanged from f464c80 at that time",
+    "routing": "passed",
+    "toolExecution": "completed",
+    "mechanicsOutcome": "unreported-by-Codex-event",
+    "scopeFingerprint": "not captured; not backfilled from the later run",
+    "contextDigest": "not captured; not backfilled from the later run"
+  },
+  "limits": [
+    "These probes measure Codex tool routing and the returned text for synthetic MCP servers, not game visibility or input truth.",
+    "No external or real Companion instance was used, and no user save was used.",
+    "The compact A/B engine response status was complete and verification returned conditional-only; this is conditional model execution, not an authoritative game outcome or complete mechanics acceptance.",
+    "No result establishes exact xenoforming visibility, authoritative game prediction, or full mechanics acceptance.",
+    "Tool routing does not grade every numerical claim in the model answer; answer review remains bounded to provenance and policy disclosures recorded above."
+  ],
+  "notEvidenceOf": [
+    "game-visibility",
+    "caller-reported-input-truth",
+    "real-Companion-behavior",
+    "exact-xenoforming-visibility",
+    "authoritative-game-outcome",
+    "full-mechanics-acceptance"
+  ]
+}
