@@ -712,6 +712,15 @@ def _profile_calls(tracker: ReadTracker):
         sys.setprofile(old_profile)
 
 
+def _enclosing_source_frame(frame: Any) -> Any:
+    """Map eager-comprehension bytecode frames back to their source function."""
+    # CPython 3.11 gives eager comprehensions synthetic frames; the AST source
+    # inventory assigns their rule references to the enclosing function.
+    while frame.f_code.co_name in {"<dictcomp>", "<listcomp>", "<setcomp>"} and frame.f_back is not None:
+        frame = frame.f_back
+    return frame
+
+
 class _TracedRuleNamespace:
     """Transparent temporary proxy that records evaluated ``Rules.X`` accesses."""
 
@@ -724,7 +733,8 @@ class _TracedRuleNamespace:
         value = getattr(self._rules, name)
         identifier = getattr(value, "id", None)
         frame = sys._getframe(1)
-        module = str(frame.f_globals.get("__name__", ""))
+        source_frame = _enclosing_source_frame(frame)
+        module = str(source_frame.f_globals.get("__name__", ""))
         if isinstance(identifier, str) and module.startswith("ti_parser_"):
             path = Path(frame.f_code.co_filename).resolve()
             try:
@@ -743,9 +753,9 @@ class _TracedRuleNamespace:
                     if caller_module.startswith("ti_parser_"):
                         call_path.append(f"{caller_module}.{caller.f_code.co_name}")
                     caller = caller.f_back
-                consumer = f"{module}.{frame.f_code.co_name}"
+                consumer = f"{module}.{source_frame.f_code.co_name}"
                 source_context = source_control_flow_context(
-                    TOOLS, module, frame.f_code.co_name, frame.f_lineno,
+                    TOOLS, module, source_frame.f_code.co_name, frame.f_lineno,
                     "rule-reference", name,
                 )
                 self._tracker.record_rule_reference({
@@ -758,8 +768,8 @@ class _TracedRuleNamespace:
                     "callPathNearestConsumerFirst": call_path,
                 })
 
-                source_site = (module, frame.f_code.co_name, frame.f_lineno)
-                execution = frame.f_locals.get("execution")
+                source_site = (module, source_frame.f_code.co_name, frame.f_lineno)
+                execution = source_frame.f_locals.get("execution")
                 parent_id = execution.get("ruleId") if isinstance(execution, dict) else None
                 append_site = (*source_site, name)
                 if append_site in self._append_sites and isinstance(parent_id, str):
